@@ -1,0 +1,516 @@
+{% extends "base.html" %}
+{% load monitoring_extras %}
+
+{% block title %}{{ product.title|default:product.nm_id }} | Мониторинг WB{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="Навигация">
+    <ol>
+        <li><a href="{% url 'monitoring:dashboard' %}">Workspace</a></li>
+        <li><a href="{% url 'monitoring:dashboard' %}">Дашборд</a></li>
+        <li aria-current="page">{{ product.nm_id }}</li>
+    </ol>
+</nav>
+
+<section class="hero product-hero">
+    <div class="hero-main">
+        <p class="eyebrow">Товар WB {{ product.nm_id }}</p>
+        <h1>{{ product.title|default:"Без названия" }}</h1>
+        <p class="hero-copy">
+            Артикул продавца: {{ product.vendor_code|default:"-" }} · Бренд: {{ product.brand_name|default:"-" }} · Предмет: {{ product.subject_name|default:"-" }}
+        </p>
+        <div class="hero-stats">
+            <article class="hero-stat">
+                <span>Заказы</span>
+                <strong>{{ report.metrics.order_count|default:0|intspace }}</strong>
+            </article>
+            <article class="hero-stat">
+                <span>Расход РК</span>
+                <strong>{{ report.total_ad.spend|money }}</strong>
+            </article>
+            <article class="hero-stat">
+                <span>Остаток WB</span>
+                <strong>{{ report.stock.total_stock|default:0|intspace }}</strong>
+            </article>
+            <article class="hero-stat">
+                <span>Средний чек</span>
+                <strong>{{ report.insights.avg_order_value|money }}</strong>
+            </article>
+        </div>
+    </div>
+    <div class="hero-badges hero-actions">
+        <span class="badge">РК: {{ report.stats_date|date:"d.m.Y" }}</span>
+        <span class="badge">Остатки: {{ report.stock_date|date:"d.m.Y" }}</span>
+        <a class="secondary-button" href="{% url 'monitoring:export_product_csv' product.pk %}?stats_date={{ report.stats_date|date:'Y-m-d' }}&stock_date={{ report.stock_date|date:'Y-m-d' }}">Экспорт CSV</a>
+    </div>
+</section>
+
+<section class="ops-strip">
+    <article class="ops-card">
+        <span>Доля органики</span>
+        <strong>{{ report.insights.organic_orders_share|percent }}</strong>
+        <p>Доля заказов, которая пришла без рекламного контура в выбранный день продаж.</p>
+    </article>
+    <article class="ops-card">
+        <span>До распродажи</span>
+        <strong>{{ report.days_until_zero|decimal2 }}</strong>
+        <p>Оценка по текущему остатку и среднему темпу заказов за последние дни.</p>
+    </article>
+    <article class="ops-card">
+        <span>Склады в мониторинге</span>
+        <strong>{{ report.warehouse_rows|length }}</strong>
+        <p>По этим складам сейчас строится табличный срез остатков на дату {{ report.stock_date|date:"d.m.Y" }}.</p>
+    </article>
+</section>
+
+{% if report.alerts %}
+    <section class="alert-stack product-alerts">
+        {% for alert in report.alerts %}
+            <article class="alert-card {{ alert.tone }}">
+                <strong>{{ alert.title }}</strong>
+                <p>{{ alert.detail }}</p>
+            </article>
+        {% endfor %}
+    </section>
+{% endif %}
+
+<section class="layout-grid detail-grid">
+    <div class="stack">
+        <article class="panel panel-spacious">
+            <div class="panel-head">
+                <div>
+                    <h2>Сводка</h2>
+                    <p class="muted">Общая воронка и текущее состояние остатков.</p>
+                </div>
+                <form method="get" class="inline-form filters">
+                    <label class="field inline-field">
+                        <span>Дата РК</span>
+                        <input type="date" name="stats_date" value="{{ report.stats_date|date:'Y-m-d' }}">
+                    </label>
+                    <label class="field inline-field">
+                        <span>Дата остатков</span>
+                        <input type="date" name="stock_date" value="{{ report.stock_date|date:'Y-m-d' }}">
+                    </label>
+                    <button class="secondary-button" type="submit">Показать</button>
+                </form>
+            </div>
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <span>Переходы в карточку</span>
+                    <strong>{{ report.metrics.open_count|default:0|intspace }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Корзины</span>
+                    <strong>{{ report.metrics.add_to_cart_count|default:0|intspace }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Заказы</span>
+                    <strong>{{ report.metrics.order_count|default:0|intspace }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Сумма заказов</span>
+                    <strong>{{ report.metrics.order_sum|default:0|money }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Остатки WB</span>
+                    <strong>{{ report.stock.total_stock|default:0|intspace }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>До распродажи</span>
+                    <strong>{{ report.days_until_zero|decimal2 }}</strong>
+                </div>
+            </div>
+        </article>
+
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <h2>Быстрые инсайты</h2>
+                    <p class="muted">Ключевые сигналы по текущему срезу без необходимости читать полную матрицу.</p>
+                </div>
+            </div>
+            <div class="insight-grid">
+                <div class="insight-card">
+                    <span>Доля заказов из рекламы</span>
+                    <strong>{{ report.insights.ad_orders_share|percent }}</strong>
+                </div>
+                <div class="insight-card">
+                    <span>Доля заказов из органики</span>
+                    <strong>{{ report.insights.organic_orders_share|percent }}</strong>
+                </div>
+                <div class="insight-card">
+                    <span>Средний чек</span>
+                    <strong>{{ report.insights.avg_order_value|money }}</strong>
+                </div>
+                <div class="insight-card">
+                    <span>Средний CPC</span>
+                    <strong>{{ report.insights.avg_spend_per_click|money }}</strong>
+                </div>
+            </div>
+        </article>
+
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <h2>Срез по зонам</h2>
+                    <p class="muted">Компактный разбор рекламных блоков, чтобы быстрее найти рабочую зону.</p>
+                </div>
+            </div>
+            <div class="traffic-grid">
+                {% if report.total_ad.impressions or report.total_ad.clicks or report.total_ad.orders %}
+                    {% for item in report.traffic_cards %}
+                        <article class="traffic-card">
+                            <span>{{ item.label }}</span>
+                            <strong>{{ item.cell.orders|intspace }} заказов</strong>
+                            <p>Показы: {{ item.cell.impressions|intspace }}</p>
+                            <p>Расход: {{ item.cell.spend|money }}</p>
+                            <p>Доля трафика: {{ item.share|percent }}</p>
+                        </article>
+                    {% endfor %}
+                {% else %}
+                    <div class="empty-state">
+                        <strong>По выбранной дате нет рекламного среза</strong>
+                        <p>Измените дату РК или запустите синхронизацию товара, чтобы заполнить зоны и матрицу.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </article>
+
+        <article class="panel panel-spacious">
+            <div class="panel-head">
+                <div>
+                    <h2>Матрица рекламных зон</h2>
+                    <p class="muted">Группы и зоны повторяют структуру мониторинга из образца.</p>
+                </div>
+                <form method="post" action="{% url 'monitoring:sync_product' product.pk %}" class="inline-form">
+                    {% csrf_token %}
+                    {% for field in sync_form %}
+                        {% if field.field.widget.input_type == "checkbox" %}
+                            <label class="inline-toggle">
+                                {{ field }}
+                                <span>{{ field.label }}</span>
+                                {% if field.help_text %}
+                                    <span class="help-popover">
+                                        <button class="help-trigger" type="button" aria-label="Пояснение к полю {{ field.label }}" title="{{ field.help_text }}">i</button>
+                                        <span class="help-tooltip" role="tooltip">{{ field.help_text }}</span>
+                                    </span>
+                                {% endif %}
+                            </label>
+                        {% else %}
+                            <label class="field inline-field">
+                                <span class="field-heading">
+                                    <span>{{ field.label }}</span>
+                                    {% if field.help_text %}
+                                        <span class="help-popover">
+                                            <button class="help-trigger" type="button" aria-label="Пояснение к полю {{ field.label }}" title="{{ field.help_text }}">i</button>
+                                            <span class="help-tooltip" role="tooltip">{{ field.help_text }}</span>
+                                        </span>
+                                    {% endif %}
+                                </span>
+                                {{ field }}
+                            </label>
+                        {% endif %}
+                    {% endfor %}
+                    <button class="primary-button" type="submit">Обновить товар</button>
+                </form>
+            </div>
+            <div class="table-wrap">
+                <table class="matrix-table">
+                    <thead>
+                        <tr>
+                            <th>Метрика</th>
+                            <th>Ед. ставка / Поиск</th>
+                            <th>Ед. ставка / Полки</th>
+                            <th>Ед. ставка / Каталог</th>
+                            <th>Руч. поиск</th>
+                            <th>Руч. полки</th>
+                            <th>Общая РК</th>
+                            <th>Органика</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Показы</td>
+                            <td>{{ report.blocks.unified_search.impressions|intspace }}</td>
+                            <td>{{ report.blocks.unified_shelves.impressions|intspace }}</td>
+                            <td>{{ report.blocks.unified_catalog.impressions|intspace }}</td>
+                            <td>{{ report.blocks.manual_search.impressions|intspace }}</td>
+                            <td>{{ report.blocks.manual_shelves.impressions|intspace }}</td>
+                            <td>{{ report.total_ad.impressions|intspace }}</td>
+                            <td>-</td>
+                        </tr>
+                        <tr>
+                            <td>Клики / переходы</td>
+                            <td>{{ report.blocks.unified_search.clicks|intspace }}</td>
+                            <td>{{ report.blocks.unified_shelves.clicks|intspace }}</td>
+                            <td>{{ report.blocks.unified_catalog.clicks|intspace }}</td>
+                            <td>{{ report.blocks.manual_search.clicks|intspace }}</td>
+                            <td>{{ report.blocks.manual_shelves.clicks|intspace }}</td>
+                            <td>{{ report.total_ad.clicks|intspace }}</td>
+                            <td>{{ report.organic.open_count|intspace }}</td>
+                        </tr>
+                        <tr>
+                            <td>Корзины</td>
+                            <td>{{ report.blocks.unified_search.carts|intspace }}</td>
+                            <td>{{ report.blocks.unified_shelves.carts|intspace }}</td>
+                            <td>{{ report.blocks.unified_catalog.carts|intspace }}</td>
+                            <td>{{ report.blocks.manual_search.carts|intspace }}</td>
+                            <td>{{ report.blocks.manual_shelves.carts|intspace }}</td>
+                            <td>{{ report.total_ad.carts|intspace }}</td>
+                            <td>{{ report.organic.cart_count|intspace }}</td>
+                        </tr>
+                        <tr>
+                            <td>Заказы</td>
+                            <td>{{ report.blocks.unified_search.orders|intspace }}</td>
+                            <td>{{ report.blocks.unified_shelves.orders|intspace }}</td>
+                            <td>{{ report.blocks.unified_catalog.orders|intspace }}</td>
+                            <td>{{ report.blocks.manual_search.orders|intspace }}</td>
+                            <td>{{ report.blocks.manual_shelves.orders|intspace }}</td>
+                            <td>{{ report.total_ad.orders|intspace }}</td>
+                            <td>{{ report.organic.order_count|intspace }}</td>
+                        </tr>
+                        <tr>
+                            <td>Сумма заказов</td>
+                            <td>{{ report.blocks.unified_search.order_sum|money }}</td>
+                            <td>{{ report.blocks.unified_shelves.order_sum|money }}</td>
+                            <td>{{ report.blocks.unified_catalog.order_sum|money }}</td>
+                            <td>{{ report.blocks.manual_search.order_sum|money }}</td>
+                            <td>{{ report.blocks.manual_shelves.order_sum|money }}</td>
+                            <td>{{ report.total_ad.order_sum|money }}</td>
+                            <td>{{ report.organic.order_sum|money }}</td>
+                        </tr>
+                        <tr>
+                            <td>Расход</td>
+                            <td>{{ report.blocks.unified_search.spend|money }}</td>
+                            <td>{{ report.blocks.unified_shelves.spend|money }}</td>
+                            <td>{{ report.blocks.unified_catalog.spend|money }}</td>
+                            <td>{{ report.blocks.manual_search.spend|money }}</td>
+                            <td>{{ report.blocks.manual_shelves.spend|money }}</td>
+                            <td>{{ report.total_ad.spend|money }}</td>
+                            <td>-</td>
+                        </tr>
+                        <tr>
+                            <td>CTR</td>
+                            <td>{{ report.blocks.unified_search.ctr|percent }}</td>
+                            <td>{{ report.blocks.unified_shelves.ctr|percent }}</td>
+                            <td>{{ report.blocks.unified_catalog.ctr|percent }}</td>
+                            <td>{{ report.blocks.manual_search.ctr|percent }}</td>
+                            <td>{{ report.blocks.manual_shelves.ctr|percent }}</td>
+                            <td>{{ report.total_ad.ctr|percent }}</td>
+                            <td>-</td>
+                        </tr>
+                        <tr>
+                            <td>CPC</td>
+                            <td>{{ report.blocks.unified_search.cpc|money }}</td>
+                            <td>{{ report.blocks.unified_shelves.cpc|money }}</td>
+                            <td>{{ report.blocks.unified_catalog.cpc|money }}</td>
+                            <td>{{ report.blocks.manual_search.cpc|money }}</td>
+                            <td>{{ report.blocks.manual_shelves.cpc|money }}</td>
+                            <td>{{ report.total_ad.cpc|money }}</td>
+                            <td>-</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </article>
+
+        <article class="panel">
+            <h2>Остатки по складам</h2>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Склад</th>
+                            <th>Остаток</th>
+                            <th>К клиенту</th>
+                            <th>Возвраты</th>
+                            <th>Ср. заказы</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in report.warehouse_rows %}
+                            <tr>
+                                <td>{{ row.warehouse.name }}</td>
+                                <td>{{ row.stock_count|intspace }}</td>
+                                <td>{{ row.in_way_to_client|intspace }}</td>
+                                <td>{{ row.in_way_from_client|intspace }}</td>
+                                <td>{{ row.avg_orders|decimal2 }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5">
+                                    <div class="empty-state">
+                                        <strong>Нет складских остатков</strong>
+                                        <p>Для этой даты в базе ещё нет данных по выбранным складам. Запустите синхронизацию или измените дату среза.</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </article>
+
+        <article class="panel">
+            <h2>История по дням</h2>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Переходы</th>
+                            <th>Корзины</th>
+                            <th>Заказы</th>
+                            <th>Сумма заказов</th>
+                            <th>Выкупы</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in report.history %}
+                            <tr>
+                                <td>{{ row.stats_date|date:"d.m.Y" }}</td>
+                                <td>{{ row.open_count|intspace }}</td>
+                                <td>{{ row.add_to_cart_count|intspace }}</td>
+                                <td>{{ row.order_count|intspace }}</td>
+                                <td>{{ row.order_sum|money }}</td>
+                                <td>{{ row.buyout_sum|money }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="6">
+                                    <div class="empty-state">
+                                        <strong>История ещё не накоплена</strong>
+                                        <p>Как только по товару появится несколько дней синхронизации, здесь соберётся хронология воронки и выкупов.</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </article>
+    </div>
+
+    <aside class="stack">
+        <article class="panel panel-emphasis">
+            <h2>Рабочий контур</h2>
+            <div class="status-grid compact-status-grid">
+                <article class="status-card neutral">
+                    <span>Привязанных кампаний</span>
+                    <strong>{{ linked_campaigns|length }}</strong>
+                    <p>Активные РК, которые участвуют в sync и попадают в отчёты товара.</p>
+                </article>
+                <article class="status-card neutral">
+                    <span>Версия экономики</span>
+                    <strong>{% if report.economics.effective_from %}{{ report.economics.effective_from|date:"d.m.Y" }}{% else %}Базовая{% endif %}</strong>
+                    <p>Именно эта версия участвует в расчётах для среза на {{ report.stock_date|date:"d.m.Y" }}.</p>
+                </article>
+                <article class="status-card neutral">
+                    <span>Складов показа</span>
+                    <strong>{{ product.visible_warehouse_names|length }}</strong>
+                    <p>Если список пуст, в мониторинге используются склады с общим флагом видимости.</p>
+                </article>
+            </div>
+        </article>
+
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <h2>Связанные кампании</h2>
+                    <p class="muted">Проверка состава РК и их мониторинговых групп по этому товару.</p>
+                </div>
+            </div>
+            <div class="stack mini-list">
+                {% for campaign in linked_campaigns %}
+                    <div class="mini-item">
+                        <strong>{{ campaign.name|default:"Без названия" }}</strong>
+                        <span>ID {{ campaign.external_id }} · {{ campaign.get_monitoring_group_display }}</span>
+                        <span>Последняя статистика: {{ campaign.latest_stats_date|date:"d.m.Y"|default:"—" }}</span>
+                    </div>
+                {% empty %}
+                    <div class="empty-state">
+                        <strong>У товара пока нет привязанных кампаний</strong>
+                        <p>Добавьте РК на дашборде или через админку, чтобы реклама участвовала в сводке и книге мониторинга.</p>
+                    </div>
+                {% endfor %}
+            </div>
+        </article>
+
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <h2>История экономики</h2>
+                    <p class="muted">Версии себестоимости, логистики и процента выкупа по датам действия.</p>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Действует с</th>
+                            <th>Выкуп</th>
+                            <th>Себестоимость</th>
+                            <th>Логистика</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for version in economics_history %}
+                            <tr>
+                                <td>{{ version.effective_from|date:"d.m.Y" }}</td>
+                                <td>{{ version.buyout_percent|percent }}</td>
+                                <td>{{ version.unit_cost|money }}</td>
+                                <td>{{ version.logistics_cost|money }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="4">
+                                    <div class="empty-state">
+                                        <strong>Версий экономики пока нет</strong>
+                                        <p>Первая версия создаётся автоматически при добавлении товара или сохранении его настроек.</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </article>
+
+        <article class="panel panel-form">
+            <h2>Настройки товара</h2>
+            <p class="panel-copy">Экономика, выкуп и служебные параметры, которые участвуют в расчётах книги и детальных отчётов.</p>
+            <form method="post" action="{% url 'monitoring:update_product_settings' product.pk %}" class="stack compact-form">
+                {% csrf_token %}
+                <div class="form-grid form-grid-2">
+                    {% for field in settings_form %}
+                        <div class="{% if field.name == 'visible_warehouses' or field.name == 'visible_warehouse_names_extra' %}form-span-2{% endif %}">
+                            {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                        </div>
+                    {% endfor %}
+                </div>
+                <button class="primary-button wide" type="submit">Сохранить настройки</button>
+            </form>
+        </article>
+
+        <article class="panel panel-form">
+            <h2>Ежедневный обзор</h2>
+            <p class="panel-copy">Ручной слой для полей, которые не приходят напрямую из WB API или требуют бизнес-комментария команды.</p>
+            <form method="post" action="{% url 'monitoring:update_daily_note' product.pk %}" class="stack compact-form">
+                {% csrf_token %}
+                <div class="form-grid form-grid-2">
+                    {% for field in note_form %}
+                        {% if field.is_hidden %}
+                            {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                        {% else %}
+                            <div class="{% if field.name == 'comment' %}form-span-2{% endif %}">
+                                {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+                <button class="primary-button wide" type="submit">Сохранить обзор</button>
+            </form>
+        </article>
+    </aside>
+</section>
+{% endblock %}

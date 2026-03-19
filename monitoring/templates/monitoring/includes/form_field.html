@@ -1,0 +1,63 @@
+{% load monitoring_extras %}
+
+{% if field.is_hidden %}
+    {{ field }}
+{% elif field|widget_type == "CheckboxSelectMultiple" %}
+    <div class="field choice-group">
+        <span class="field-heading">
+            <span>{{ field.label }}</span>
+            {% if field.help_text and compact_help %}
+                <span class="help-popover">
+                    <button class="help-trigger" type="button" aria-label="Пояснение к полю {{ field.label }}" title="{{ field.help_text }}">i</button>
+                    <span class="help-tooltip" role="tooltip">{{ field.help_text }}</span>
+                </span>
+            {% endif %}
+        </span>
+        <div class="choice-shell{% if not field.field.choices %} empty{% endif %}">
+            {% if not field.field.choices %}
+                <p class="choice-empty">После первой синхронизации здесь появятся найденные склады.</p>
+            {% endif %}
+            {{ field }}
+        </div>
+        {% if field.help_text and not compact_help %}
+            <small class="field-help">{{ field.help_text }}</small>
+        {% endif %}
+    </div>
+{% elif field.field.widget.input_type == "checkbox" %}
+    <label class="checkbox-field{% if compact_help %} compact{% endif %}">
+        <span class="checkbox-control">{{ field }}</span>
+        <span class="checkbox-copy">
+            <span class="field-heading">
+                <strong>{{ field.label }}</strong>
+                {% if field.help_text %}
+                    <span class="help-popover">
+                        <button class="help-trigger" type="button" aria-label="Пояснение к полю {{ field.label }}" title="{{ field.help_text }}">i</button>
+                        <span class="help-tooltip" role="tooltip">{{ field.help_text }}</span>
+                    </span>
+                {% endif %}
+            </span>
+            {% if field.help_text and not compact_help %}
+                <small>{{ field.help_text }}</small>
+            {% endif %}
+        </span>
+    </label>
+{% else %}
+    <label class="field">
+        <span class="field-heading">
+            <span>{{ field.label }}</span>
+            {% if field.help_text and compact_help %}
+                <span class="help-popover">
+                    <button class="help-trigger" type="button" aria-label="Пояснение к полю {{ field.label }}" title="{{ field.help_text }}">i</button>
+                    <span class="help-tooltip" role="tooltip">{{ field.help_text }}</span>
+                </span>
+            {% endif %}
+        </span>
+        {{ field }}
+        {% if field.help_text and not compact_help %}
+            <small class="field-help">{{ field.help_text }}</small>
+        {% endif %}
+    </label>
+{% endif %}
+{% if field.errors %}
+    <div class="field-errors">{{ field.errors }}</div>
+{% endif %}

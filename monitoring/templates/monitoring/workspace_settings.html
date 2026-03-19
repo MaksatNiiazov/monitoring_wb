@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}Операции проекта | Мониторинг WB{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="Навигация">
+    <ol>
+        <li><a href="{% url 'monitoring:dashboard' %}">Workspace</a></li>
+        <li aria-current="page">Операции</li>
+    </ol>
+</nav>
+
+<section class="hero prep-hero">
+    <div class="hero-main">
+        <p class="eyebrow">Operations</p>
+        <h1>Управление проектом, выгрузкой и внешними контурами</h1>
+        <p class="hero-copy">
+            Здесь собраны прикладные настройки, экспорт книги, ручной sync в Google Sheets и весь операционный контур проекта.
+        </p>
+        <div class="hero-stats">
+            <article class="hero-stat">
+                <span>История мониторинга</span>
+                <strong>{{ workspace_settings.monitoring_history_days|default:14 }} дн.</strong>
+            </article>
+            <article class="hero-stat">
+                <span>Часовой пояс</span>
+                <strong>{{ workspace_settings.report_timezone }}</strong>
+            </article>
+            <article class="hero-stat">
+                <span>Автосинхронизация</span>
+                <strong>{{ workspace_settings.sync_hour|stringformat:"02d" }}:{{ workspace_settings.sync_minute|stringformat:"02d" }}</strong>
+            </article>
+        </div>
+    </div>
+    <div class="hero-badges hero-actions">
+        <span class="badge">Книга: {{ workspace_settings.monitoring_history_days|default:14 }} дней</span>
+        <span class="badge soft">{% if google_service_account_email %}Google Sheets подключён{% else %}Google Sheets не подключён{% endif %}</span>
+    </div>
+</section>
+
+<section class="ops-strip">
+    <article class="ops-card">
+        <span>Шаблоны</span>
+        <strong>{{ template_definitions|length }} подготовленных CSV</strong>
+        <p>Можно сразу отправить заказчику структуру для товаров, кампаний, складов и общих настроек.</p>
+    </article>
+    <article class="ops-card">
+        <span>Книга мониторинга</span>
+        <strong>{{ workspace_settings.monitoring_history_days|default:14 }} дней истории</strong>
+        <p>Именно на такую глубину система формирует книгу по шаблону и обновляет диапазоны в Google Sheets.</p>
+    </article>
+    <article class="ops-card">
+        <span>Google контур</span>
+        <strong>{% if google_service_account_email %}Подключён{% else %}Ожидает настройки{% endif %}</strong>
+        <p>{% if google_service_account_email %}Service account готов к синку книги в рабочую таблицу.{% else %}Подключите service account и ID таблицы, чтобы включить автоматический sync.{% endif %}</p>
+    </article>
+</section>
+
+<section class="panel panel-spacious">
+    <div class="panel-head">
+        <div>
+            <h2>Операционный статус</h2>
+            <p class="muted">Текущее состояние данных, автозапуска и внешних интеграций по проекту.</p>
+        </div>
+        <div class="workspace-tools">
+            {% if workspace_overview.spreadsheet_url %}
+                <a class="utility-pill" href="{{ workspace_overview.spreadsheet_url }}" target="_blank" rel="noreferrer">Открыть Google Sheets</a>
+            {% endif %}
+        </div>
+    </div>
+    {% if workspace_overview.warnings %}
+        <div class="alert-stack">
+            {% for warning in workspace_overview.warnings %}
+                <article class="alert-card warning">
+                    <strong>Требует внимания</strong>
+                    <p>{{ warning }}</p>
+                </article>
+            {% endfor %}
+        </div>
+    {% endif %}
+    <div class="status-grid">
+        {% for signal in workspace_overview.signals %}
+            <article class="status-card {{ signal.tone }}">
+                <span>{{ signal.label }}</span>
+                <strong>{{ signal.value }}</strong>
+                <p>{{ signal.detail }}</p>
+            </article>
+        {% endfor %}
+    </div>
+</section>
+
+<section class="layout-grid detail-grid">
+    <div class="stack">
+        <article class="panel panel-emphasis">
+            <div class="panel-head">
+                <div>
+                    <h2>Готовность контура</h2>
+                    <p class="muted">Быстрый статус того, что уже можно считать готовым.</p>
+                </div>
+            </div>
+            <div class="readiness-grid">
+                {% for item in readiness %}
+                    <div class="readiness-card {% if item.ready %}ready{% else %}pending{% endif %}">
+                        <strong>{{ item.title }}</strong>
+                        <p>{{ item.detail }}</p>
+                    </div>
+                {% endfor %}
+            </div>
+        </article>
+
+        <article class="panel panel-form">
+            <div class="panel-head">
+                <div>
+                    <h2>Шаблоны для заказчика</h2>
+                    <p class="muted">Скачайте и отправьте нужные CSV, чтобы заказчик заполнил их без лишних пояснений.</p>
+                </div>
+            </div>
+            <div class="template-grid">
+                {% for key, item in template_definitions.items %}
+                    <a class="template-card" href="{% url 'monitoring:download_customer_template' key %}">
+                        <strong>{{ item.filename }}</strong>
+                        <span>Скачать CSV</span>
+                    </a>
+                {% endfor %}
+            </div>
+        </article>
+    </div>
+
+    <aside class="stack">
+        <article class="panel panel-form">
+            <h2>Настройки мониторинга</h2>
+            <p class="panel-copy">Здесь задаётся служебный контур проекта: часовой пояс, расписание, глубина книги и параметры, которые влияют на ежедневную сборку.</p>
+            <form method="post" action="{% url 'monitoring:update_workspace_settings' %}" class="stack compact-form">
+                {% csrf_token %}
+                <div class="form-grid form-grid-2">
+                    {% for field in settings_form %}
+                        <div class="{% if field.name == 'visible_warehouses_note' or field.name == 'campaign_grouping_note' %}form-span-2{% endif %}">
+                            {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                        </div>
+                    {% endfor %}
+                </div>
+                <button class="primary-button wide" type="submit">Сохранить настройки</button>
+            </form>
+        </article>
+
+        <article class="panel panel-form">
+            <h2>Книга мониторинга</h2>
+            <p class="panel-copy">
+                Система собирает историю из БД и формирует итоговую таблицу по шаблону из проекта:
+                один лист на товар, блоки по датам, готово для передачи заказчику или загрузки в Google Sheets.
+            </p>
+            <form method="get" action="{% url 'monitoring:download_monitoring_workbook' %}" class="stack compact-form">
+                {% for field in workbook_form %}
+                    {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                {% endfor %}
+                <button class="primary-button wide" type="submit">Скачать .xlsx</button>
+            </form>
+        </article>
+
+        <article class="panel panel-form">
+            <h2>Google Sheets</h2>
+            <p class="panel-copy">
+                Данные продолжают сохраняться в БД, а при включённой интеграции дополнительно пишутся в Google Sheets.
+            </p>
+            <div class="stack compact-form">
+                <div class="field">
+                    <span>Service account email</span>
+                    <div class="static-value">{{ google_service_account_email|default:"Не настроен" }}</div>
+                </div>
+                <form method="post" action="{% url 'monitoring:sync_google_sheets' %}" class="stack compact-form">
+                    {% csrf_token %}
+                    {% for field in google_sync_form %}
+                        {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                    {% endfor %}
+                    <button class="secondary-button wide" type="submit">Обновить Google Sheets</button>
+                </form>
+            </div>
+        </article>
+
+        <article class="panel">
+            <h2>Демо-режим</h2>
+            <p class="panel-copy">Безопасный контур для предпросмотра интерфейса, книги и аналитики, пока реальные токены и справочники ещё не пришли.</p>
+            <form method="post" action="{% url 'monitoring:load_demo_data' %}">
+                {% csrf_token %}
+                <button class="secondary-button wide" type="submit">Загрузить демо-данные</button>
+            </form>
+        </article>
+    </aside>
+</section>
+{% endblock %}
