@@ -12,7 +12,9 @@ from monitoring.models import (
     CampaignMonitoringGroup,
     CampaignZone,
     DailyCampaignProductStat,
+    DailyProductKeywordStat,
     DailyProductMetrics,
+    DailyProductNote,
     DailyProductStock,
     DailyWarehouseStock,
     MonitoringSettings,
@@ -29,6 +31,7 @@ from monitoring.services.config import build_workspace_overview
 from monitoring.services.demo import seed_demo_dataset
 from monitoring.services.exporters import exporter_rows
 from monitoring.services.monitoring_table import export_monitoring_workbook_bytes
+from monitoring.services.monitoring_table import build_day_block
 from monitoring.services.reporting_hub import build_reports_context
 from monitoring.services.google_sheets import (
     GoogleSheetsSyncError,
@@ -114,6 +117,27 @@ class ReportingTests(TestCase):
         self.assertEqual(report["organic"]["order_count"], 4)
         self.assertEqual(report["organic"]["order_sum"], Decimal("4000.00"))
 
+    def test_product_report_includes_saved_keyword_metrics(self) -> None:
+        DailyProductKeywordStat.objects.create(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            query_text=self.product.primary_keyword,
+            frequency=120,
+            organic_position=Decimal("5.50"),
+            boosted_position=Decimal("12.30"),
+            boosted_ctr=Decimal("8.40"),
+        )
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+
+        self.assertEqual(report["keyword_rows"][0]["frequency"], 120)
+        self.assertEqual(report["keyword_rows"][0]["organic_position"], Decimal("5.50"))
+        self.assertEqual(report["keyword_rows"][0]["boosted_position"], Decimal("12.30"))
+        self.assertEqual(report["keyword_rows"][0]["boosted_ctr"], Decimal("8.40"))
+
     def test_export_contains_sample_header(self) -> None:
         report = build_product_report(
             product=self.product,
@@ -121,8 +145,19 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         rows = exporter_rows(report)
-        self.assertEqual(rows[0][2], "ОБРАЗЕЦ")
+        self.assertEqual(rows[0][2], "ОБРАЗЕЦ (17.03.2026)")
         self.assertEqual(rows[4][0], "Затраты (руб)")
+
+    def test_exporter_uses_overall_funnel_in_summary_column(self) -> None:
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        rows = exporter_rows(report)
+        self.assertEqual(rows[10][7], "50")
+        self.assertEqual(rows[11][7], "10")
+        self.assertEqual(rows[12][7], "10000")
 
     def test_dashboard_context_builds_aggregated_totals(self) -> None:
         context = build_dashboard_context(stats_date=date(2026, 3, 16), stock_date=date(2026, 3, 17))
@@ -138,6 +173,58 @@ class ReportingTests(TestCase):
         )
         self.assertIn("insights", report)
         self.assertEqual(len(report["traffic_cards"]), 5)
+
+    def test_monitoring_day_block_uses_overall_totals_and_single_profit_cell(self) -> None:
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        block = build_day_block(report, start_row=1, start_col=1)
+        self.assertEqual(block[11][7], 10)
+        self.assertEqual(block[11][8], "=H12-SUM(C12:G12)")
+        self.assertTrue(block[18][2].startswith("=(("))
+        self.assertEqual(block[18][3:], ["", "", "", "", "", ""])
+
+    def test_monitoring_day_block_offsets_organic_formula_for_later_blocks(self) -> None:
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        block = build_day_block(report, start_row=1, start_col=11)
+        self.assertEqual(block[9][8], "=R10-SUM(M10:Q10)")
+        self.assertEqual(block[12][8], "=R13-SUM(M13:Q13)")
+
+    def test_product_report_ignores_stats_from_unlinked_campaigns(self) -> None:
+        other_campaign = Campaign.objects.create(
+            external_id=99887755,
+            name="Foreign campaign",
+            monitoring_group=CampaignMonitoringGroup.UNIFIED,
+        )
+        other_product = Product.objects.create(nm_id=999000, title="Other")
+        other_campaign.products.add(other_product)
+        DailyCampaignProductStat.objects.create(
+            campaign=other_campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.SEARCH,
+            impressions=999,
+            clicks=99,
+            spend=Decimal("999.00"),
+            add_to_cart_count=9,
+            order_count=9,
+            order_sum=Decimal("9999.00"),
+        )
+
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+
+        self.assertEqual(report["total_ad"].clicks, 100)
+        self.assertEqual(report["total_ad"].order_sum, Decimal("6000.00"))
 
     def test_product_report_uses_economics_effective_for_stock_date(self) -> None:
         ProductEconomicsVersion.objects.create(
@@ -289,6 +376,9 @@ class SyncTests(TestCase):
         reference_date = date(2026, 3, 17)
         product = self.product
         campaign = self.campaign
+        product.primary_keyword = "брюки мужские черные"
+        product.secondary_keyword = "мужские классические брюки"
+        product.save(update_fields=["primary_keyword", "secondary_keyword"])
 
         class FakeAnalyticsClient:
             def get_sales_funnel_history(self, *, nm_ids, start_date, end_date):
@@ -297,7 +387,7 @@ class SyncTests(TestCase):
                         "product": {"nmId": product.nm_id, "name": "Updated title"},
                         "history": [
                             {
-                                "date": "2026-03-16",
+                                "date": "2026-03-17",
                                 "openCount": 10,
                                 "cartCount": 5,
                                 "orderCount": 2,
@@ -353,6 +443,24 @@ class SyncTests(TestCase):
                     }
                 }
 
+            def get_search_orders(self, *, nm_id, start_date, end_date, search_texts):
+                return {
+                    "data": {
+                        "items": [
+                            {
+                                "text": product.primary_keyword,
+                                "frequency": 202,
+                                "dateItems": [{"dt": "2026-03-17", "avgPosition": 4, "orders": 0}],
+                            },
+                            {
+                                "text": product.secondary_keyword,
+                                "frequency": 72,
+                                "dateItems": [{"dt": "2026-03-17", "avgPosition": 3, "orders": 0}],
+                            },
+                        ]
+                    }
+                }
+
         class FakePromotionClient:
             def get_campaigns(self, *, ids=None, statuses=None):
                 return {
@@ -372,22 +480,137 @@ class SyncTests(TestCase):
                 }
 
             def get_campaign_stats(self, *, ids, start_date, end_date):
-                return []
+                return [
+                    {
+                        "advertId": campaign.external_id,
+                        "days": [
+                            {
+                                "date": "2026-03-17T00:00:00+00:00",
+                                "apps": [
+                                    {
+                                        "appType": 32,
+                                        "nms": [
+                                            {
+                                                "nmId": product.nm_id,
+                                                "views": 100,
+                                                "clicks": 10,
+                                                "sum": "55",
+                                                "atbs": 2,
+                                                "orders": 1,
+                                                "shks": 1,
+                                                "sum_price": "1300",
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+
+            def get_daily_search_cluster_stats(self, *, items, start_date, end_date):
+                return {
+                    "items": [
+                        {
+                            "advertId": campaign.external_id,
+                            "nmId": product.nm_id,
+                            "dailyStats": [
+                                {
+                                    "date": "2026-03-17",
+                                    "stat": {
+                                        "normQuery": product.primary_keyword,
+                                        "avgPos": 15.68,
+                                        "ctr": 9.21,
+                                        "views": 239,
+                                        "clicks": 22,
+                                    },
+                                },
+                                {
+                                    "date": "2026-03-17",
+                                    "stat": {
+                                        "normQuery": product.secondary_keyword,
+                                        "avgPos": 10.25,
+                                        "ctr": 9.02,
+                                        "views": 2185,
+                                        "clicks": 197,
+                                    },
+                                },
+                            ],
+                        }
+                    ]
+                }
+
+        class FakeStatisticsClient:
+            def get_supplier_orders(self, *, date_from, flag=1):
+                return [
+                    {"nmId": product.nm_id, "spp": 17, "priceWithDisc": 3395, "finishedPrice": 2783},
+                    {"nmId": product.nm_id, "spp": 18, "priceWithDisc": 3395, "finishedPrice": 2783},
+                ]
+
+        class FakePricesClient:
+            def get_goods_prices(self, *, nm_ids):
+                return {
+                    "data": {
+                        "listGoods": [
+                            {
+                                "nmID": product.nm_id,
+                                "sizes": [
+                                    {"discountedPrice": 3424.75, "clubDiscountedPrice": 2783},
+                                ],
+                            }
+                        ]
+                    }
+                }
+
+        class FakeFeedbacksClient:
+            def get_feedbacks(self, *, nm_id, is_answered, take=100, skip=0):
+                if skip:
+                    return {"data": {"feedbacks": []}}
+                if is_answered:
+                    return {"data": {"feedbacks": []}}
+                return {
+                    "data": {
+                        "feedbacks": [
+                            {"id": "f1", "productValuation": 2, "createdDate": "2026-03-17T09:00:00Z"},
+                            {"id": "f2", "productValuation": 5, "createdDate": "2026-03-17T12:00:00Z"},
+                        ]
+                    }
+                }
 
         with patch("monitoring.services.sync.AnalyticsWBClient", return_value=FakeAnalyticsClient()):
             with patch("monitoring.services.sync.PromotionWBClient", return_value=FakePromotionClient()):
-                log = run_sync(reference_date=reference_date, overwrite=True)
+                with patch("monitoring.services.sync.StatisticsWBClient", return_value=FakeStatisticsClient()):
+                    with patch("monitoring.services.sync.PricesWBClient", return_value=FakePricesClient()):
+                        with patch("monitoring.services.sync.FeedbacksWBClient", return_value=FakeFeedbacksClient()):
+                            log = run_sync(reference_date=reference_date, overwrite=True)
 
         self.assertEqual(log.status, "success")
         stock = DailyProductStock.objects.get(product=product, stats_date=reference_date)
         self.assertEqual(stock.total_stock, 10)
         self.assertEqual(stock.in_way_to_client, 3)
         self.assertEqual(stock.in_way_from_client, 1)
+        self.assertEqual(stock.avg_orders_per_day, Decimal("3.70"))
+        self.assertEqual(stock.days_until_zero, Decimal("2.70"))
         self.assertEqual(DailyWarehouseStock.objects.filter(product=product, stats_date=reference_date).count(), 2)
         kole = DailyWarehouseStock.objects.get(product=product, stats_date=reference_date, warehouse__office_id=10)
         self.assertEqual(kole.stock_count, 7)
         self.assertEqual(kole.in_way_to_client, 2)
         self.assertEqual(kole.in_way_from_client, 1)
+        note = DailyProductNote.objects.get(product=product, note_date=reference_date)
+        self.assertEqual(note.spp_percent, Decimal("17.50"))
+        self.assertEqual(note.seller_price, Decimal("3395.00"))
+        self.assertEqual(note.wb_price, Decimal("2783.00"))
+        self.assertEqual(note.negative_feedback, "1")
+        self.assertTrue(note.unified_enabled)
+        primary_keyword = DailyProductKeywordStat.objects.get(
+            product=product,
+            stats_date=reference_date,
+            query_text=product.primary_keyword,
+        )
+        self.assertEqual(primary_keyword.frequency, 202)
+        self.assertEqual(primary_keyword.organic_position, Decimal("4.00"))
+        self.assertEqual(primary_keyword.boosted_position, Decimal("15.68"))
+        self.assertEqual(primary_keyword.boosted_ctr, Decimal("9.21"))
 
 
 class WBClientTests(TestCase):
@@ -502,10 +725,10 @@ class PreparationTests(TestCase):
         dashboard = payloads[0]
         product_payload = next(payload for payload in payloads if payload.kind == "product")
         self.assertEqual(dashboard.rows[2][1], "2026-03-18")
-        self.assertEqual(dashboard.rows[3][1], "2026-03-17")
-        self.assertEqual(product_payload.rows[0][2], "РК 15.03.2026 / Остатки 16.03.2026")
-        self.assertEqual(product_payload.rows[0][12], "РК 16.03.2026 / Остатки 17.03.2026")
-        self.assertEqual(product_payload.rows[0][22], "РК 17.03.2026 / Остатки 18.03.2026")
+        self.assertEqual(dashboard.rows[3][1], "2026-03-18")
+        self.assertEqual(product_payload.rows[0][2], "ОБРАЗЕЦ (16.03.2026)")
+        self.assertEqual(product_payload.rows[0][12], "ОБРАЗЕЦ (17.03.2026)")
+        self.assertEqual(product_payload.rows[0][22], "ОБРАЗЕЦ (18.03.2026)")
 
     def test_workbook_headers_match_generated_sheet_payloads(self) -> None:
         seed_demo_dataset()

@@ -279,6 +279,34 @@ class DailyCampaignProductStat(TimeStampedModel):
         return f"{self.campaign} / {self.product} / {self.zone} / {self.stats_date}"
 
 
+class DailyProductKeywordStat(TimeStampedModel):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="daily_keyword_stats")
+    stats_date = models.DateField(verbose_name="Р”Р°С‚Р° СЃС‚Р°С‚РёСЃС‚РёРєРё")
+    query_text = models.CharField(max_length=255, verbose_name="РџРѕРёСЃРєРѕРІС‹Р№ Р·Р°РїСЂРѕСЃ")
+    frequency = models.PositiveIntegerField(default=0, verbose_name="Р§Р°СЃС‚РѕС‚Р°")
+    organic_position = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="РџРѕР·РёС†РёСЏ РѕСЂРіР°РЅРёРєРё")
+    organic_orders = models.PositiveIntegerField(default=0, verbose_name="Р—Р°РєР°Р·С‹ РѕСЂРіР°РЅРёРєРё")
+    boosted_position = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="РџРѕР·РёС†РёСЏ Р±СѓСЃС‚Р°")
+    boosted_ctr = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="CTR Р±СѓСЃС‚Р°")
+    boosted_views = models.PositiveIntegerField(default=0, verbose_name="РџРѕРєР°Р·С‹ Р±СѓСЃС‚Р°")
+    boosted_clicks = models.PositiveIntegerField(default=0, verbose_name="РљР»РёРєРё Р±СѓСЃС‚Р°")
+    raw_payload = models.JSONField(default=dict, blank=True, verbose_name="РЎС‹СЂРѕР№ РѕС‚РІРµС‚ API")
+
+    class Meta:
+        ordering = ["-stats_date", "product_id", "query_text"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product", "stats_date", "query_text"],
+                name="uniq_daily_product_keyword_stat",
+            ),
+        ]
+        verbose_name = "Р”РЅРµРІРЅР°СЏ РјРµС‚СЂРёРєР° РєР»СЋС‡Р°"
+        verbose_name_plural = "Р”РЅРµРІРЅС‹Рµ РјРµС‚СЂРёРєРё РєР»СЋС‡РµР№"
+
+    def __str__(self) -> str:
+        return f"{self.product} / РєР»СЋС‡ / {self.query_text} / {self.stats_date}"
+
+
 class DailyProductNote(TimeStampedModel):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="daily_notes")
     note_date = models.DateField(verbose_name="Дата заметки")

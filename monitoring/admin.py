@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     Campaign,
     DailyCampaignProductStat,
+    DailyProductKeywordStat,
     DailyProductMetrics,
     DailyProductNote,
     DailyProductStock,
@@ -68,6 +69,13 @@ class DailyCampaignProductStatAdmin(admin.ModelAdmin):
     list_display = ("campaign", "product", "stats_date", "zone", "impressions", "clicks", "order_count", "spend")
     list_filter = ("stats_date", "zone", "campaign__monitoring_group")
     search_fields = ("campaign__name", "campaign__external_id", "product__title", "product__nm_id")
+
+
+@admin.register(DailyProductKeywordStat)
+class DailyProductKeywordStatAdmin(admin.ModelAdmin):
+    list_display = ("product", "stats_date", "query_text", "frequency", "organic_position", "boosted_position", "boosted_ctr")
+    list_filter = ("stats_date",)
+    search_fields = ("product__title", "product__nm_id", "query_text")
 
 
 @admin.register(DailyProductNote)

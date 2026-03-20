@@ -205,7 +205,7 @@ def sync_product(request: HttpRequest, pk: int) -> HttpResponse:
     except SyncServiceError as exc:
         messages.error(request, f"Ошибка синхронизации товара: {exc}")
     stock_date = _selected_date(request.POST.get("reference_date"), get_default_dates(product)[1])
-    stats_date = stock_date - timedelta(days=1)
+    stats_date = stock_date
     return redirect(
         f"{reverse('monitoring:product_detail', kwargs={'pk': product.pk})}?stats_date={stats_date}&stock_date={stock_date}"
     )

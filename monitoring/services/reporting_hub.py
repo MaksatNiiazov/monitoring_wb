@@ -43,7 +43,7 @@ def _format_percent(value) -> str:
 
 
 def _series_point(*, stock_date: date) -> dict:
-    stats_date = stock_date - timedelta(days=1)
+    stats_date = stock_date
     funnel = DailyProductMetrics.objects.filter(stats_date=stats_date).aggregate(
         opens=Sum("open_count"),
         carts=Sum("add_to_cart_count"),
@@ -191,7 +191,7 @@ def _product_spotlights(product_rows: list[dict], reference_date: date) -> list[
         {
             "label": "Максимальная рекламная нагрузка",
             "value": spend_leader["label"],
-            "detail": f"{spend_leader['spend_label']} расхода на дату РК {reference_date - timedelta(days=1):%d.%m.%Y}.",
+            "detail": f"{spend_leader['spend_label']} расхода на дату РК {reference_date:%d.%m.%Y}.",
             "tone": "warning",
         },
         {
@@ -223,7 +223,7 @@ def build_reports_context(*, reference_date: date, range_days: int = 14) -> dict
     for product in products:
         report = build_product_report(
             product=product,
-            stats_date=reference_date - timedelta(days=1),
+            stats_date=reference_date,
             stock_date=reference_date,
             create_note=False,
         )
@@ -251,7 +251,7 @@ def build_reports_context(*, reference_date: date, range_days: int = 14) -> dict
     group_labels = dict(CampaignMonitoringGroup.choices)
     total_campaign_spend = Decimal("0")
     campaign_mix_raw = list(
-        DailyCampaignProductStat.objects.filter(stats_date=reference_date - timedelta(days=1))
+        DailyCampaignProductStat.objects.filter(stats_date=reference_date)
         .values("campaign__monitoring_group")
         .annotate(
             spend=Sum("spend"),
@@ -337,7 +337,7 @@ def build_reports_context(*, reference_date: date, range_days: int = 14) -> dict
             "label": "Доля органики",
             "value": _float(latest_point.get("organic_share", 0)),
             "format": "percent",
-            "detail": f"По рекламному дню {reference_date - timedelta(days=1):%d.%m.%Y}.",
+            "detail": f"По рекламному дню {reference_date:%d.%m.%Y}.",
         },
     ]
 
@@ -354,5 +354,5 @@ def build_reports_context(*, reference_date: date, range_days: int = 14) -> dict
         "campaign_mix_rows": campaign_mix_rows,
         "warehouse_rows": warehouse_rows,
         "latest_point": latest_point,
-        "latest_stats_date": reference_date - timedelta(days=1),
+        "latest_stats_date": reference_date,
     }

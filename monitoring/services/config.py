@@ -106,10 +106,10 @@ def build_workspace_overview() -> dict:
     )
     if report_now < today_sync_cutoff:
         stock_expected_date = report_now.date() - timedelta(days=1)
-        stats_expected_date = report_now.date() - timedelta(days=2)
+        stats_expected_date = report_now.date() - timedelta(days=1)
     else:
         stock_expected_date = report_now.date()
-        stats_expected_date = report_now.date() - timedelta(days=1)
+        stats_expected_date = report_now.date()
 
     warnings: list[str] = []
     if not latest_metrics_date:

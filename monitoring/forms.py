@@ -272,7 +272,7 @@ class DailyNoteForm(StyledFormMixin, forms.ModelForm):
 
 class SyncForm(StyledFormMixin, forms.Form):
     help_texts = {
-        "reference_date": "Остатки на эту дату, реклама и воронка за предыдущий день.",
+        "reference_date": "Остатки, реклама и воронка будут собраны на эту же дату.",
         "force": "Перезапишет уже сохранённые данные за выбранную дату.",
     }
 
@@ -314,7 +314,7 @@ class ReportsFilterForm(StyledFormMixin, forms.Form):
     )
 
     help_texts = {
-        "reference_date": "Дата среза остатков. Реклама и воронка берутся за предыдущий день.",
+        "reference_date": "Дата единого среза для остатков, рекламы и общей воронки.",
         "range_days": "На такую глубину строятся графики и сравнительные отчёты.",
     }
 

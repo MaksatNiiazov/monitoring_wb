@@ -193,6 +193,27 @@ class AnalyticsWBClient(BaseWBClient):
             },
         )
 
+    def get_search_orders(
+        self,
+        *,
+        nm_id: int,
+        start_date: date,
+        end_date: date,
+        search_texts: list[str],
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/v2/search-report/product/orders",
+            payload={
+                "period": {
+                    "start": start_date.isoformat(),
+                    "end": end_date.isoformat(),
+                },
+                "nmId": nm_id,
+                "searchTexts": search_texts,
+            },
+        )
+
 
 class PromotionWBClient(BaseWBClient):
     base_url = "https://advert-api.wildberries.ru"
@@ -216,5 +237,81 @@ class PromotionWBClient(BaseWBClient):
                 "ids": ",".join(str(item) for item in ids),
                 "beginDate": start_date.isoformat(),
                 "endDate": end_date.isoformat(),
+            },
+        )
+
+    def get_daily_search_cluster_stats(
+        self,
+        *,
+        items: list[dict[str, int]],
+        start_date: date,
+        end_date: date,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/adv/v1/normquery/stats",
+            payload={
+                "from": start_date.isoformat(),
+                "to": end_date.isoformat(),
+                "items": items,
+            },
+        )
+
+
+class StatisticsWBClient(BaseWBClient):
+    base_url = "https://statistics-api.wildberries.ru"
+
+    def __init__(self, token: str | None = None) -> None:
+        super().__init__(token or settings.WB_ANALYTICS_API_TOKEN)
+
+    def get_supplier_orders(self, *, date_from: date, flag: int = 1) -> list[dict[str, Any]]:
+        return self._request(
+            "GET",
+            "/api/v1/supplier/orders",
+            params={
+                "dateFrom": date_from.isoformat(),
+                "flag": flag,
+            },
+        )
+
+
+class PricesWBClient(BaseWBClient):
+    base_url = "https://discounts-prices-api.wildberries.ru"
+
+    def __init__(self, token: str | None = None) -> None:
+        super().__init__(token or settings.WB_ANALYTICS_API_TOKEN)
+
+    def get_goods_prices(self, *, nm_ids: list[int]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/v2/list/goods/filter",
+            payload={
+                "nmList": nm_ids,
+            },
+        )
+
+
+class FeedbacksWBClient(BaseWBClient):
+    base_url = "https://feedbacks-api.wildberries.ru"
+
+    def __init__(self, token: str | None = None) -> None:
+        super().__init__(token or settings.WB_ANALYTICS_API_TOKEN)
+
+    def get_feedbacks(
+        self,
+        *,
+        nm_id: int,
+        is_answered: bool,
+        take: int = 100,
+        skip: int = 0,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/api/v1/feedbacks",
+            params={
+                "nmId": nm_id,
+                "isAnswered": "true" if is_answered else "false",
+                "take": take,
+                "skip": skip,
             },
         )

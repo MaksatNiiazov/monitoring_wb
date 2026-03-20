@@ -66,6 +66,32 @@ def _bool_label(value: bool) -> str:
     return "Да" if value else "Нет"
 
 
+def _optional_money(value: Decimal | int | float | str | None) -> float | str:
+    number = decimalize(value)
+    if number == 0:
+        return ""
+    return _money(number)
+
+
+def _optional_fraction(value: Decimal | int | float | str | None) -> float | str:
+    number = decimalize(value)
+    if number == 0:
+        return ""
+    return _fraction(number)
+
+
+def _keyword_int(value: int | None, *, has_data: bool) -> int | str:
+    if value is None and not has_data:
+        return ""
+    return _int(value or 0)
+
+
+def _keyword_money(value: Decimal | int | float | str | None, *, has_data: bool) -> float | str:
+    if value is None and not has_data:
+        return ""
+    return _money(value or 0)
+
+
 def _cell_ref(*, start_row: int, start_col: int, relative_row: int, relative_col: int) -> str:
     return f"{get_column_letter(start_col + relative_col - 1)}{start_row + relative_row - 1}"
 
@@ -89,17 +115,22 @@ def _metric_cell(report: dict[str, Any], group: str, zone: str) -> MetricCell:
 
 
 def _block_header(report: dict[str, Any]) -> str:
-    stats_date = report["stats_date"]
     stock_date = report["stock_date"]
-    return f"РК {stats_date:%d.%m.%Y} / Остатки {stock_date:%d.%m.%Y}"
+    return f"ОБРАЗЕЦ ({stock_date:%d.%m.%Y})"
 
 
 def _spp_delta_value(report: dict[str, Any], previous_report: dict[str, Any] | None) -> float | str:
-    if previous_report is None:
-        return ""
     current = decimalize(report["note"].spp_percent)
+    if current == 0:
+        return ""
+    if previous_report is None:
+        return "Без изменений"
     previous = decimalize(previous_report["note"].spp_percent)
-    return float((current - previous).quantize(Decimal("0.0001")) / Decimal("100"))
+    delta = current - previous
+    if delta == 0:
+        return "Без изменений"
+    label = "Вырос на" if delta > 0 else "Упал на"
+    return f"{label} {delta.copy_abs().quantize(Decimal('0.01')).normalize()}%"
 
 
 def build_day_block(
@@ -111,10 +142,10 @@ def build_day_block(
 ) -> list[list[Any]]:
     product = report["product"]
     economics = report["economics"]
+    keyword_rows = report["keyword_rows"]
     note = report["note"]
     stock = report["stock"]
-    total_ad = report["total_ad"]
-    organic = report["organic"]
+    metrics = report["metrics"]
 
     unified_search = _metric_cell(report, CampaignMonitoringGroup.UNIFIED, CampaignZone.SEARCH)
     unified_shelves = _metric_cell(report, CampaignMonitoringGroup.UNIFIED, CampaignZone.RECOMMENDATION)
@@ -124,9 +155,26 @@ def build_day_block(
 
     columns = [unified_search, unified_shelves, unified_catalog, manual_search, manual_shelves]
 
-    def pick_numbers(metric_name: str) -> list[int | float]:
-        values: list[int | float] = []
-        for cell in columns:
+    def is_active(cell: MetricCell) -> bool:
+        return any(
+            [
+                cell.impressions,
+                cell.clicks,
+                cell.carts,
+                cell.orders,
+                decimalize(cell.order_sum),
+                decimalize(cell.spend),
+            ]
+        )
+
+    active_columns = [is_active(cell) for cell in columns]
+
+    def pick_numbers(metric_name: str) -> list[int | float | str]:
+        values: list[int | float | str] = []
+        for index, cell in enumerate(columns):
+            if not active_columns[index]:
+                values.append("")
+                continue
             value = getattr(cell, metric_name)
             if isinstance(value, Decimal):
                 values.append(_money(value))
@@ -134,20 +182,16 @@ def build_day_block(
                 values.append(_int(value))
         return values
 
-    def traffic_formula(relative_col: int) -> str:
+    def traffic_value(relative_col: int) -> float | str:
+        cell = columns[relative_col - 3]
+        if not is_active(cell):
+            return ""
         if relative_col in (6, 7):
-            impressions_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=6, relative_col=relative_col)
-            return f'=IF({impressions_ref}>0,1,0)'
-        return _cell_formula(
-            start_row=start_row,
-            start_col=start_col,
-            template="IFERROR({current}/SUM({start}:{end}),0)",
-            refs={
-                "current": (6, relative_col),
-                "start": (6, 3),
-                "end": (6, 5),
-            },
-        )
+            return 1
+        unified_total = unified_search.impressions + unified_shelves.impressions + unified_catalog.impressions
+        if unified_total <= 0:
+            return ""
+        return _fraction(decimalize(cell.impressions) * Decimal("100") / decimalize(unified_total))
 
     seller_price_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=38, relative_col=7)
     buyout_percent_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=20, relative_col=3)
@@ -157,67 +201,117 @@ def build_day_block(
     def row_value_ref(relative_row: int, relative_col: int) -> str:
         return _cell_ref(start_row=start_row, start_col=start_col, relative_row=relative_row, relative_col=relative_col)
 
-    def order_sum_formula(relative_col: int) -> str:
-        return f"={row_value_ref(12, relative_col)}*{seller_price_ref}"
-
     def buyout_formula(relative_col: int) -> str:
         return f"={row_value_ref(13, relative_col)}*{buyout_percent_ref}"
 
     def cost_per_order_formula(relative_col: int) -> str:
-        return f'=IFERROR({row_value_ref(5, relative_col)}/{row_value_ref(12, relative_col)},0)'
+        return f'={row_value_ref(5, relative_col)}/{row_value_ref(12, relative_col)}'
 
     def cost_per_cart_formula(relative_col: int) -> str:
-        return f'=IFERROR({row_value_ref(5, relative_col)}/{row_value_ref(11, relative_col)},0)'
+        return f'={row_value_ref(5, relative_col)}/{row_value_ref(11, relative_col)}'
 
     def ratio_formula(relative_col: int, denominator_row: int) -> str:
-        return f'=IFERROR({row_value_ref(5, relative_col)}/{row_value_ref(denominator_row, relative_col)},0)'
+        return f'={row_value_ref(5, relative_col)}/({row_value_ref(denominator_row, relative_col)}/100)'
 
-    def profit_formula(relative_col: int) -> str:
+    def overall_profit_formula() -> str:
         return (
-            f"={row_value_ref(14, relative_col)}-{row_value_ref(5, relative_col)}-"
-            f"({row_value_ref(12, relative_col)}*{buyout_percent_ref}*({unit_cost_ref}+{logistics_ref}))"
+            f"=(({seller_price_ref}-{unit_cost_ref}-({seller_price_ref}*({row_value_ref(18, 8)}/100)))-"
+            f"({seller_price_ref}*0.25)-(({logistics_ref}/{buyout_percent_ref})-50))*"
+            f"({row_value_ref(12, 8)}*{buyout_percent_ref})"
+        )
+
+    def maybe_formula(relative_col: int, formula: str) -> str:
+        return formula if active_columns[relative_col - 3] else ""
+
+    def average_orders_formula() -> float | str:
+        if stock and decimalize(stock.avg_orders_per_day):
+            return _money(stock.avg_orders_per_day)
+        block_span = BLOCK_WIDTH + BLOCK_GAP
+        refs: list[str] = []
+        for offset in range(7):
+            block_start_col = start_col - offset * block_span
+            if block_start_col < 1:
+                break
+            refs.append(
+                _cell_ref(
+                    start_row=start_row,
+                    start_col=block_start_col,
+                    relative_row=12,
+                    relative_col=8,
+                )
+            )
+        if len(refs) <= 1:
+            return _money(report["avg_orders_per_day"])
+        return f"=(({'+'.join(refs)})/{len(refs)})"
+
+    def days_until_zero_formula() -> float | str:
+        if stock and decimalize(stock.days_until_zero):
+            return _money(stock.days_until_zero)
+        return (
+            f"=IFERROR(({row_value_ref(28, 8)}+({row_value_ref(29, 8)}-{row_value_ref(29, 8)}*{buyout_percent_ref})+"
+            f"{row_value_ref(30, 8)})/({row_value_ref(31, 8)}*{buyout_percent_ref}),0)"
         )
 
     rows: list[list[Any]] = [
         ["", "", _block_header(report), "", "", "", "", "", ""],
-        ["Тип рекламной кампании", "", "Единая ставка", "", "", "Руч. поиск", "Руч. полки", "Итого реклама", "Органика"],
+        ["Тип рекламной кампании", "", "Единая ставка", "", "", "Руч. Поиск", "Руч. Полки", "Общая и органика", ""],
         ["Зоны показов", "", "Поиск", "Полки", "Каталог", "Поиск", "Полки", "Общая", "ОРГ"],
-        ["Доля трафика (%)", "", traffic_formula(3), traffic_formula(4), traffic_formula(5), traffic_formula(6), traffic_formula(7), "", ""],
-        ["Затраты (руб)", "", *pick_numbers("spend"), _money(total_ad.spend), ""],
-        ["Показы", "", *pick_numbers("impressions"), _int(total_ad.impressions), ""],
-        ["CTR", "", f'=IFERROR({row_value_ref(10, 3)}/{row_value_ref(6, 3)},0)', f'=IFERROR({row_value_ref(10, 4)}/{row_value_ref(6, 4)},0)', f'=IFERROR({row_value_ref(10, 5)}/{row_value_ref(6, 5)},0)', f'=IFERROR({row_value_ref(10, 6)}/{row_value_ref(6, 6)},0)', f'=IFERROR({row_value_ref(10, 7)}/{row_value_ref(6, 7)},0)', f'=IFERROR({row_value_ref(10, 8)}/{row_value_ref(6, 8)},0)', ""],
-        ["CPM", "", f'=IFERROR({row_value_ref(5, 3)}*1000/{row_value_ref(6, 3)},0)', f'=IFERROR({row_value_ref(5, 4)}*1000/{row_value_ref(6, 4)},0)', f'=IFERROR({row_value_ref(5, 5)}*1000/{row_value_ref(6, 5)},0)', f'=IFERROR({row_value_ref(5, 6)}*1000/{row_value_ref(6, 6)},0)', f'=IFERROR({row_value_ref(5, 7)}*1000/{row_value_ref(6, 7)},0)', f'=IFERROR({row_value_ref(5, 8)}*1000/{row_value_ref(6, 8)},0)', ""],
-        ["CPC", "", f'=IFERROR({row_value_ref(5, 3)}/{row_value_ref(10, 3)},0)', f'=IFERROR({row_value_ref(5, 4)}/{row_value_ref(10, 4)},0)', f'=IFERROR({row_value_ref(5, 5)}/{row_value_ref(10, 5)},0)', f'=IFERROR({row_value_ref(5, 6)}/{row_value_ref(10, 6)},0)', f'=IFERROR({row_value_ref(5, 7)}/{row_value_ref(10, 7)},0)', f'=IFERROR({row_value_ref(5, 8)}/{row_value_ref(10, 8)},0)', ""],
-        ["Клики", "", *pick_numbers("clicks"), _int(total_ad.clicks), _int(organic["open_count"])],
-        ["Корзины", "", *pick_numbers("carts"), _int(total_ad.carts), _int(organic["cart_count"])],
-        ["Заказы", "", *pick_numbers("orders"), _int(total_ad.orders), _int(organic["order_count"])],
-        ["Заказы (руб.)", "", order_sum_formula(3), order_sum_formula(4), order_sum_formula(5), order_sum_formula(6), order_sum_formula(7), order_sum_formula(8), order_sum_formula(9)],
-        ["Выкупы ≈ (руб.)", "", buyout_formula(3), buyout_formula(4), buyout_formula(5), buyout_formula(6), buyout_formula(7), buyout_formula(8), ""],
-        ["Стоимость заказа", "", cost_per_order_formula(3), cost_per_order_formula(4), cost_per_order_formula(5), cost_per_order_formula(6), cost_per_order_formula(7), cost_per_order_formula(8), ""],
-        ["Стоимость корзины", "", cost_per_cart_formula(3), cost_per_cart_formula(4), cost_per_cart_formula(5), cost_per_cart_formula(6), cost_per_cart_formula(7), cost_per_cart_formula(8), ""],
-        ["ДРР от заказов (%)", "", ratio_formula(3, 13), ratio_formula(4, 13), ratio_formula(5, 13), ratio_formula(6, 13), ratio_formula(7, 13), ratio_formula(8, 13), ""],
-        ["ДРР от продаж ≈ (%)", "", ratio_formula(3, 14), ratio_formula(4, 14), ratio_formula(5, 14), ratio_formula(6, 14), ratio_formula(7, 14), ratio_formula(8, 14), ""],
-        ["Прибыль (без налогов и костов вне ВБ)", "", profit_formula(3), profit_formula(4), profit_formula(5), profit_formula(6), profit_formula(7), profit_formula(8), ""],
+        ["Доля трафика (%)", "", traffic_value(3), traffic_value(4), traffic_value(5), traffic_value(6), traffic_value(7), "-", "-"],
+        ["Затраты (руб)", "", *pick_numbers("spend"), f"=SUM({row_value_ref(5, 3)}:{row_value_ref(5, 7)})", "-"],
+        ["Показы ", "", *pick_numbers("impressions"), f"=SUM({row_value_ref(6, 3)}:{row_value_ref(6, 7)})", "-"],
+        ["CTR", "", maybe_formula(3, f'={row_value_ref(10, 3)}/{row_value_ref(6, 3)}*100'), maybe_formula(4, f'={row_value_ref(10, 4)}/{row_value_ref(6, 4)}*100'), maybe_formula(5, f'={row_value_ref(10, 5)}/{row_value_ref(6, 5)}*100'), maybe_formula(6, f'={row_value_ref(10, 6)}/{row_value_ref(6, 6)}*100'), maybe_formula(7, f'={row_value_ref(10, 7)}/{row_value_ref(6, 7)}*100'), "-", "-"],
+        ["CPM", "", maybe_formula(3, f'={row_value_ref(5, 3)}*1000/{row_value_ref(6, 3)}'), maybe_formula(4, f'={row_value_ref(5, 4)}*1000/{row_value_ref(6, 4)}'), maybe_formula(5, f'={row_value_ref(5, 5)}*1000/{row_value_ref(6, 5)}'), maybe_formula(6, f'={row_value_ref(5, 6)}*1000/{row_value_ref(6, 6)}'), maybe_formula(7, f'={row_value_ref(5, 7)}*1000/{row_value_ref(6, 7)}'), "-", "-"],
+        ["CPC", "", maybe_formula(3, f'={row_value_ref(5, 3)}/{row_value_ref(10, 3)}'), maybe_formula(4, f'={row_value_ref(5, 4)}/{row_value_ref(10, 4)}'), maybe_formula(5, f'={row_value_ref(5, 5)}/{row_value_ref(10, 5)}'), maybe_formula(6, f'={row_value_ref(5, 6)}/{row_value_ref(10, 6)}'), maybe_formula(7, f'={row_value_ref(5, 7)}/{row_value_ref(10, 7)}'), "-", "-"],
+        ["Клики ", "", *pick_numbers("clicks"), _int(metrics.open_count if metrics else 0), f'={row_value_ref(10, 8)}-SUM({row_value_ref(10, 3)}:{row_value_ref(10, 7)})'],
+        ["Корзины ", "", *pick_numbers("carts"), _int(metrics.add_to_cart_count if metrics else 0), f'={row_value_ref(11, 8)}-SUM({row_value_ref(11, 3)}:{row_value_ref(11, 7)})'],
+        ["Заказы", "", *pick_numbers("orders"), _int(metrics.order_count if metrics else 0), f'={row_value_ref(12, 8)}-SUM({row_value_ref(12, 3)}:{row_value_ref(12, 7)})'],
+        ["Заказы (руб.)", "", *pick_numbers("order_sum"), _money(metrics.order_sum if metrics else 0), f'={row_value_ref(13, 8)}-SUM({row_value_ref(13, 3)}:{row_value_ref(13, 7)})'],
+        ["Выкупы ≈ (руб.)", "", maybe_formula(3, buyout_formula(3)), maybe_formula(4, buyout_formula(4)), maybe_formula(5, buyout_formula(5)), maybe_formula(6, buyout_formula(6)), maybe_formula(7, buyout_formula(7)), buyout_formula(8), "-"],
+        ["Стоимость заказа", "", maybe_formula(3, cost_per_order_formula(3)), maybe_formula(4, cost_per_order_formula(4)), maybe_formula(5, cost_per_order_formula(5)), maybe_formula(6, cost_per_order_formula(6)), maybe_formula(7, cost_per_order_formula(7)), cost_per_order_formula(8), "-"],
+        ["Стоимость корзины", "", maybe_formula(3, cost_per_cart_formula(3)), maybe_formula(4, cost_per_cart_formula(4)), maybe_formula(5, cost_per_cart_formula(5)), maybe_formula(6, cost_per_cart_formula(6)), maybe_formula(7, cost_per_cart_formula(7)), cost_per_cart_formula(8), "-"],
+        ["ДРР от заказов (%)", "", maybe_formula(3, ratio_formula(3, 13)), maybe_formula(4, ratio_formula(4, 13)), maybe_formula(5, ratio_formula(5, 13)), maybe_formula(6, ratio_formula(6, 13)), maybe_formula(7, ratio_formula(7, 13)), ratio_formula(8, 13), "-"],
+        ["ДРР от продаж ≈ (%)", "", maybe_formula(3, ratio_formula(3, 14)), maybe_formula(4, ratio_formula(4, 14)), maybe_formula(5, ratio_formula(5, 14)), maybe_formula(6, ratio_formula(6, 14)), maybe_formula(7, ratio_formula(7, 14)), ratio_formula(8, 14), "-"],
+        ["прибыль (без налогов, костов вне ВБ и возвратов)", "", overall_profit_formula(), "", "", "", "", "", ""],
         ["Процент выкупа %", "", _fraction(economics.buyout_percent), "", "", "", "", "", ""],
         ["Себестоимость", "", _money(economics.unit_cost), "", "", "", "", "", ""],
         ["Логистика", "", _money(economics.logistics_cost), "", "", "", "", "", ""],
-        ["Себес", "", "Остатки:", "", "", "", "", "", ""],
-        ["Логистика", "", "", "", "", "", "", "", ""],
+        ["", "", "Остатки:", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", ""],
         ["", "", "Остатки на складах WB", "", "", "", "", _int(stock.total_stock if stock else 0), ""],
         ["", "", "Едут к клиенту", "", "", "", "", _int(stock.in_way_to_client if stock else 0), ""],
         ["", "", "Возвращаются на склад", "", "", "", "", _int(stock.in_way_from_client if stock else 0), ""],
-        ["", "", "Ср. кол-во заказов/день", "", "", "", "", _money(report["avg_orders_per_day"]), ""],
-        ["", "", "Дней до распродажи в 0", "", "", "", "", f'=IFERROR({row_value_ref(28, 8)}/{row_value_ref(31, 8)},0)', ""],
+        ["", "", "Ср. кол-во заказов/день", "", "", "", "", average_orders_formula(), ""],
+        ["", "", "Дней до распродажи в 0", "", "", "", "", days_until_zero_formula(), ""],
         ["Ключи", "", "Частота", "поз. ОРГ", "", "", "", "поз. БУСТ", "CTR (%)"],
-        [product.primary_keyword or "", "", "", "", "", "", "", "", ""],
-        [product.secondary_keyword or "", "", "", "", "", "", "", "", ""],
+        [
+            keyword_rows[0]["query_text"],
+            "",
+            _keyword_int(keyword_rows[0]["frequency"], has_data=keyword_rows[0]["has_data"]),
+            _keyword_money(keyword_rows[0]["organic_position"], has_data=keyword_rows[0]["has_data"]),
+            "",
+            "",
+            "",
+            _keyword_money(keyword_rows[0]["boosted_position"], has_data=keyword_rows[0]["has_data"]),
+            _keyword_money(keyword_rows[0]["boosted_ctr"], has_data=keyword_rows[0]["has_data"]),
+        ],
+        [
+            keyword_rows[1]["query_text"],
+            "",
+            _keyword_int(keyword_rows[1]["frequency"], has_data=keyword_rows[1]["has_data"]),
+            _keyword_money(keyword_rows[1]["organic_position"], has_data=keyword_rows[1]["has_data"]),
+            "",
+            "",
+            "",
+            _keyword_money(keyword_rows[1]["boosted_position"], has_data=keyword_rows[1]["has_data"]),
+            _keyword_money(keyword_rows[1]["boosted_ctr"], has_data=keyword_rows[1]["has_data"]),
+        ],
         ["", "", "Обзор:", "", "", "", "", "", ""],
-        ["", "", "СПП", _fraction(note.spp_percent), "", "", "Изм. к пред.", "", _spp_delta_value(report, previous_report)],
-        ["", "", "Цена WBSELLER (наша)", "", "", "", _money(note.seller_price), "", ""],
-        ["", "", "Цена WB (на сайте)", "", "", "", _money(note.wb_price), "", ""],
+        ["", "", "СПП", _optional_fraction(note.spp_percent), "", "", _spp_delta_value(report, previous_report), "", ""],
+        ["", "", "Цена WBSELLER (наша)", "", "", "", _optional_money(note.seller_price), "", ""],
+        ["", "", "Цена WB (на сайте)", "", "", "", _optional_money(note.wb_price), "", ""],
         ["", "", "Акция", "", "", "", note.promo_status, "", ""],
         ["", "", "Негативные отзывы", "", "", "", note.negative_feedback, "", ""],
         ["", "", "Действия:", "", "", "", "", "", ""],
@@ -236,7 +330,7 @@ def build_product_monitoring_rows(*, product: Product, reference_date: date, his
     reports = [
         build_product_report(
             product=product,
-            stats_date=stock_date - timedelta(days=1),
+            stats_date=stock_date,
             stock_date=stock_date,
             create_note=False,
         )
@@ -261,7 +355,7 @@ def build_product_monitoring_rows(*, product: Product, reference_date: date, his
 
 
 def build_dashboard_rows(*, reference_date: date, history_days: int, product_ids: list[int] | None = None) -> list[list[Any]]:
-    stats_date = reference_date - timedelta(days=1)
+    stats_date = reference_date
     context = build_dashboard_context(stats_date=stats_date, stock_date=reference_date)
     settings = get_monitoring_settings()
     rows: list[list[Any]] = [
@@ -349,11 +443,11 @@ def _apply_dashboard_style(sheet) -> None:
 
 def _apply_product_sheet_style(sheet, history_days: int) -> None:
     sheet.freeze_panes = "C4"
-    percent_rows = {4, 7, 17, 18, 20, 37}
-    money_rows = {5, 8, 9, 13, 14, 15, 16, 19, 21, 22, 38, 39}
+    percent_rows = {4, 20, 37}
+    money_rows = {5, 13, 14, 19, 21, 22, 38, 39}
     integer_rows = {6, 10, 11, 12, 28, 29, 30}
-    decimal_rows = {31, 32}
-    section_rows = {33, 36, 42, 47}
+    decimal_rows = {7, 8, 9, 15, 16, 17, 18, 31, 32}
+    section_rows = {23, 33, 36, 42, 47}
 
     for block_index in range(history_days):
         start_col = 1 + block_index * (BLOCK_WIDTH + BLOCK_GAP)
@@ -381,13 +475,13 @@ def _apply_product_sheet_style(sheet, history_days: int) -> None:
                     cell.fill = META_FILL
 
                 if row_idx in percent_rows:
-                    cell.number_format = "0.00%"
+                    cell.number_format = "0.##%"
                 elif row_idx in money_rows:
-                    cell.number_format = '#,##0.00'
+                    cell.number_format = "#,##0.##"
                 elif row_idx in integer_rows:
                     cell.number_format = "#,##0"
                 elif row_idx in decimal_rows:
-                    cell.number_format = "#,##0.00"
+                    cell.number_format = "#,##0.##"
 
                 if col_offset == 0 or row_idx in section_rows:
                     cell.alignment = Alignment(vertical="center", horizontal="left", wrap_text=True)

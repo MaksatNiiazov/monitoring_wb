@@ -13,6 +13,7 @@ from monitoring.models import (
     CampaignMonitoringGroup,
     CampaignZone,
     DailyCampaignProductStat,
+    DailyProductKeywordStat,
     DailyProductMetrics,
     DailyProductNote,
     DailyProductStock,
@@ -43,6 +44,10 @@ def safe_divide(numerator: Decimal | int | float, denominator: Decimal | int | f
 
 def quantize_money(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"))
+
+
+def normalize_search_text(value: str) -> str:
+    return " ".join((value or "").strip().lower().split())
 
 
 def parse_zone_map() -> dict[int, str]:
@@ -149,7 +154,7 @@ def get_default_dates(product: Product | None = None) -> tuple[date, date]:
     latest_metrics = metrics_qs.aggregate(latest=Max("stats_date"))["latest"]
     latest_stock = stock_qs.aggregate(latest=Max("stats_date"))["latest"]
     today = timezone.localdate()
-    return latest_metrics or today - timedelta(days=1), latest_stock or today
+    return latest_metrics or today, latest_stock or today
 
 
 def estimate_buyout_sum(product_or_economics: Product | ResolvedEconomics, order_sum: Decimal, effective_date: date | None = None) -> Decimal:
@@ -194,7 +199,10 @@ def build_dashboard_context(*, stats_date: date | None = None, stock_date: date 
     for product in products:
         metrics = product.daily_metrics.filter(stats_date=stats_date).first()
         stock = product.daily_stocks.filter(stats_date=stock_date).first()
-        spend_values = product.campaign_stats.filter(stats_date=stats_date).values_list("spend", flat=True)
+        spend_values = product.campaign_stats.filter(
+            stats_date=stats_date,
+            campaign__products=product,
+        ).values_list("spend", flat=True)
         product_spend = sum((decimalize(item) for item in spend_values), ZERO)
         campaigns_count = product.campaigns.filter(is_active=True).count()
         cards.append(
@@ -261,9 +269,19 @@ def build_product_report(
     else:
         warehouse_rows = [row for row in warehouse_rows if row.warehouse.is_visible_in_monitoring]
     campaign_stats = list(
-        DailyCampaignProductStat.objects.filter(product=product, stats_date=stats_date)
+        DailyCampaignProductStat.objects.filter(
+            product=product,
+            stats_date=stats_date,
+            campaign__products=product,
+        )
         .select_related("campaign")
         .order_by("campaign__monitoring_group", "zone")
+    )
+    keyword_stats = list(
+        DailyProductKeywordStat.objects.filter(
+            product=product,
+            stats_date=stats_date,
+        ).order_by("query_text")
     )
 
     cells: dict[tuple[str, str], MetricCell] = {}
@@ -402,8 +420,30 @@ def build_product_report(
         )
 
     history = list(product.daily_metrics.order_by("-stats_date")[:14])
-    avg_orders_per_day = product.daily_metrics.order_by("-stats_date")[:7].aggregate(avg=Avg("order_count"))["avg"] or 0
-    days_until_zero = safe_divide(stock.total_stock if stock else 0, avg_orders_per_day) if avg_orders_per_day else ZERO
+    rolling_avg_orders_per_day = product.daily_metrics.order_by("-stats_date")[:7].aggregate(avg=Avg("order_count"))["avg"] or 0
+    avg_orders_per_day = decimalize(stock.avg_orders_per_day if stock else 0) or decimalize(rolling_avg_orders_per_day)
+    days_until_zero = decimalize(stock.days_until_zero if stock else 0)
+    if days_until_zero == 0 and avg_orders_per_day:
+        days_until_zero = safe_divide(stock.total_stock if stock else 0, avg_orders_per_day)
+
+    keyword_stats_map = {
+        normalize_search_text(item.query_text): item
+        for item in keyword_stats
+    }
+    keyword_rows: list[dict[str, Any]] = []
+    for query_text in [product.primary_keyword or "", product.secondary_keyword or ""]:
+        normalized_query = normalize_search_text(query_text)
+        keyword_stat = keyword_stats_map.get(normalized_query)
+        keyword_rows.append(
+            {
+                "query_text": query_text,
+                "has_data": keyword_stat is not None,
+                "frequency": keyword_stat.frequency if keyword_stat else None,
+                "organic_position": keyword_stat.organic_position if keyword_stat else None,
+                "boosted_position": keyword_stat.boosted_position if keyword_stat else None,
+                "boosted_ctr": keyword_stat.boosted_ctr if keyword_stat else None,
+            }
+        )
 
     report = {
         "product": product,
@@ -415,13 +455,14 @@ def build_product_report(
         "economics": economics,
         "warehouse_rows": warehouse_rows,
         "history": history,
+        "keyword_rows": keyword_rows,
         "cells": cells,
         "blocks": blocks,
         "total_ad": total_ad,
         "organic": organic,
         "traffic_cards": traffic_cards,
         "insights": insights,
-        "avg_orders_per_day": decimalize(avg_orders_per_day).quantize(Decimal("0.01")),
+        "avg_orders_per_day": avg_orders_per_day.quantize(Decimal("0.01")) if avg_orders_per_day else ZERO,
         "days_until_zero": days_until_zero.quantize(Decimal("0.01")) if days_until_zero else ZERO,
         "traffic_totals": traffic_totals,
         "alerts": alerts,
