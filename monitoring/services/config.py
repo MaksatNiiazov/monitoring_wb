@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta
+from functools import lru_cache
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -22,23 +23,32 @@ from monitoring.models import (
 
 
 def get_monitoring_settings():
+    return _get_monitoring_settings_cached()
+
+
+def _fallback_monitoring_settings() -> SimpleNamespace:
+    return SimpleNamespace(
+        project_name="Мониторинг WB",
+        report_timezone=settings.WB_REPORT_TIMEZONE,
+        sync_hour=settings.WB_SYNC_HOUR,
+        sync_minute=settings.WB_SYNC_MINUTE,
+        overwrite_within_day=True,
+        monitoring_history_days=14,
+        visible_warehouses_note="",
+        campaign_grouping_note="",
+    )
+
+
+@lru_cache(maxsize=1)
+def _get_monitoring_settings_cached():
     try:
         return MonitoringSettings.get_solo()
     except (OperationalError, ProgrammingError):
-        return SimpleNamespace(
-            project_name="Мониторинг WB",
-            report_timezone=settings.WB_REPORT_TIMEZONE,
-            sync_hour=settings.WB_SYNC_HOUR,
-            sync_minute=settings.WB_SYNC_MINUTE,
-            overwrite_within_day=True,
-            monitoring_history_days=14,
-            google_sheets_enabled=False,
-            google_sheets_auto_sync=True,
-            google_spreadsheet_id="",
-            google_dashboard_sheet_name="Dashboard",
-            visible_warehouses_note="",
-            campaign_grouping_note="",
-        )
+        return _fallback_monitoring_settings()
+
+
+def clear_monitoring_settings_cache() -> None:
+    _get_monitoring_settings_cached.cache_clear()
 
 
 def _report_now(runtime_settings) -> datetime:
@@ -85,16 +95,6 @@ def build_workspace_overview() -> dict:
     configured_products = Product.objects.filter(is_active=True).count()
     configured_campaigns = Campaign.objects.filter(is_active=True).count()
 
-    google_ready = bool(
-        (settings.GOOGLE_SERVICE_ACCOUNT_FILE or settings.GOOGLE_SERVICE_ACCOUNT_JSON)
-        and getattr(runtime_settings, "google_spreadsheet_id", "")
-    )
-    google_spreadsheet_id = getattr(runtime_settings, "google_spreadsheet_id", "")
-    spreadsheet_url = (
-        f"https://docs.google.com/spreadsheets/d/{google_spreadsheet_id}/edit"
-        if google_spreadsheet_id
-        else ""
-    )
     next_run = _next_sync_run(runtime_settings, report_now)
     today_sync_cutoff = datetime.combine(
         report_now.date(),
@@ -128,8 +128,6 @@ def build_workspace_overview() -> dict:
             f"Ожидался срез за {stock_expected_date:%d.%m.%Y}."
         )
 
-    if not google_ready and getattr(runtime_settings, "google_sheets_enabled", False):
-        warnings.append("Google Sheets включён в настройках, но не хватает service account или ID таблицы.")
     if last_error and (not last_success or last_error.created_at > last_success.created_at):
         warnings.append(f"Последний запуск завершился ошибкой: {last_error.message or 'без текста ошибки'}.")
 
@@ -154,12 +152,6 @@ def build_workspace_overview() -> dict:
             "detail": f"Остатки {latest_stock_date:%d.%m.%Y}" if latest_stock_date else "Остатки ещё не собраны",
             "tone": "positive" if latest_metrics_date and latest_stock_date else "warning",
         },
-        {
-            "label": "Google Sheets",
-            "value": "Подключён" if google_ready else "Ожидает настройки",
-            "detail": "Таблица подключена и готова к синку." if google_ready else "Нужны service account и spreadsheet ID.",
-            "tone": "positive" if google_ready else "warning",
-        },
     ]
 
     return {
@@ -171,9 +163,6 @@ def build_workspace_overview() -> dict:
         "last_error": last_error,
         "configured_products": configured_products,
         "configured_campaigns": configured_campaigns,
-        "google_ready": google_ready,
-        "google_spreadsheet_id": google_spreadsheet_id,
-        "spreadsheet_url": spreadsheet_url,
         "warnings": warnings,
         "signals": signals,
     }
@@ -228,11 +217,6 @@ def build_readiness_summary() -> list[dict]:
             "title": "Рекламные кампании",
             "ready": configured_campaigns > 0,
             "detail": f"Заведено {configured_campaigns} кампаний.",
-        },
-        {
-            "title": "Google Sheets",
-            "ready": bool(settings.GOOGLE_SERVICE_ACCOUNT_FILE or settings.GOOGLE_SERVICE_ACCOUNT_JSON),
-            "detail": "Нужен service account JSON для записи в таблицу.",
         },
         {
             "title": "Склады показа",

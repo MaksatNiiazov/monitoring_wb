@@ -1,0 +1,282 @@
+﻿{% extends "base.html" %}
+{% load static monitoring_extras %}
+
+{% block title %}Таблица | Мониторинг WB{% endblock %}
+
+{% block content %}
+<section class="panel panel-spacious table-primary-panel table-primary-panel-focused">
+    <div class="table-primary-head">
+        <div class="table-primary-title">
+            <p class="eyebrow">Таблица</p>
+            <h1>Рабочая таблица</h1>
+            <p class="muted">Основной экран работы: данные в таблице, действия вынесены в кнопки и попапы.</p>
+        </div>
+        <div class="table-primary-actions">
+            <div class="table-action-group table-action-group-primary">
+                <button class="primary-button table-head-action table-head-action-primary" type="button" data-modal-open="table-modal-sync">Синхронизация</button>
+                <button class="secondary-button table-head-action" type="button" data-modal-open="table-modal-product">Добавить товар</button>
+                <button class="secondary-button table-head-action" type="button" data-modal-open="table-modal-campaign">Добавить РК</button>
+            </div>
+            <div class="table-action-group table-action-group-links">
+                <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:products' %}">Товары</a>
+                <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:reports' %}?reference_date={{ reference_date|date:'Y-m-d' }}&range_days={{ workspace_settings.monitoring_history_days|default:14 }}">Аналитика</a>
+                <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:download_monitoring_workbook' %}?reference_date={{ reference_date|date:'Y-m-d' }}&history_days={{ history_days }}">Скачать .xlsx</a>
+                <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:workspace_settings' %}">Настройки</a>
+            </div>
+        </div>
+    </div>
+
+    <form method="get" class="table-toolbar" data-table-filter-form>
+        <input type="hidden" name="sheet" value="{% if active_sheet %}{{ active_sheet.key }}{% endif %}">
+        {% for field in table_filters_form %}
+            {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+        {% endfor %}
+        <button class="primary-button table-toolbar-submit" type="submit">Обновить</button>
+    </form>
+    <div class="table-toolbar-presets" data-table-filter-presets>
+        <button class="table-preset-button" type="button" data-filter-reference="today">Сегодня</button>
+        <button class="table-preset-button {% if history_days == 7 %}is-active{% endif %}" type="button" data-filter-days="7">7 дней</button>
+        <button class="table-preset-button {% if history_days == 14 %}is-active{% endif %}" type="button" data-filter-days="14">14 дней</button>
+        <button class="table-preset-button {% if history_days == 30 %}is-active{% endif %}" type="button" data-filter-days="30">30 дней</button>
+        <button class="table-preset-button {% if history_days == 60 %}is-active{% endif %}" type="button" data-filter-days="60">60 дней</button>
+    </div>
+
+    <div class="table-workbench-tools">
+        <button class="secondary-button table-view-action" type="button" data-table-action="toggle-density">Компактный режим</button>
+        <button class="secondary-button table-view-action" type="button" data-table-action="fullscreen">Режим на весь экран</button>
+    </div>
+    <p class="table-inline-status" data-inline-status aria-live="polite" hidden></p>
+
+    {% if sheet_tabs %}
+        <div class="table-sheets-nav-shell" data-sheets-nav>
+            <button class="table-day-nav-button table-sheets-nav-button" type="button" data-sheets-step="-1" aria-label="Предыдущий лист">‹</button>
+            <nav class="segmented-control table-sheets-nav" data-sheets-track aria-label="Листы таблицы">
+                {% for tab in sheet_tabs %}
+                    <a
+                        class="segmented-button {% if active_sheet and tab.key == active_sheet.key %}is-active{% endif %}"
+                        href="{% url 'monitoring:table' %}?reference_date={{ reference_date|date:'Y-m-d' }}&history_days={{ history_days }}&sheet={{ tab.key }}"
+                    >
+                        {{ tab.label }}
+                    </a>
+                {% endfor %}
+            </nav>
+            <button class="table-day-nav-button table-sheets-nav-button" type="button" data-sheets-step="1" aria-label="Следующий лист">›</button>
+        </div>
+    {% endif %}
+
+    {% if active_sheet %}
+        <div class="table-wrap monitoring-grid-wrap table-primary-wrap" data-note-update-url="{{ table_note_update_url }}" data-table-workspace>
+            <table class="monitoring-grid-table {% if active_sheet.kind == 'product' %}is-product{% else %}is-dashboard{% endif %}">
+                <tbody>
+                    {% for row in active_sheet.rows %}
+                        <tr>
+                            {% for cell in row.cells %}
+                                <td
+                                    {% if cell.colspan and cell.colspan > 1 %}colspan="{{ cell.colspan }}"{% endif %}
+                                    data-row="{{ cell.row_index }}"
+                                    data-col="{{ cell.col_index }}"
+                                    data-block="{{ cell.block_index }}"
+                                    data-in-block-col="{{ cell.in_block_col }}"
+                                    class="{% if cell.is_gap_col %}is-gap-col{% endif %}{% if cell.is_block_start %} is-block-start{% endif %}{% if cell.is_spacer_col %} is-spacer-col{% endif %}{% if cell.is_label_col %} is-label-col{% endif %}{% if cell.is_repeat_label_col %} is-repeat-label-col{% endif %}{% if cell.control %} is-control-cell{% endif %}{% if cell.is_comment_span %} is-comment-span{% endif %}{% if cell.is_stock_span %} is-stock-span{% endif %}{% if cell.is_input_span %} is-input-span{% endif %}{% if cell.is_centered_value_span %} is-centered-value-span{% endif %}"
+                                >
+                                    {% if cell.control and cell.control.type == "stock_popup" %}
+                                        <button
+                                            type="button"
+                                            class="grid-stock-trigger"
+                                            data-stock-popup-button
+                                            data-modal-open="table-modal-stocks"
+                                            data-stock-date="{{ cell.control.stock_date_label }}"
+                                            data-stock-total="{{ cell.control.total }}"
+                                            data-stock-rows="{{ cell.control.rows_json|escapejs }}"
+                                        >
+                                            <span class="grid-stock-trigger-title">Остатки по складам</span>
+                                            <span class="grid-stock-trigger-meta">
+                                                {% if cell.control.has_rows %}
+                                                    Итого: {{ cell.control.total }} шт. Нажмите для деталей
+                                                {% else %}
+                                                    Нет данных по складам на эту дату
+                                                {% endif %}
+                                            </span>
+                                        </button>
+                                    {% elif cell.control and cell.control.type == "bool" %}
+                                        <div
+                                            class="grid-choice"
+                                            data-note-control="bool"
+                                            data-product-id="{{ cell.control.product_id }}"
+                                            data-note-date="{{ cell.control.note_date }}"
+                                            data-field="{{ cell.control.field }}"
+                                        >
+                                            <button type="button" class="grid-choice-btn {% if cell.control.value %}is-active{% endif %}" data-value="true">Да</button>
+                                            <button type="button" class="grid-choice-btn {% if not cell.control.value %}is-active{% endif %}" data-value="false">Нет</button>
+                                        </div>
+                                    {% elif cell.control and cell.control.type == "select" %}
+                                        <select
+                                            class="grid-select"
+                                            data-note-control="select"
+                                            data-product-id="{{ cell.control.product_id }}"
+                                            data-note-date="{{ cell.control.note_date }}"
+                                            data-field="{{ cell.control.field }}"
+                                        >
+                                            {% for option in cell.control.options %}
+                                                <option value="{{ option }}" {% if option == cell.control.value %}selected{% endif %}>{{ option }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    {% elif cell.control and cell.control.type == "input" %}
+                                        <input
+                                            class="grid-input{% if cell.control.centered %} grid-input-centered{% endif %}"
+                                            type="text"
+                                            inputmode="decimal"
+                                            data-note-control="input"
+                                            data-product-id="{{ cell.control.product_id }}"
+                                            data-note-date="{{ cell.control.note_date }}"
+                                            data-field="{{ cell.control.field }}"
+                                            value="{{ cell.control.value|default_if_none:'' }}"
+                                            placeholder="{{ cell.control.placeholder|default_if_none:'' }}"
+                                        >
+                                    {% elif cell.control and cell.control.type == "textarea" %}
+                                        <textarea
+                                            class="grid-input grid-input-textarea"
+                                            rows="2"
+                                            data-note-control="text"
+                                            data-product-id="{{ cell.control.product_id }}"
+                                            data-note-date="{{ cell.control.note_date }}"
+                                            data-field="{{ cell.control.field }}"
+                                            placeholder="{{ cell.control.placeholder|default_if_none:'' }}"
+                                        >{{ cell.control.value|default_if_none:"" }}</textarea>
+                                    {% else %}
+                                        {% if cell.is_label_col and cell.value == "Прибыль" %}
+                                            <span class="grid-row-label" data-row-label>
+                                                <span class="grid-row-label-text">Прибыль</span>
+                                                <span class="help-popover grid-row-help">
+                                                    <button class="help-trigger" type="button" aria-label="Пояснение к метрике Прибыль" title="Без налогов, костов вне ВБ и возвратов.">i</button>
+                                                    <span class="help-tooltip" role="tooltip">Без налогов, костов вне ВБ и возвратов.</span>
+                                                </span>
+                                            </span>
+                                        {% else %}
+                                            <span {% if cell.is_label_col %}data-row-label{% endif %}>{{ cell.value|default_if_none:"" }}</span>
+                                        {% endif %}
+                                    {% endif %}
+                                </td>
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if active_sheet.kind == "product" and active_sheet.block_dates %}
+            <div class="table-day-nav" data-day-nav>
+                <button class="table-day-nav-button" type="button" data-day-step="-1" aria-label="Предыдущая дата">‹</button>
+                <div class="table-day-nav-track" data-day-track>
+                    {% for block_date in active_sheet.block_dates %}
+                        <button class="table-day-chip {% if forloop.last %}is-current{% endif %}" type="button" data-day-index="{{ forloop.counter0 }}">
+                            {{ block_date|date:"d.m" }}
+                        </button>
+                    {% endfor %}
+                </div>
+                <button class="table-day-nav-button" type="button" data-day-step="1" aria-label="Следующая дата">›</button>
+            </div>
+            <p class="table-day-meta" data-day-meta aria-live="polite"></p>
+        {% endif %}
+    {% else %}
+        <div class="empty-state">
+            <strong>Листы ещё не сформированы</strong>
+            <p>Добавьте товары и выполните синхронизацию, после чего таблица появится здесь.</p>
+        </div>
+    {% endif %}
+</section>
+
+<section class="table-modal" id="table-modal-sync" data-table-modal hidden>
+    <div class="table-modal-backdrop" data-modal-close></div>
+    <article class="table-modal-dialog panel panel-form" role="dialog" aria-modal="true" aria-labelledby="table-modal-sync-title">
+        <div class="table-modal-head">
+            <h2 id="table-modal-sync-title">Синхронизация</h2>
+            <button class="secondary-button table-modal-close" type="button" data-modal-close>Закрыть</button>
+        </div>
+        <p class="muted table-modal-copy">Обновляет базу и таблицу мониторинга за выбранный период.</p>
+        {% include "monitoring/includes/sync_indicator.html" %}
+        <form method="post" action="{% url 'monitoring:sync_all' %}" class="stack compact-form table-modal-form">
+            {% csrf_token %}
+            {% for field in sync_form %}
+                {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+            {% endfor %}
+            <div class="table-modal-actions">
+                <button class="secondary-button" type="button" data-modal-close>Отмена</button>
+                <button class="primary-button" type="submit" data-sync-submit>Запустить</button>
+            </div>
+        </form>
+    </article>
+</section>
+
+<section class="table-modal" id="table-modal-product" data-table-modal hidden>
+    <div class="table-modal-backdrop" data-modal-close></div>
+    <article class="table-modal-dialog panel panel-form" role="dialog" aria-modal="true" aria-labelledby="table-modal-product-title">
+        <div class="table-modal-head">
+            <h2 id="table-modal-product-title">Добавить товар</h2>
+            <button class="secondary-button table-modal-close" type="button" data-modal-close>Закрыть</button>
+        </div>
+        <p class="muted table-modal-copy">Новый SKU появится в рабочей таблице после следующего обновления.</p>
+        <form method="post" action="{% url 'monitoring:add_product' %}" class="stack compact-form table-modal-form">
+            {% csrf_token %}
+            {% for field in product_form %}
+                {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+            {% endfor %}
+            <div class="table-modal-actions">
+                <button class="secondary-button" type="button" data-modal-close>Отмена</button>
+                <button class="primary-button" type="submit">Добавить товар</button>
+            </div>
+        </form>
+    </article>
+</section>
+
+<section class="table-modal" id="table-modal-campaign" data-table-modal hidden>
+    <div class="table-modal-backdrop" data-modal-close></div>
+    <article class="table-modal-dialog panel panel-form" role="dialog" aria-modal="true" aria-labelledby="table-modal-campaign-title">
+        <div class="table-modal-head">
+            <h2 id="table-modal-campaign-title">Добавить кампанию</h2>
+            <button class="secondary-button table-modal-close" type="button" data-modal-close>Закрыть</button>
+        </div>
+        <p class="muted table-modal-copy">Привяжите РК к группе мониторинга и нужным товарам.</p>
+        <form method="post" action="{% url 'monitoring:add_campaign' %}" class="stack compact-form table-modal-form">
+            {% csrf_token %}
+            {% for field in campaign_form %}
+                {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+            {% endfor %}
+            <div class="table-modal-actions">
+                <button class="secondary-button" type="button" data-modal-close>Отмена</button>
+                <button class="primary-button" type="submit">Добавить РК</button>
+            </div>
+        </form>
+    </article>
+</section>
+
+<section class="table-modal" id="table-modal-stocks" data-table-modal hidden>
+    <div class="table-modal-backdrop" data-modal-close></div>
+    <article class="table-modal-dialog panel panel-form" role="dialog" aria-modal="true" aria-labelledby="table-modal-stocks-title">
+        <div class="table-modal-head">
+            <h2 id="table-modal-stocks-title">Остатки по складам</h2>
+            <button class="secondary-button table-modal-close" type="button" data-modal-close>Закрыть</button>
+        </div>
+        <p class="muted table-modal-copy" data-stocks-modal-meta></p>
+        <div class="table-stocks-modal-scroll">
+            <table class="table-stocks-modal-table">
+                <thead>
+                    <tr>
+                        <th>Склад</th>
+                        <th class="is-numeric">Остаток</th>
+                    </tr>
+                </thead>
+                <tbody data-stocks-modal-body>
+                    <tr>
+                        <td class="table-stocks-modal-empty" colspan="2">Нет данных</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </article>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="{% static 'monitoring/sync_status.js' %}" defer></script>
+    <script src="{% static 'monitoring/table_grid_controls.js' %}" defer></script>
+{% endblock %}

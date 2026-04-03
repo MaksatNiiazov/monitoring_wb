@@ -15,8 +15,6 @@
   - история по датам;
   - блоки собраны по шаблону мониторинга;
   - расчётные ячейки выгружаются формулами;
-- запись той же книги в Google Sheets;
-- демо-режим и CSV-шаблоны для сбора данных от заказчика.
 
 ## Быстрый старт
 
@@ -24,7 +22,6 @@
 python -m pip install -r requirements.txt
 python manage.py migrate
 python manage.py createsuperuser
-python manage.py seed_demo_data
 python manage.py runserver
 ```
 
@@ -37,20 +34,8 @@ python manage.py runserver
 - `WB_ANALYTICS_API_TOKEN` — доступ к аналитике и остаткам.
 - `WB_PROMOTION_API_TOKEN` — доступ к рекламным кампаниям.
 - `WB_APP_TYPE_ZONE_MAP` — маппинг `appType` в зоны мониторинга.
-- `GOOGLE_SERVICE_ACCOUNT_FILE` или `GOOGLE_SERVICE_ACCOUNT_JSON` — доступ к Google Sheets.
 
 `.env` подхватывается автоматически при старте проекта.
-
-## Google Sheets
-
-Чтобы запись в Google Sheets работала:
-
-1. Создайте service account в Google Cloud.
-2. Включите Google Sheets API.
-3. Сохраните JSON-ключ.
-4. Укажите путь в `GOOGLE_SERVICE_ACCOUNT_FILE` или вставьте содержимое в `GOOGLE_SERVICE_ACCOUNT_JSON`.
-5. Выдайте доступ к целевой таблице для email service account.
-6. На странице `/settings/` включите Google Sheets и заполните `ID Google таблицы`.
 
 ## Команды
 
@@ -59,8 +44,6 @@ python manage.py sync_wb_data
 python manage.py sync_wb_data --reference-date 2026-03-17
 python manage.py sync_wb_data --product-id 1
 python manage.py export_monitoring_workbook --reference-date 2026-03-17 --history-days 14
-python manage.py sync_google_sheets --reference-date 2026-03-17 --history-days 14
-python manage.py seed_demo_data
 python manage.py run_daily_sync_loop
 ```
 
@@ -72,11 +55,10 @@ python manage.py run_daily_sync_loop
 ## Веб-интерфейс
 
 - `/` — дашборд с аналитикой по товарам, товарами, РК и запуском синхронизации.
-- `/settings/` — подготовка проекта, настройки, выгрузка книги мониторинга и запуск записи в Google Sheets.
+- `/settings/` — подготовка проекта, настройки и выгрузка книги мониторинга.
 - `/products/<id>/` — карточка товара с деталями, заметками и CSV-экспортом однодневного блока.
 
 ## Ограничения текущей версии
 
 - автоматическая группировка кампаний по мониторинговым группам остаётся эвристической и может потребовать ручной корректировки;
 - часть полей обзора (`СПП`, цены, комментарии, действия`) пока зависит от ежедневных заметок, если их нет в WB API;
-- Google Sheets используется как внешний контур выгрузки, источник истины внутри проекта — БД.

@@ -100,6 +100,4 @@ class MonitoringSettingsAdmin(admin.ModelAdmin):
         "sync_hour",
         "sync_minute",
         "overwrite_within_day",
-        "google_sheets_enabled",
-        "google_sheets_auto_sync",
     )

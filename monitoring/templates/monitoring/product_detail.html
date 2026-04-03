@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% load monitoring_extras %}
+{% load static monitoring_extras %}
 
 {% block title %}{{ product.title|default:product.nm_id }} | Мониторинг WB{% endblock %}
 
 {% block content %}
 <nav class="breadcrumb" aria-label="Навигация">
     <ol>
-        <li><a href="{% url 'monitoring:dashboard' %}">Workspace</a></li>
-        <li><a href="{% url 'monitoring:dashboard' %}">Дашборд</a></li>
+        <li><a href="{% url 'monitoring:table' %}">Workspace</a></li>
+        <li><a href="{% url 'monitoring:products' %}">Товары</a></li>
         <li aria-current="page">{{ product.nm_id }}</li>
     </ol>
 </nav>
@@ -74,9 +74,16 @@
     </section>
 {% endif %}
 
-<section class="layout-grid detail-grid">
-    <div class="stack">
-        <article class="panel panel-spacious">
+<section class="layout-grid detail-grid detail-tabs-shell" data-detail-tabs-shell data-active-tab="overview">
+    <nav class="segmented-control detail-tabs-nav" role="tablist" aria-label="Разделы карточки товара">
+        <button type="button" class="segmented-button is-active" role="tab" aria-selected="true" data-detail-tab-trigger="overview">Обзор</button>
+        <button type="button" class="segmented-button" role="tab" aria-selected="false" data-detail-tab-trigger="ads">Реклама</button>
+        <button type="button" class="segmented-button" role="tab" aria-selected="false" data-detail-tab-trigger="stock">Склады и история</button>
+        <button type="button" class="segmented-button" role="tab" aria-selected="false" data-detail-tab-trigger="settings">Настройки</button>
+    </nav>
+
+    <div class="stack detail-stack-main" data-detail-stack="main">
+        <article class="panel panel-spacious detail-tab-panel" data-detail-tab-panel="overview">
             <div class="panel-head">
                 <div>
                     <h2>Сводка</h2>
@@ -122,7 +129,7 @@
             </div>
         </article>
 
-        <article class="panel">
+        <article class="panel detail-tab-panel" data-detail-tab-panel="overview">
             <div class="panel-head">
                 <div>
                     <h2>Быстрые инсайты</h2>
@@ -149,7 +156,7 @@
             </div>
         </article>
 
-        <article class="panel">
+        <article class="panel detail-tab-panel" data-detail-tab-panel="ads">
             <div class="panel-head">
                 <div>
                     <h2>Срез по зонам</h2>
@@ -176,7 +183,7 @@
             </div>
         </article>
 
-        <article class="panel panel-spacious">
+        <article class="panel panel-spacious detail-tab-panel" data-detail-tab-panel="ads">
             <div class="panel-head">
                 <div>
                     <h2>Матрица рекламных зон</h2>
@@ -211,9 +218,10 @@
                             </label>
                         {% endif %}
                     {% endfor %}
-                    <button class="primary-button" type="submit">Обновить товар</button>
+                    <button class="primary-button" type="submit" data-sync-submit>Обновить товар</button>
                 </form>
             </div>
+            {% include "monitoring/includes/sync_indicator.html" %}
             <div class="table-wrap">
                 <table class="matrix-table">
                     <thead>
@@ -314,7 +322,7 @@
             </div>
         </article>
 
-        <article class="panel">
+        <article class="panel detail-tab-panel" data-detail-tab-panel="stock">
             <h2>Остатки по складам</h2>
             <div class="table-wrap">
                 <table class="data-table">
@@ -351,7 +359,7 @@
             </div>
         </article>
 
-        <article class="panel">
+        <article class="panel detail-tab-panel" data-detail-tab-panel="stock">
             <h2>История по дням</h2>
             <div class="table-wrap">
                 <table class="data-table">
@@ -391,8 +399,8 @@
         </article>
     </div>
 
-    <aside class="stack">
-        <article class="panel panel-emphasis">
+    <aside class="stack detail-stack-side" data-detail-stack="side">
+        <article class="panel panel-emphasis detail-tab-panel" data-detail-tab-panel="overview">
             <h2>Рабочий контур</h2>
             <div class="status-grid compact-status-grid">
                 <article class="status-card neutral">
@@ -413,7 +421,7 @@
             </div>
         </article>
 
-        <article class="panel">
+        <article class="panel detail-tab-panel" data-detail-tab-panel="ads">
             <div class="panel-head">
                 <div>
                     <h2>Связанные кампании</h2>
@@ -436,7 +444,7 @@
             </div>
         </article>
 
-        <article class="panel">
+        <article class="panel detail-tab-panel" data-detail-tab-panel="stock">
             <div class="panel-head">
                 <div>
                     <h2>История экономики</h2>
@@ -476,7 +484,7 @@
             </div>
         </article>
 
-        <article class="panel panel-form">
+        <article class="panel panel-form detail-tab-panel" data-detail-tab-panel="settings">
             <h2>Настройки товара</h2>
             <p class="panel-copy">Экономика, выкуп и служебные параметры, которые участвуют в расчётах книги и детальных отчётов.</p>
             <form method="post" action="{% url 'monitoring:update_product_settings' product.pk %}" class="stack compact-form">
@@ -492,7 +500,7 @@
             </form>
         </article>
 
-        <article class="panel panel-form">
+        <article class="panel panel-form detail-tab-panel" data-detail-tab-panel="settings">
             <h2>Ежедневный обзор</h2>
             <p class="panel-copy">Ручной слой для полей, которые не приходят напрямую из WB API или требуют бизнес-комментария команды.</p>
             <form method="post" action="{% url 'monitoring:update_daily_note' product.pk %}" class="stack compact-form">
@@ -513,4 +521,9 @@
         </article>
     </aside>
 </section>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="{% static 'monitoring/sync_status.js' %}" defer></script>
+    <script src="{% static 'monitoring/product_tabs.js' %}" defer></script>
 {% endblock %}

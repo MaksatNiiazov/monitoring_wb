@@ -1,0 +1,997 @@
+﻿(function () {
+    function getCookie(name) {
+        const cookieValue = document.cookie
+            .split(";")
+            .map((chunk) => chunk.trim())
+            .find((chunk) => chunk.startsWith(`${name}=`));
+        if (!cookieValue) {
+            return "";
+        }
+        return decodeURIComponent(cookieValue.split("=").slice(1).join("="));
+    }
+
+    function storageKey(suffix) {
+        return `wb-table-${window.location.pathname}-${suffix}`;
+    }
+
+    async function saveCell(updateUrl, payload) {
+        const response = await fetch(updateUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-CSRFToken": getCookie("csrftoken"),
+            },
+            body: JSON.stringify(payload),
+            cache: "no-store",
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) {
+            const detail = data && data.detail ? data.detail : `HTTP ${response.status}`;
+            throw new Error(detail);
+        }
+        return data;
+    }
+
+    function parseNumericValue(rawValue) {
+        if (rawValue === null || typeof rawValue === "undefined") {
+            return null;
+        }
+        const text = String(rawValue).trim();
+        if (!text || text === "-" || text === "—") {
+            return null;
+        }
+        const cleaned = text
+            .replace(/\u00a0/g, "")
+            .replace(/\s/g, "")
+            .replace(/руб\.?/gi, "")
+            .replace(/₽/g, "")
+            .replace(/%/g, "")
+            .replace(/,/g, ".");
+        const value = Number.parseFloat(cleaned);
+        return Number.isFinite(value) ? value : null;
+    }
+
+    function formatDecimalValue(value) {
+        if (!Number.isFinite(value)) {
+            return "";
+        }
+        let text = value.toFixed(2);
+        text = text.replace(/\.?0+$/, "");
+        return text.replace(".", ",");
+    }
+
+    function formatPercentValue(value) {
+        if (!Number.isFinite(value)) {
+            return "";
+        }
+        return `${formatDecimalValue(value)}%`;
+    }
+
+    function initLiveCalculations(tableWrap) {
+        const table = tableWrap.querySelector("table");
+        if (!table) {
+            return;
+        }
+
+        const ROW = {
+            CLICKS: 10,
+            CARTS: 11,
+            CONVERSION_CART: 12,
+            ORDERS: 13,
+            CONVERSION_ORDER: 14,
+            ORDER_SUM: 15,
+            BUYOUTS: 16,
+            DRR_SALES: 20,
+            PROFIT: 21,
+            BUYOUT_PERCENT: 22,
+            UNIT_COST: 23,
+            LOGISTICS: 24,
+            STOCK_TOTAL: 27,
+            AVG_STOCK_DROP: 31,
+            SELLER_PRICE: 38,
+        };
+        const COL = {
+            OVERALL: 7,
+            INPUT_MAIN: 2,
+            SELLER_PRICE: 6,
+        };
+
+        const getCell = (row, block, inBlockCol) =>
+            table.querySelector(`td[data-row="${row}"][data-block="${block}"][data-in-block-col="${inBlockCol}"]`);
+
+        const readNumber = (row, block, inBlockCol) => {
+            const cell = getCell(row, block, inBlockCol);
+            if (!cell) {
+                return null;
+            }
+            const input = cell.querySelector("input");
+            if (input) {
+                return parseNumericValue(input.value);
+            }
+            const span = cell.querySelector("span");
+            return parseNumericValue(span ? span.textContent : cell.textContent);
+        };
+
+        const setCellText = (row, block, inBlockCol, value) => {
+            const cell = getCell(row, block, inBlockCol);
+            if (!cell) {
+                return;
+            }
+            const span = cell.querySelector("span");
+            if (span) {
+                span.textContent = value;
+                return;
+            }
+            cell.textContent = value;
+        };
+
+        const resolveBlocksCount = () => {
+            let max = -1;
+            table.querySelectorAll("td[data-block]").forEach((cell) => {
+                const raw = Number.parseInt(cell.dataset.block || "", 10);
+                if (Number.isFinite(raw)) {
+                    max = Math.max(max, raw);
+                }
+            });
+            return max + 1;
+        };
+
+        const recalcBlock = (blockIndex) => {
+            const clicks = readNumber(ROW.CLICKS, blockIndex, COL.OVERALL);
+            const carts = readNumber(ROW.CARTS, blockIndex, COL.OVERALL);
+            const orders = readNumber(ROW.ORDERS, blockIndex, COL.OVERALL);
+            const orderSum = readNumber(ROW.ORDER_SUM, blockIndex, COL.OVERALL);
+            const spend = readNumber(5, blockIndex, COL.OVERALL);
+
+            const conversionCart = clicks ? (carts || 0) * 100 / clicks : 0;
+            setCellText(ROW.CONVERSION_CART, blockIndex, COL.OVERALL, formatPercentValue(conversionCart));
+
+            const conversionOrder = carts ? (orders || 0) * 100 / carts : 0;
+            setCellText(ROW.CONVERSION_ORDER, blockIndex, COL.OVERALL, formatPercentValue(conversionOrder));
+
+            const buyoutPercent = readNumber(ROW.BUYOUT_PERCENT, blockIndex, COL.INPUT_MAIN) || 0;
+            const buyoutFraction = Math.abs(buyoutPercent) > 1 ? buyoutPercent / 100 : buyoutPercent;
+            const buyouts = orderSum && buyoutFraction ? orderSum * buyoutFraction : 0;
+            setCellText(ROW.BUYOUTS, blockIndex, COL.OVERALL, formatDecimalValue(buyouts));
+
+            const drrSales = buyouts ? (spend || 0) * 100 / buyouts : 0;
+            setCellText(ROW.DRR_SALES, blockIndex, COL.OVERALL, formatDecimalValue(drrSales));
+
+            const sellerPrice = readNumber(ROW.SELLER_PRICE, blockIndex, COL.SELLER_PRICE) || 0;
+            const unitCost = readNumber(ROW.UNIT_COST, blockIndex, COL.INPUT_MAIN) || 0;
+            const logistics = readNumber(ROW.LOGISTICS, blockIndex, COL.INPUT_MAIN) || 0;
+            const totalOrders = orders || 0;
+
+            let profit = 0;
+            if (sellerPrice && buyoutFraction > 0) {
+                const logisticsAdjustment = logistics / buyoutFraction - 50;
+                const margin =
+                    sellerPrice -
+                    unitCost -
+                    (sellerPrice * drrSales) / 100 -
+                    sellerPrice * 0.25 -
+                    logisticsAdjustment;
+                profit = margin * totalOrders * buyoutFraction;
+            }
+            setCellText(ROW.PROFIT, blockIndex, COL.INPUT_MAIN, formatDecimalValue(profit));
+        };
+
+        const recalcAvgStockDrop = () => {
+            const blocksCount = resolveBlocksCount();
+            for (let blockIndex = 0; blockIndex < blocksCount; blockIndex += 1) {
+                const values = [];
+                for (let offset = 0; offset < 5; offset += 1) {
+                    const sourceIndex = blockIndex - offset;
+                    if (sourceIndex < 0) {
+                        break;
+                    }
+                    const value = readNumber(ROW.STOCK_TOTAL, sourceIndex, COL.OVERALL);
+                    if (value === null) {
+                        continue;
+                    }
+                    values.push(value);
+                }
+                if (values.length < 2) {
+                    setCellText(ROW.AVG_STOCK_DROP, blockIndex, COL.OVERALL, "");
+                    continue;
+                }
+                let sum = 0;
+                for (let index = 0; index < values.length - 1; index += 1) {
+                    sum += values[index + 1] - values[index];
+                }
+                setCellText(
+                    ROW.AVG_STOCK_DROP,
+                    blockIndex,
+                    COL.OVERALL,
+                    formatDecimalValue(sum / (values.length - 1))
+                );
+            }
+        };
+
+        const recalcAll = () => {
+            const blocksCount = resolveBlocksCount();
+            for (let blockIndex = 0; blockIndex < blocksCount; blockIndex += 1) {
+                recalcBlock(blockIndex);
+            }
+            recalcAvgStockDrop();
+        };
+
+        tableWrap._recalculateBlock = recalcBlock;
+        tableWrap._recalculateAllBlocks = recalcAll;
+
+        recalcAll();
+    }
+
+    function setBoolPending(wrapper, pending) {
+        wrapper.classList.toggle("is-pending", pending);
+        wrapper.querySelectorAll(".grid-choice-btn").forEach((button) => {
+            button.disabled = pending;
+        });
+    }
+
+    function setBoolActive(wrapper, boolValue) {
+        wrapper.querySelectorAll(".grid-choice-btn").forEach((button) => {
+            const value = button.dataset.value === "true";
+            button.classList.toggle("is-active", value === boolValue);
+        });
+    }
+
+    function setSelectPending(select, pending) {
+        select.classList.toggle("is-pending", pending);
+        select.disabled = pending;
+    }
+
+    function setInputPending(input, pending) {
+        input.classList.toggle("is-pending", pending);
+        input.disabled = pending;
+    }
+
+    function initInlineControls(tableWrap, updateUrl) {
+        const statusNode = document.querySelector("[data-inline-status]");
+        let statusTimer = 0;
+        const showStatus = (message, tone) => {
+            if (!statusNode) {
+                return;
+            }
+            window.clearTimeout(statusTimer);
+            statusNode.hidden = false;
+            statusNode.dataset.tone = tone || "neutral";
+            statusNode.textContent = message;
+            if (tone !== "error") {
+                statusTimer = window.setTimeout(() => {
+                    statusNode.hidden = true;
+                    statusNode.dataset.tone = "";
+                    statusNode.textContent = "";
+                }, 1700);
+            }
+        };
+
+        tableWrap.querySelectorAll("[data-note-control='select']").forEach((select) => {
+            select.dataset.previousValue = select.value;
+        });
+        tableWrap.querySelectorAll("[data-note-control='input'], [data-note-control='text']").forEach((input) => {
+            input.dataset.previousValue = input.value;
+        });
+
+        const commitInput = async (input) => {
+            if (input.classList.contains("is-pending")) {
+                return;
+            }
+            const previous = input.dataset.previousValue ?? "";
+            const next = input.value;
+            if (next === previous) {
+                return;
+            }
+            const payload = {
+                product_id: input.dataset.productId,
+                note_date: input.dataset.noteDate,
+                field: input.dataset.field,
+                value: next,
+            };
+            try {
+                setInputPending(input, true);
+                const result = await saveCell(updateUrl, payload);
+                const serverValue = result && typeof result.value !== "undefined" ? String(result.value ?? "") : next;
+                input.value = serverValue;
+                input.dataset.previousValue = serverValue;
+                showStatus("Сохранено", "success");
+                const cell = input.closest("td[data-block]");
+                if (cell && typeof tableWrap._recalculateBlock === "function") {
+                    const blockIndex = Number.parseInt(cell.dataset.block || "", 10);
+                    if (Number.isFinite(blockIndex)) {
+                        tableWrap._recalculateBlock(blockIndex);
+                    }
+                }
+            } catch (error) {
+                input.value = previous;
+                showStatus(`Ошибка сохранения: ${error.message}`, "error");
+            } finally {
+                setInputPending(input, false);
+            }
+        };
+
+        tableWrap.addEventListener("click", async (event) => {
+            const button = event.target.closest(".grid-choice-btn");
+            if (!button) {
+                return;
+            }
+            const wrapper = button.closest("[data-note-control='bool']");
+            if (!wrapper || wrapper.classList.contains("is-pending")) {
+                return;
+            }
+            const activeButton = wrapper.querySelector(".grid-choice-btn.is-active");
+            const previousValue = activeButton ? activeButton.dataset.value === "true" : false;
+            const payload = {
+                product_id: wrapper.dataset.productId,
+                note_date: wrapper.dataset.noteDate,
+                field: wrapper.dataset.field,
+                value: button.dataset.value === "true",
+            };
+            if (payload.value === previousValue) {
+                return;
+            }
+            try {
+                setBoolPending(wrapper, true);
+                await saveCell(updateUrl, payload);
+                setBoolActive(wrapper, payload.value);
+                showStatus("Сохранено", "success");
+            } catch (error) {
+                setBoolActive(wrapper, previousValue);
+                showStatus(`Ошибка сохранения: ${error.message}`, "error");
+            } finally {
+                setBoolPending(wrapper, false);
+            }
+        });
+
+        tableWrap.addEventListener("change", async (event) => {
+            const select = event.target.closest("[data-note-control='select']");
+            if (select && !select.classList.contains("is-pending")) {
+                const previous = select.dataset.previousValue ?? select.value;
+                const payload = {
+                    product_id: select.dataset.productId,
+                    note_date: select.dataset.noteDate,
+                    field: select.dataset.field,
+                    value: select.value,
+                };
+                try {
+                    setSelectPending(select, true);
+                    const result = await saveCell(updateUrl, payload);
+                    const serverValue = result && typeof result.value !== "undefined" ? String(result.value ?? "") : select.value;
+                    select.dataset.previousValue = serverValue;
+                    showStatus("Сохранено", "success");
+                } catch (error) {
+                    select.value = previous;
+                    showStatus(`Ошибка сохранения: ${error.message}`, "error");
+                } finally {
+                    setSelectPending(select, false);
+                }
+                return;
+            }
+
+            const input = event.target.closest("[data-note-control='input'], [data-note-control='text']");
+            if (!input) {
+                return;
+            }
+            await commitInput(input);
+        });
+
+        tableWrap.addEventListener("input", (event) => {
+            const input = event.target.closest("[data-note-control='input']");
+            if (!input) {
+                return;
+            }
+            const cell = input.closest("td[data-block]");
+            if (cell && typeof tableWrap._recalculateBlock === "function") {
+                const blockIndex = Number.parseInt(cell.dataset.block || "", 10);
+                if (Number.isFinite(blockIndex)) {
+                    tableWrap._recalculateBlock(blockIndex);
+                }
+            }
+        });
+
+        tableWrap.addEventListener("keydown", (event) => {
+            const input = event.target.closest("[data-note-control='input']");
+            if (!input) {
+                return;
+            }
+            if (event.key === "Enter") {
+                event.preventDefault();
+                input.blur();
+            }
+        });
+
+        tableWrap.addEventListener(
+            "blur",
+            async (event) => {
+                const input = event.target.closest("[data-note-control='input'], [data-note-control='text']");
+                if (!input) {
+                    return;
+                }
+                await commitInput(input);
+            },
+            true
+        );
+    }
+
+    function initDensityToggle(tableWrap) {
+        const button = document.querySelector("[data-table-action='toggle-density']");
+        if (!button) {
+            return;
+        }
+        const key = storageKey("density");
+        const apply = (compact) => {
+            tableWrap.classList.toggle("is-compact", compact);
+            button.textContent = compact ? "Обычный режим" : "Компактный режим";
+        };
+        const saved = window.localStorage.getItem(key) === "compact";
+        apply(saved);
+        button.addEventListener("click", () => {
+            const next = !tableWrap.classList.contains("is-compact");
+            apply(next);
+            window.localStorage.setItem(key, next ? "compact" : "normal");
+        });
+    }
+
+    function initFullscreenToggle(tableWrap) {
+        const button = document.querySelector("[data-table-action='fullscreen']");
+        if (!button) {
+            return;
+        }
+        const key = storageKey("fullscreen");
+        const apply = (enabled) => {
+            document.body.classList.toggle("is-table-fullscreen", enabled);
+            button.textContent = enabled ? "Выйти из полноэкранного" : "Режим на весь экран";
+            button.setAttribute("aria-pressed", enabled ? "true" : "false");
+            if (enabled) {
+                tableWrap.scrollIntoView({ block: "start", inline: "nearest" });
+            }
+        };
+        const saved = window.localStorage.getItem(key) === "fullscreen";
+        apply(saved);
+        button.addEventListener("click", () => {
+            const next = !document.body.classList.contains("is-table-fullscreen");
+            apply(next);
+            window.localStorage.setItem(key, next ? "fullscreen" : "normal");
+        });
+        window.addEventListener("keydown", (event) => {
+            if (event.key === "Escape" && document.body.classList.contains("is-table-fullscreen")) {
+                apply(false);
+                window.localStorage.setItem(key, "normal");
+            }
+        });
+    }
+
+    function initActionModals() {
+        const modals = Array.from(document.querySelectorAll("[data-table-modal]"));
+        if (!modals.length) {
+            return;
+        }
+        const stocksModal = document.getElementById("table-modal-stocks");
+        const stocksModalMeta = stocksModal ? stocksModal.querySelector("[data-stocks-modal-meta]") : null;
+        const stocksModalBody = stocksModal ? stocksModal.querySelector("[data-stocks-modal-body]") : null;
+
+        const focusByModal = new WeakMap();
+        const openedModals = () => modals.filter((modal) => !modal.hidden);
+        const syncBodyState = () => {
+            document.body.classList.toggle("is-modal-open", openedModals().length > 0);
+        };
+
+        const parseStockRows = (rawRows) => {
+            if (!rawRows) {
+                return [];
+            }
+            try {
+                const parsed = JSON.parse(rawRows);
+                if (!Array.isArray(parsed)) {
+                    return [];
+                }
+                return parsed
+                    .map((row) => {
+                        const warehouse = String(row && row.warehouse ? row.warehouse : "").trim();
+                        const stockValue = Number.parseInt(String(row && row.stock ? row.stock : "0"), 10);
+                        if (!warehouse) {
+                            return null;
+                        }
+                        return {
+                            warehouse,
+                            stock: Number.isFinite(stockValue) ? stockValue : 0,
+                        };
+                    })
+                    .filter((row) => Boolean(row));
+            } catch (error) {
+                return [];
+            }
+        };
+
+        const hydrateStocksModal = (trigger) => {
+            if (!stocksModal || !stocksModalMeta || !stocksModalBody || !trigger) {
+                return;
+            }
+            const rows = parseStockRows(trigger.getAttribute("data-stock-rows") || "[]");
+            const dateLabel = String(trigger.getAttribute("data-stock-date") || "").trim();
+            const totalValue = Number.parseInt(String(trigger.getAttribute("data-stock-total") || "0"), 10);
+            const totalLabel = Number.isFinite(totalValue) ? totalValue.toLocaleString("ru-RU") : "0";
+            stocksModalMeta.textContent = dateLabel
+                ? `Срез на ${dateLabel}. Итого по складам: ${totalLabel} шт.`
+                : `Итого по складам: ${totalLabel} шт.`;
+            stocksModalBody.innerHTML = "";
+
+            if (!rows.length) {
+                const emptyRow = document.createElement("tr");
+                const emptyCell = document.createElement("td");
+                emptyCell.colSpan = 2;
+                emptyCell.className = "table-stocks-modal-empty";
+                emptyCell.textContent = "Нет данных по складам для выбранной даты.";
+                emptyRow.appendChild(emptyCell);
+                stocksModalBody.appendChild(emptyRow);
+                return;
+            }
+
+            rows.forEach((row) => {
+                const tableRow = document.createElement("tr");
+                const warehouseCell = document.createElement("td");
+                warehouseCell.textContent = row.warehouse;
+                const stockCell = document.createElement("td");
+                stockCell.className = "is-numeric";
+                stockCell.textContent = row.stock.toLocaleString("ru-RU");
+                tableRow.appendChild(warehouseCell);
+                tableRow.appendChild(stockCell);
+                stocksModalBody.appendChild(tableRow);
+            });
+        };
+
+        const openModal = (modal, trigger) => {
+            if (!modal || !modal.hidden) {
+                return;
+            }
+            focusByModal.set(modal, trigger || document.activeElement);
+            modal.hidden = false;
+            syncBodyState();
+            const firstFocusable = modal.querySelector(
+                "[autofocus], input, select, textarea, button, a[href], [tabindex]:not([tabindex='-1'])"
+            );
+            if (firstFocusable && typeof firstFocusable.focus === "function") {
+                firstFocusable.focus();
+            }
+        };
+
+        const closeModal = (modal) => {
+            if (!modal || modal.hidden) {
+                return;
+            }
+            modal.hidden = true;
+            const focusTarget = focusByModal.get(modal);
+            if (focusTarget && typeof focusTarget.focus === "function") {
+                focusTarget.focus();
+            }
+            syncBodyState();
+        };
+
+        document.addEventListener("click", (event) => {
+            const openTrigger = event.target.closest("[data-modal-open]");
+            if (openTrigger) {
+                if (openTrigger.matches("[data-stock-popup-button]")) {
+                    hydrateStocksModal(openTrigger);
+                }
+                const targetId = openTrigger.dataset.modalOpen;
+                const modal = targetId ? document.getElementById(targetId) : null;
+                if (!modal || !modal.matches("[data-table-modal]")) {
+                    return;
+                }
+                event.preventDefault();
+                openModal(modal, openTrigger);
+                return;
+            }
+
+            const closeTrigger = event.target.closest("[data-modal-close]");
+            if (closeTrigger) {
+                const modal = closeTrigger.closest("[data-table-modal]");
+                if (!modal) {
+                    return;
+                }
+                event.preventDefault();
+                closeModal(modal);
+            }
+        });
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape") {
+                return;
+            }
+            const activeModal = openedModals().pop();
+            if (!activeModal) {
+                return;
+            }
+            event.preventDefault();
+            closeModal(activeModal);
+        });
+    }
+
+    function initToolbarFilters() {
+        const form = document.querySelector("[data-table-filter-form]");
+        if (!form) {
+            return;
+        }
+
+        const referenceInput = form.querySelector("input[name='reference_date']");
+        const historyInput = form.querySelector("input[name='history_days']");
+        const presetsRoot = document.querySelector("[data-table-filter-presets]");
+        const presetButtons = presetsRoot ? Array.from(presetsRoot.querySelectorAll(".table-preset-button")) : [];
+
+        const clampHistoryDays = () => {
+            if (!historyInput) {
+                return;
+            }
+            const fallback = 14;
+            const parsed = Number(historyInput.value || fallback);
+            const normalized = Number.isFinite(parsed) ? Math.max(1, Math.min(90, Math.round(parsed))) : fallback;
+            historyInput.value = String(normalized);
+        };
+
+        const updateActivePreset = () => {
+            if (!historyInput || !presetButtons.length) {
+                return;
+            }
+            const currentDays = String(historyInput.value || "").trim();
+            presetButtons.forEach((button) => {
+                if (!button.dataset.filterDays) {
+                    return;
+                }
+                button.classList.toggle("is-active", button.dataset.filterDays === currentDays);
+            });
+        };
+
+        if (historyInput) {
+            historyInput.addEventListener("change", () => {
+                clampHistoryDays();
+                updateActivePreset();
+            });
+            historyInput.addEventListener("blur", () => {
+                clampHistoryDays();
+                updateActivePreset();
+            });
+            clampHistoryDays();
+            updateActivePreset();
+        }
+
+        if (!presetButtons.length) {
+            return;
+        }
+
+        const todayValue = () => {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, "0");
+            const day = String(now.getDate()).padStart(2, "0");
+            return `${year}-${month}-${day}`;
+        };
+
+        presetButtons.forEach((button) => {
+            button.addEventListener("click", () => {
+                let changed = false;
+
+                if (button.dataset.filterDays && historyInput) {
+                    historyInput.value = button.dataset.filterDays;
+                    changed = true;
+                }
+                if (button.dataset.filterReference === "today" && referenceInput) {
+                    referenceInput.value = todayValue();
+                    changed = true;
+                }
+
+                clampHistoryDays();
+                updateActivePreset();
+
+                if (changed) {
+                    form.requestSubmit();
+                }
+            });
+        });
+    }
+
+    function initSheetsNavigation() {
+        const nav = document.querySelector("[data-sheets-nav]");
+        if (!nav) {
+            return;
+        }
+        const track = nav.querySelector("[data-sheets-track]");
+        if (!track) {
+            return;
+        }
+        const prevButton = nav.querySelector("[data-sheets-step='-1']");
+        const nextButton = nav.querySelector("[data-sheets-step='1']");
+
+        const maxScrollLeft = () => Math.max(0, track.scrollWidth - track.clientWidth);
+        const updateButtons = () => {
+            const max = maxScrollLeft();
+            if (prevButton) {
+                prevButton.disabled = track.scrollLeft <= 1;
+            }
+            if (nextButton) {
+                nextButton.disabled = track.scrollLeft >= max - 1;
+            }
+        };
+
+        const scrollTrack = (delta) => {
+            const step = Math.max(120, Math.round(track.clientWidth * 0.75));
+            track.scrollBy({ left: step * delta, behavior: "smooth" });
+        };
+
+        if (prevButton) {
+            prevButton.addEventListener("click", () => scrollTrack(-1));
+        }
+        if (nextButton) {
+            nextButton.addEventListener("click", () => scrollTrack(1));
+        }
+
+        let scrollRaf = 0;
+        track.addEventListener("scroll", () => {
+            if (scrollRaf) {
+                return;
+            }
+            scrollRaf = window.requestAnimationFrame(() => {
+                scrollRaf = 0;
+                updateButtons();
+            });
+        });
+
+        const activeTab = track.querySelector(".segmented-button.is-active");
+        if (activeTab) {
+            activeTab.scrollIntoView({ block: "nearest", inline: "center" });
+        }
+        updateButtons();
+    }
+
+    function initDayNavigation(tableWrap) {
+        const nav = document.querySelector("[data-day-nav]");
+        if (!nav) {
+            return;
+        }
+        const track = nav.querySelector("[data-day-track]") || nav;
+        const firstRow = tableWrap.querySelector("tbody tr");
+        if (!firstRow) {
+            return;
+        }
+        const chips = Array.from(track.querySelectorAll("[data-day-index]"));
+        if (!chips.length) {
+            return;
+        }
+        const prevButton = nav.querySelector("[data-day-step='-1']");
+        const nextButton = nav.querySelector("[data-day-step='1']");
+        const meta = document.querySelector("[data-day-meta]");
+
+        const dateAnchors = Array.from(firstRow.querySelectorAll("td")).filter((cell) =>
+            /^\d{2}\.\d{2}\.\d{4}$/.test((cell.textContent || "").trim())
+        );
+        const blockStartCells = Array.from(firstRow.querySelectorAll("td.is-block-start"));
+        const anchors =
+            dateAnchors.length >= chips.length
+                ? dateAnchors.slice(0, chips.length)
+                : blockStartCells.filter((cell) => cell.offsetWidth > 0);
+        if (anchors.length < chips.length) {
+            return;
+        }
+
+        const stickyLabel = firstRow.querySelector("td.is-label-col");
+        const stickySpacer = firstRow.querySelector("td.is-spacer-col");
+        const getStickyOffset = () =>
+            (stickyLabel ? stickyLabel.getBoundingClientRect().width : 0) +
+            (stickySpacer ? stickySpacer.getBoundingClientRect().width : 0);
+        const getAnchorLeft = (cell) => {
+            const wrapRect = tableWrap.getBoundingClientRect();
+            const cellRect = cell.getBoundingClientRect();
+            return cellRect.left - wrapRect.left + tableWrap.scrollLeft;
+        };
+
+        const applyActive = (index, options = {}) => {
+            const syncChip = Boolean(options.syncChip);
+            chips.forEach((chip, chipIndex) => {
+                chip.classList.toggle("is-current", chipIndex === index);
+                chip.setAttribute("aria-pressed", chipIndex === index ? "true" : "false");
+            });
+            if (meta) {
+                const activeChip = chips[index];
+                const activeDate = activeChip ? (activeChip.textContent || "").trim() : "";
+                meta.textContent = activeDate ? `Текущий день: ${activeDate} (${index + 1}/${chips.length})` : "";
+            }
+            if (syncChip && chips[index]) {
+                chips[index].scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+            }
+            if (prevButton) {
+                prevButton.disabled = index <= 0;
+            }
+            if (nextButton) {
+                nextButton.disabled = index >= chips.length - 1;
+            }
+        };
+
+        const scrollToDayIndex = (index, behavior = "smooth") => {
+            const target = anchors[index];
+            if (!target) {
+                return;
+            }
+            const left = Math.max(0, getAnchorLeft(target) - getStickyOffset() - 6);
+            tableWrap.scrollTo({ left, behavior });
+            applyActive(index, { syncChip: true });
+        };
+
+        const resolveCurrentDayIndex = () => {
+            const probe = tableWrap.scrollLeft + getStickyOffset() + 6;
+            let nearestIndex = 0;
+            let nearestDistance = Number.POSITIVE_INFINITY;
+            anchors.forEach((cell, index) => {
+                const distance = Math.abs(getAnchorLeft(cell) - probe);
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestIndex = index;
+                }
+            });
+            return nearestIndex;
+        };
+
+        chips.forEach((chip) => {
+            chip.addEventListener("click", () => {
+                const index = Number(chip.dataset.dayIndex || "0");
+                scrollToDayIndex(index);
+            });
+        });
+
+        const shiftDay = (delta) => {
+            const current = resolveCurrentDayIndex();
+            const next = Math.max(0, Math.min(chips.length - 1, current + delta));
+            if (next !== current) {
+                scrollToDayIndex(next);
+                return;
+            }
+            applyActive(current, { syncChip: true });
+        };
+
+        if (prevButton) {
+            prevButton.addEventListener("click", () => shiftDay(-1));
+        }
+        if (nextButton) {
+            nextButton.addEventListener("click", () => shiftDay(1));
+        }
+
+        const isTypingTarget = (node) => {
+            if (!node || !(node instanceof HTMLElement)) {
+                return false;
+            }
+            return node.matches("input, textarea, select") || node.isContentEditable;
+        };
+        document.addEventListener("keydown", (event) => {
+            if (event.ctrlKey || event.altKey || event.metaKey) {
+                return;
+            }
+            if (isTypingTarget(document.activeElement)) {
+                return;
+            }
+            if (event.key === "ArrowLeft") {
+                event.preventDefault();
+                shiftDay(-1);
+                return;
+            }
+            if (event.key === "ArrowRight") {
+                event.preventDefault();
+                shiftDay(1);
+                return;
+            }
+            if (event.key === "Home") {
+                event.preventDefault();
+                scrollToDayIndex(0);
+                return;
+            }
+            if (event.key === "End") {
+                event.preventDefault();
+                scrollToDayIndex(chips.length - 1);
+            }
+        });
+
+        let scrollRaf = 0;
+        tableWrap.addEventListener("scroll", () => {
+            if (scrollRaf) {
+                return;
+            }
+            scrollRaf = window.requestAnimationFrame(() => {
+                scrollRaf = 0;
+                applyActive(resolveCurrentDayIndex());
+            });
+        });
+
+        applyActive(resolveCurrentDayIndex());
+    }
+
+    function initDragScroll(tableWrap) {
+        let isDragging = false;
+        let startX = 0;
+        let startY = 0;
+        let startLeft = 0;
+        let startTop = 0;
+        let moved = false;
+
+        const resetDragging = () => {
+            if (!isDragging) {
+                return;
+            }
+            isDragging = false;
+            tableWrap.classList.remove("is-dragging");
+            if (moved) {
+                tableWrap.dataset.dragMoved = "1";
+                window.setTimeout(() => {
+                    tableWrap.dataset.dragMoved = "";
+                }, 0);
+            }
+        };
+
+        tableWrap.addEventListener("mousedown", (event) => {
+            if (event.button !== 0) {
+                return;
+            }
+            if (event.target.closest("button, select, input, textarea, a, label")) {
+                return;
+            }
+            isDragging = true;
+            moved = false;
+            startX = event.clientX;
+            startY = event.clientY;
+            startLeft = tableWrap.scrollLeft;
+            startTop = tableWrap.scrollTop;
+            tableWrap.classList.add("is-dragging");
+            event.preventDefault();
+        });
+
+        window.addEventListener("mousemove", (event) => {
+            if (!isDragging) {
+                return;
+            }
+            const dx = event.clientX - startX;
+            const dy = event.clientY - startY;
+            if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+                moved = true;
+            }
+            tableWrap.scrollLeft = startLeft - dx;
+            tableWrap.scrollTop = startTop - dy;
+        });
+
+        window.addEventListener("mouseup", resetDragging);
+        tableWrap.addEventListener("mouseleave", resetDragging);
+        tableWrap.addEventListener(
+            "click",
+            (event) => {
+                if (tableWrap.dataset.dragMoved === "1") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+            },
+            true
+        );
+    }
+
+    function initTableControls() {
+        initActionModals();
+        initToolbarFilters();
+        initSheetsNavigation();
+
+        const tableWrap = document.querySelector("[data-table-workspace]");
+        if (!tableWrap) {
+            return;
+        }
+        const updateUrl = tableWrap.dataset.noteUpdateUrl;
+        if (updateUrl) {
+            initInlineControls(tableWrap, updateUrl);
+        }
+        initLiveCalculations(tableWrap);
+        initDensityToggle(tableWrap);
+        initFullscreenToggle(tableWrap);
+        initDayNavigation(tableWrap);
+        initDragScroll(tableWrap);
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initTableControls);
+    } else {
+        initTableControls();
+    }
+})();

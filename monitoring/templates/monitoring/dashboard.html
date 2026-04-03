@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load monitoring_extras %}
+{% load static monitoring_extras %}
 
 {% block title %}Дашборд | Мониторинг WB{% endblock %}
 
@@ -16,7 +16,7 @@
         <p class="eyebrow">Дашборд</p>
         <h1>Мониторинг по товарам, рекламе и остаткам</h1>
         <p class="hero-copy">
-            Веб-интерфейс управляет синхронизацией WB, хранит историю, показывает аналитику и формирует итоговую книгу мониторинга для Google Sheets и Excel.
+            Веб-интерфейс управляет синхронизацией WB, хранит историю, показывает аналитику и формирует итоговую книгу мониторинга в Excel.
         </p>
         <div class="hero-stats">
             <article class="hero-stat">
@@ -44,7 +44,7 @@
         <span class="badge soft">Активных РК: {{ totals.campaigns }}</span>
         <a class="primary-button" href="{% url 'monitoring:reports' %}?reference_date={{ stock_date|date:'Y-m-d' }}&range_days={{ workspace_settings.monitoring_history_days|default:14 }}">Открыть отчёты</a>
         <a class="secondary-button" href="{% url 'monitoring:download_monitoring_workbook' %}?reference_date={{ stock_date|date:'Y-m-d' }}&history_days={{ workspace_settings.monitoring_history_days|default:14 }}">Скачать мониторинг</a>
-        <a class="secondary-button" href="{% url 'monitoring:workspace_settings' %}">Операции проекта</a>
+        <a class="secondary-button" href="{% url 'monitoring:workspace_settings' %}">Настройки проекта</a>
     </div>
 </section>
 
@@ -52,7 +52,7 @@
     <article class="ops-card">
         <span>Режим работы</span>
         <strong>База данных + книга мониторинга</strong>
-        <p>Основной контур в веб-системе, XLSX и Google Sheets как итоговый слой.</p>
+        <p>Основной контур в веб-системе, XLSX как итоговый слой.</p>
     </article>
     <article class="ops-card">
         <span>История книги</span>
@@ -73,10 +73,7 @@
             <p class="muted">Свежесть данных, следующий автозапуск и состояние внешнего контура без перехода в админку.</p>
         </div>
         <div class="workspace-tools">
-            {% if workspace_overview.spreadsheet_url %}
-                <a class="utility-pill" href="{{ workspace_overview.spreadsheet_url }}" target="_blank" rel="noreferrer">Открыть Google Sheets</a>
-            {% endif %}
-            <a class="utility-pill" href="{% url 'monitoring:workspace_settings' %}">Операционные настройки</a>
+            <a class="utility-pill" href="{% url 'monitoring:workspace_settings' %}">Настройки проекта</a>
         </div>
     </div>
     {% if workspace_overview.warnings %}
@@ -100,7 +97,7 @@
     </div>
 </section>
 
-<section class="layout-grid">
+<section class="layout-grid dashboard-layout-grid">
     <aside class="stack">
         <article class="panel panel-emphasis">
             <h2>Готовность</h2>
@@ -117,40 +114,50 @@
             </div>
         </article>
 
-        <article class="panel panel-form">
-            <h2>Полная синхронизация</h2>
-            <p class="panel-copy">Главное действие на странице: обновляет базу, книгу мониторинга и связанные витрины за выбранную дату.</p>
-            <form method="post" action="{% url 'monitoring:sync_all' %}" class="stack compact-form">
-                {% csrf_token %}
-                {% for field in sync_form %}
-                    {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
-                {% endfor %}
-                <button class="primary-button wide" type="submit">Запустить</button>
-            </form>
-        </article>
+        <article class="panel panel-form dashboard-controls" data-dashboard-controls data-active-tab="sync">
+            <div class="dashboard-controls-head">
+                <h2>Центр управления</h2>
+                <p class="panel-copy">Все ключевые действия в одном блоке: запуск синхронизации, добавление товара и привязка кампании.</p>
+            </div>
+            <nav class="segmented-control dashboard-tabs-nav" role="tablist" aria-label="Действия дашборда">
+                <button type="button" class="segmented-button is-active" role="tab" aria-selected="true" data-dashboard-tab-trigger="sync">Синхронизация</button>
+                <button type="button" class="segmented-button" role="tab" aria-selected="false" data-dashboard-tab-trigger="product">Товар</button>
+                <button type="button" class="segmented-button" role="tab" aria-selected="false" data-dashboard-tab-trigger="campaign">Кампания</button>
+            </nav>
 
-        <article class="panel panel-form">
-            <h2>Добавить товар</h2>
-            <p class="panel-copy">Карточка появится на дашборде и войдёт в общую книгу мониторинга после следующего обновления.</p>
-            <form method="post" action="{% url 'monitoring:add_product' %}" class="stack compact-form">
-                {% csrf_token %}
-                {% for field in product_form %}
-                    {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
-                {% endfor %}
-                <button class="secondary-button wide" type="submit">Добавить товар</button>
-            </form>
-        </article>
+            <section class="dashboard-tab-panel" data-dashboard-tab-panel="sync">
+                <p class="panel-copy">Обновляет базу, книгу мониторинга и связанные витрины за выбранную дату.</p>
+                {% include "monitoring/includes/sync_indicator.html" %}
+                <form method="post" action="{% url 'monitoring:sync_all' %}" class="stack compact-form">
+                    {% csrf_token %}
+                    {% for field in sync_form %}
+                        {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                    {% endfor %}
+                    <button class="primary-button wide" type="submit" data-sync-submit>Запустить</button>
+                </form>
+            </section>
 
-        <article class="panel panel-form">
-            <h2>Добавить кампанию</h2>
-            <p class="panel-copy">Используйте для ручной привязки новых РК и для разведения кампаний по группам мониторинга.</p>
-            <form method="post" action="{% url 'monitoring:add_campaign' %}" class="stack compact-form">
-                {% csrf_token %}
-                {% for field in campaign_form %}
-                    {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
-                {% endfor %}
-                <button class="secondary-button wide" type="submit">Добавить РК</button>
-            </form>
+            <section class="dashboard-tab-panel" data-dashboard-tab-panel="product" hidden>
+                <p class="panel-copy">Карточка появится на дашборде и попадёт в книгу мониторинга после следующего обновления.</p>
+                <form method="post" action="{% url 'monitoring:add_product' %}" class="stack compact-form">
+                    {% csrf_token %}
+                    {% for field in product_form %}
+                        {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                    {% endfor %}
+                    <button class="secondary-button wide" type="submit">Добавить товар</button>
+                </form>
+            </section>
+
+            <section class="dashboard-tab-panel" data-dashboard-tab-panel="campaign" hidden>
+                <p class="panel-copy">Используйте для ручной привязки новых РК и корректной группировки в мониторинге.</p>
+                <form method="post" action="{% url 'monitoring:add_campaign' %}" class="stack compact-form">
+                    {% csrf_token %}
+                    {% for field in campaign_form %}
+                        {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                    {% endfor %}
+                    <button class="secondary-button wide" type="submit">Добавить РК</button>
+                </form>
+            </section>
         </article>
 
         <article class="panel panel-spacious">
@@ -285,24 +292,11 @@
                 </table>
             </div>
         </article>
-
-        <article class="panel">
-            <div class="panel-head">
-                <div>
-                    <h2>Шаблоны для заказчика</h2>
-                    <p class="muted">Можно сразу отправить подготовленные CSV для заполнения.</p>
-                </div>
-                <a class="ghost-link" href="{% url 'monitoring:workspace_settings' %}">Все операции</a>
-            </div>
-            <div class="template-grid">
-                {% for key, item in template_definitions.items %}
-                    <a class="template-card" href="{% url 'monitoring:download_customer_template' key %}">
-                        <strong>{{ item.filename }}</strong>
-                        <span>Скачать шаблон</span>
-                    </a>
-                {% endfor %}
-            </div>
-        </article>
     </div>
 </section>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="{% static 'monitoring/sync_status.js' %}" defer></script>
+    <script src="{% static 'monitoring/dashboard_controls.js' %}" defer></script>
 {% endblock %}

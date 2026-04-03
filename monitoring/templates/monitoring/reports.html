@@ -6,7 +6,7 @@
 {% block content %}
 <nav class="breadcrumb" aria-label="Навигация">
     <ol>
-        <li><a href="{% url 'monitoring:dashboard' %}">Workspace</a></li>
+        <li><a href="{% url 'monitoring:table' %}">Workspace</a></li>
         <li aria-current="page">Отчёты</li>
     </ol>
 </nav>
@@ -16,12 +16,13 @@
         <p class="eyebrow">Reports</p>
         <h1>Аналитика по периоду, товарам и рекламному контуру</h1>
         <p class="hero-copy">
-            Здесь собраны сводные графики, сравнение SKU, распределение рекламного расхода и быстрые сигналы по складам.
+            Раздел показывает динамику бизнеса, эффективность рекламы, аномалии по SKU и
+            структуру остатков. Переключайте логические вкладки, чтобы не перегружать экран.
         </p>
         <div class="hero-stats">
             <article class="hero-stat">
-                <span>Окно анализа</span>
-                <strong>{{ range_days }} дн.</strong>
+                <span>Период анализа</span>
+                <strong>{{ date_from|date:"d.m.Y" }} — {{ date_to|date:"d.m.Y" }}</strong>
             </article>
             <article class="hero-stat">
                 <span>Дата среза остатков</span>
@@ -40,11 +41,10 @@
     <div class="hero-badges hero-actions">
         <span class="badge">Графики по {{ range_days }} дням</span>
         <span class="badge soft">SKU в сравнении: {{ product_rows|length }}</span>
-        <a class="primary-button" href="{% url 'monitoring:download_monitoring_workbook' %}?reference_date={{ reference_date|date:'Y-m-d' }}&history_days={{ workspace_settings.monitoring_history_days|default:14 }}">Скачать книгу</a>
-        {% if workspace_overview.spreadsheet_url %}
-            <a class="secondary-button" href="{{ workspace_overview.spreadsheet_url }}" target="_blank" rel="noreferrer">Открыть Google Sheets</a>
-        {% endif %}
-        <a class="secondary-button" href="{% url 'monitoring:workspace_settings' %}">Операции проекта</a>
+        <a class="primary-button" href="{% url 'monitoring:download_monitoring_workbook' %}?reference_date={{ reference_date|date:'Y-m-d' }}&history_days={{ workspace_settings.monitoring_history_days|default:14 }}">
+            Скачать книгу
+        </a>
+        <a class="secondary-button" href="{% url 'monitoring:workspace_settings' %}">Настройки проекта</a>
     </div>
 </section>
 
@@ -66,110 +66,51 @@
     {% endfor %}
 </section>
 
-<section class="layout-grid reports-layout">
-    <aside class="stack">
-        <article class="panel panel-form report-filter-panel">
-            <div class="panel-head">
-                <div>
-                    <h2>Параметры отчёта</h2>
-                    <p class="muted">Меняйте окно аналитики и опорную дату без перехода в другие разделы.</p>
-                </div>
-            </div>
-            <form method="get" class="stack compact-form">
-                {% for field in filters_form %}
-                    {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
-                {% endfor %}
-                <button class="primary-button wide" type="submit">Обновить отчёт</button>
-            </form>
-        </article>
+<section class="reports-tabs-shell" data-reports-tabs-shell data-active-tab="overview">
+    <nav class="segmented-control reports-tabs-nav" role="tablist" aria-label="Разделы отчётов">
+        <button type="button" class="segmented-button is-active" role="tab" aria-selected="true" data-reports-tab-trigger="overview">Обзор</button>
+        <button type="button" class="segmented-button" role="tab" aria-selected="false" data-reports-tab-trigger="sku">SKU</button>
+        <button type="button" class="segmented-button" role="tab" aria-selected="false" data-reports-tab-trigger="warehouses">Склады</button>
+    </nav>
 
-        <article class="panel panel-spacious">
-            <div class="panel-head">
-                <div>
-                    <h2>Фокус дня</h2>
-                    <p class="muted">Куда смотреть в первую очередь по текущему срезу.</p>
-                </div>
-            </div>
-            <div class="spotlight-grid">
-                {% for item in spotlight_cards %}
-                    <article class="spotlight-card {{ item.tone }}">
-                        <span>{{ item.label }}</span>
-                        <strong>{{ item.value }}</strong>
-                        <p>{{ item.detail }}</p>
-                    </article>
-                {% endfor %}
-            </div>
-        </article>
-
-        <article class="panel panel-spacious">
-            <div class="panel-head">
-                <div>
-                    <h2>Операционный контур</h2>
-                    <p class="muted">Свежесть данных и готовность внешних витрин.</p>
-                </div>
-            </div>
-            <div class="status-grid compact-status-grid">
-                {% for signal in workspace_overview.signals %}
-                    <article class="status-card {{ signal.tone }}">
-                        <span>{{ signal.label }}</span>
-                        <strong>{{ signal.value }}</strong>
-                        <p>{{ signal.detail }}</p>
-                    </article>
-                {% endfor %}
-            </div>
-        </article>
-    </aside>
-
-    <div class="stack">
-        <article class="panel panel-spacious chart-panel">
-            <div class="panel-head">
-                <div>
-                    <h2>Динамика периода</h2>
-                    <p class="muted">Заказы, оборот, расход, остатки и доля органики на одной временной шкале.</p>
-                </div>
-            </div>
-            <div class="chart-widget" data-chart-script="timeline-chart-data">
-                <div class="chart-toolbar">
-                    <div class="segmented-control" data-chart-group="metric">
-                        <button type="button" class="segmented-button is-active" data-chart-metric="revenue">Оборот</button>
-                        <button type="button" class="segmented-button" data-chart-metric="orders">Заказы</button>
-                        <button type="button" class="segmented-button" data-chart-metric="spend">Расход</button>
-                        <button type="button" class="segmented-button" data-chart-metric="stock">Остатки</button>
-                        <button type="button" class="segmented-button" data-chart-metric="organic_share">Органика</button>
-                    </div>
-                    <div class="segmented-control" data-chart-group="type">
-                        <button type="button" class="segmented-button is-active" data-chart-type="area">Площадь</button>
-                        <button type="button" class="segmented-button" data-chart-type="line">Линия</button>
-                        <button type="button" class="segmented-button" data-chart-type="bar">Столбцы</button>
-                    </div>
-                </div>
-                <div class="chart-stage" aria-live="polite"></div>
-                <div class="chart-caption"></div>
-                <div class="chart-legend"></div>
-            </div>
-        </article>
-
-        <div class="report-grid-2">
-            <article class="panel panel-spacious chart-panel">
+    <section class="layout-grid reports-layout">
+        <div class="stack reports-main-stack">
+            <article class="panel panel-form report-filter-panel" data-reports-panel="overview">
                 <div class="panel-head">
                     <div>
-                        <h2>Сравнение товаров</h2>
-                        <p class="muted">Быстрое сравнение лидеров по заказам, обороту, расходу и доле органики.</p>
+                        <h2>Параметры отчёта</h2>
+                        <p class="muted">Меняйте окно аналитики и опорную дату без перехода в другие разделы.</p>
                     </div>
                 </div>
-                <div class="chart-widget" data-chart-script="product-chart-data">
+                <form method="get" class="report-filter-form compact-form">
+                    {% for field in filters_form %}
+                        {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                    {% endfor %}
+                    <button class="primary-button report-filter-submit" type="submit">Обновить отчёт</button>
+                </form>
+            </article>
+
+            <article class="panel panel-spacious chart-panel" data-reports-panel="overview">
+                <div class="panel-head">
+                    <div>
+                        <h2>Динамика периода</h2>
+                        <p class="muted">Заказы, оборот, расход, остатки и метрики эффективности на одной временной шкале.</p>
+                    </div>
+                </div>
+                <div class="chart-widget" data-chart-script="timeline-chart-data">
                     <div class="chart-toolbar">
                         <div class="segmented-control" data-chart-group="metric">
-                            <button type="button" class="segmented-button is-active" data-chart-metric="orders">Заказы</button>
-                            <button type="button" class="segmented-button" data-chart-metric="revenue">Оборот</button>
+                            <button type="button" class="segmented-button is-active" data-chart-metric="revenue">Оборот</button>
+                            <button type="button" class="segmented-button" data-chart-metric="orders">Заказы</button>
                             <button type="button" class="segmented-button" data-chart-metric="spend">Расход</button>
                             <button type="button" class="segmented-button" data-chart-metric="stock">Остатки</button>
                             <button type="button" class="segmented-button" data-chart-metric="organic_share">Органика</button>
+                            <button type="button" class="segmented-button" data-chart-metric="cpo">CPO</button>
+                            <button type="button" class="segmented-button" data-chart-metric="drr">ДРР</button>
                         </div>
                         <div class="segmented-control" data-chart-group="type">
-                            <button type="button" class="segmented-button is-active" data-chart-type="bar">Столбцы</button>
-                            <button type="button" class="segmented-button" data-chart-type="line">Линия</button>
-                            <button type="button" class="segmented-button" data-chart-type="area">Площадь</button>
+                            <button type="button" class="segmented-button is-active" data-chart-type="line">Линия</button>
+                            <button type="button" class="segmented-button" data-chart-type="bar">Столбцы</button>
                         </div>
                     </div>
                     <div class="chart-stage" aria-live="polite"></div>
@@ -178,125 +119,134 @@
                 </div>
             </article>
 
-            <article class="panel panel-spacious">
+            <article class="panel panel-spacious" data-reports-panel="sku" hidden>
                 <div class="panel-head">
                     <div>
-                        <h2>Микс рекламных групп</h2>
-                        <p class="muted">Как раскладывается рекламный расход между логическими группами мониторинга.</p>
+                        <h2>Лидерборд SKU</h2>
+                        <p class="muted">Текущий срез по товарам: продажи, рекламная нагрузка, органика и запас по остаткам.</p>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table class="data-table leaderboard-table">
+                        <thead>
+                            <tr>
+                                <th>Товар</th>
+                                <th>Заказы</th>
+                                <th>Оборот</th>
+                                <th>Расход</th>
+                                <th>CPO</th>
+                                <th>ДРР</th>
+                                <th>Органика</th>
+                                <th>Остаток</th>
+                                <th>Дней до 0</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in product_rows %}
+                                <tr>
+                                    <td>
+                                        <a class="table-link" href="{% url 'monitoring:product_detail' row.product.pk %}?stats_date={{ latest_stats_date|date:'Y-m-d' }}&stock_date={{ reference_date|date:'Y-m-d' }}">
+                                            <strong>{{ row.label }}</strong>
+                                        </a><br>
+                                        <span class="muted">WB {{ row.product.nm_id }} · {{ row.campaigns_count }} РК</span>
+                                    </td>
+                                    <td>{{ row.orders|intspace }}</td>
+                                    <td>{{ row.revenue|money }}</td>
+                                    <td>{{ row.spend|money }}</td>
+                                    <td>{{ row.cpo|money }}</td>
+                                    <td>{{ row.drr|percent }}</td>
+                                    <td>{{ row.organic_share|percent }}</td>
+                                    <td>{{ row.stock|intspace }}</td>
+                                    <td>{{ row.days_until_zero|decimal2 }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td colspan="9">
+                                        <div class="empty-state compact-empty">
+                                            <strong>По товарам пока нечего сравнивать</strong>
+                                            <p>Добавьте товары и выполните sync, тогда здесь появится лидерборд.</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+
+            <article class="panel panel-spacious" data-reports-panel="warehouses" hidden>
+                <div class="panel-head">
+                    <div>
+                        <h2>Распределение по складам</h2>
+                        <p class="muted">Топ складов по текущему объёму остатков и товарам в пути к клиенту.</p>
                     </div>
                 </div>
                 <div class="bar-list">
-                    {% for row in campaign_mix_rows %}
+                    {% for row in warehouse_rows %}
                         <article class="bar-row">
                             <div class="bar-row-head">
                                 <strong>{{ row.label }}</strong>
-                                <span>{{ row.spend|money }}</span>
+                                <span>{{ row.stock|intspace }}</span>
                             </div>
                             <div class="bar-track">
-                                <span class="bar-fill accent" style="width: {{ row.spend_share|default:0|floatformat:2 }}%;"></span>
+                                <span class="bar-fill warm" style="width: {{ row.stock_share|css_percent }}%;"></span>
                             </div>
                             <div class="bar-row-meta">
-                                <span>{{ row.orders|intspace }} заказов</span>
-                                <span>Доля расхода: {{ row.spend_share|percent }}</span>
-                                <span>CPO: {{ row.cpo|money }}</span>
+                                <span>Доля остатка: {{ row.stock_share|percent }}</span>
+                                <span>К клиенту: {{ row.to_client|intspace }}</span>
                             </div>
                         </article>
                     {% empty %}
                         <div class="empty-state compact-empty">
-                            <strong>Нет рекламной статистики</strong>
-                            <p>Запустите синхронизацию за нужную дату, чтобы увидеть микс по группам кампаний.</p>
+                            <strong>Нет складских остатков</strong>
+                            <p>После синхронизации по остаткам здесь появится топ складов.</p>
                         </div>
                     {% endfor %}
                 </div>
             </article>
         </div>
 
-        <article class="panel panel-spacious">
-            <div class="panel-head">
-                <div>
-                    <h2>Лидерборд SKU</h2>
-                    <p class="muted">Текущий срез по товарам: продажи, рекламная нагрузка, органика и запас по остаткам.</p>
-                </div>
-            </div>
-            <div class="table-wrap">
-                <table class="data-table leaderboard-table">
-                    <thead>
-                        <tr>
-                            <th>Товар</th>
-                            <th>Заказы</th>
-                            <th>Оборот</th>
-                            <th>Расход</th>
-                            <th>Органика</th>
-                            <th>Остаток</th>
-                            <th>Дней до 0</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in product_rows %}
-                            <tr>
-                                <td>
-                                    <a class="table-link" href="{% url 'monitoring:product_detail' row.product.pk %}?stats_date={{ latest_stats_date|date:'Y-m-d' }}&stock_date={{ reference_date|date:'Y-m-d' }}">
-                                        <strong>{{ row.label }}</strong>
-                                    </a><br>
-                                    <span class="muted">WB {{ row.product.nm_id }} · {{ row.campaigns_count }} РК</span>
-                                </td>
-                                <td>{{ row.orders|intspace }}</td>
-                                <td>{{ row.revenue|money }}</td>
-                                <td>{{ row.spend|money }}</td>
-                                <td>{{ row.organic_share|percent }}</td>
-                                <td>{{ row.stock|intspace }}</td>
-                                <td>{{ row.days_until_zero|decimal2 }}</td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="7">
-                                    <div class="empty-state compact-empty">
-                                        <strong>По товарам пока нечего сравнивать</strong>
-                                        <p>Добавьте товары и выполните sync, тогда здесь появится лидерборд.</p>
-                                    </div>
-                                </td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </article>
-
-        <article class="panel panel-spacious">
-            <div class="panel-head">
-                <div>
-                    <h2>Распределение по складам</h2>
-                    <p class="muted">Топ складов по текущему объёму остатков и товарам в пути к клиенту.</p>
-                </div>
-            </div>
-            <div class="bar-list">
-                {% for row in warehouse_rows %}
-                    <article class="bar-row">
-                        <div class="bar-row-head">
-                            <strong>{{ row.label }}</strong>
-                            <span>{{ row.stock|intspace }}</span>
-                        </div>
-                        <div class="bar-track">
-                            <span class="bar-fill warm" style="width: {{ row.stock_share|default:0|floatformat:2 }}%;"></span>
-                        </div>
-                        <div class="bar-row-meta">
-                            <span>Доля остатка: {{ row.stock_share|percent }}</span>
-                            <span>К клиенту: {{ row.to_client|intspace }}</span>
-                        </div>
-                    </article>
-                {% empty %}
-                    <div class="empty-state compact-empty">
-                        <strong>Нет складских остатков</strong>
-                        <p>После синхронизации по остаткам здесь появится топ складов.</p>
+        <aside class="stack reports-side-stack" data-reports-panel="overview">
+            <article class="panel panel-spacious">
+                <div class="panel-head">
+                    <div>
+                        <h2>Фокус дня</h2>
+                        <p class="muted">Куда смотреть в первую очередь по текущему срезу.</p>
                     </div>
-                {% endfor %}
-            </div>
-        </article>
-    </div>
+                </div>
+                <div class="spotlight-grid">
+                    {% for item in spotlight_cards %}
+                        <article class="spotlight-card {{ item.tone }}">
+                            <span>{{ item.label }}</span>
+                            <strong>{{ item.value }}</strong>
+                            <p>{{ item.detail }}</p>
+                        </article>
+                    {% endfor %}
+                </div>
+            </article>
+
+            <article class="panel panel-spacious">
+                <div class="panel-head">
+                    <div>
+                        <h2>Системный контур</h2>
+                        <p class="muted">Свежесть данных и готовность внешних витрин.</p>
+                    </div>
+                </div>
+                <div class="status-grid compact-status-grid">
+                    {% for signal in workspace_overview.signals %}
+                        <article class="status-card {{ signal.tone }}">
+                            <span>{{ signal.label }}</span>
+                            <strong>{{ signal.value }}</strong>
+                            <p>{{ signal.detail }}</p>
+                        </article>
+                    {% endfor %}
+                </div>
+            </article>
+        </aside>
+    </section>
 </section>
 
 {{ timeline_chart|json_script:"timeline-chart-data" }}
-{{ product_chart|json_script:"product-chart-data" }}
 {% endblock %}
 
 {% block extra_scripts %}

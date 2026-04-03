@@ -20,15 +20,17 @@ def env_bool(name: str, default: bool = False) -> bool:
         return default
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
+
+def env_csv(name: str, default: str = "") -> list[str]:
+    return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
+
 load_env_file(BASE_DIR / ".env")
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-wb-monitoring-dev-key")
 DEBUG = env_bool("DJANGO_DEBUG", True)
-ALLOWED_HOSTS = [
-    host.strip()
-    for host in os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver").split(",")
-    if host.strip()
-]
+ALLOWED_HOSTS = env_csv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver")
+CSRF_TRUSTED_ORIGINS = env_csv("DJANGO_CSRF_TRUSTED_ORIGINS", "")
+CORS_ALLOWED_ORIGINS = env_csv("DJANGO_CORS_ALLOWED_ORIGINS", "")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -49,6 +51,16 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+if CORS_ALLOWED_ORIGINS:
+    try:
+        import corsheaders  # type: ignore  # noqa: F401
+    except Exception:
+        # CORS env is set, but optional dependency is not installed yet.
+        CORS_ALLOWED_ORIGINS = []
+    else:
+        INSTALLED_APPS.insert(0, "corsheaders")
+        MIDDLEWARE.insert(1, "corsheaders.middleware.CorsMiddleware")
 
 ROOT_URLCONF = "wb_monitoring.urls"
 
@@ -75,6 +87,9 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / "db.sqlite3",
+        "OPTIONS": {
+            "timeout": int(os.getenv("SQLITE_TIMEOUT_SECONDS", "30")),
+        },
     }
 }
 
@@ -113,5 +128,3 @@ WB_SYNC_HOUR = int(os.getenv("WB_SYNC_HOUR", "9"))
 WB_SYNC_MINUTE = int(os.getenv("WB_SYNC_MINUTE", "15"))
 WB_SYNC_SLEEP_SECONDS = int(os.getenv("WB_SYNC_SLEEP_SECONDS", "60"))
 WB_APP_TYPE_ZONE_MAP = os.getenv("WB_APP_TYPE_ZONE_MAP", "1:recommendation,32:search,64:catalog")
-GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "")
-GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")

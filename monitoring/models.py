@@ -29,6 +29,7 @@ class SyncStatus(models.TextChoices):
     RUNNING = "running", "В работе"
     SUCCESS = "success", "Успешно"
     ERROR = "error", "Ошибка"
+    CANCELED = "canceled", "Отменено"
 
 
 class TimeStampedModel(models.Model):
@@ -279,18 +280,45 @@ class DailyCampaignProductStat(TimeStampedModel):
         return f"{self.campaign} / {self.product} / {self.zone} / {self.stats_date}"
 
 
+class DailyCampaignSearchClusterStat(TimeStampedModel):
+    campaign = models.ForeignKey(Campaign, on_delete=models.CASCADE, related_name="daily_search_cluster_stats")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="search_cluster_stats")
+    stats_date = models.DateField(verbose_name="Дата статистики")
+    impressions = models.PositiveIntegerField(default=0, verbose_name="Показы")
+    clicks = models.PositiveIntegerField(default=0, verbose_name="Клики")
+    spend = models.DecimalField(max_digits=14, decimal_places=2, default=0, verbose_name="Расход")
+    add_to_cart_count = models.PositiveIntegerField(default=0, verbose_name="Корзины")
+    order_count = models.PositiveIntegerField(default=0, verbose_name="Заказы")
+    units_ordered = models.PositiveIntegerField(default=0, verbose_name="ШК")
+    raw_payload = models.JSONField(default=dict, blank=True, verbose_name="Сырой ответ API")
+
+    class Meta:
+        ordering = ["-stats_date", "campaign_id", "product_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["campaign", "product", "stats_date"],
+                name="uniq_campaign_product_search_cluster_day",
+            ),
+        ]
+        verbose_name = "Дневная статистика search-кластеров РК по товару"
+        verbose_name_plural = "Дневные статистики search-кластеров РК по товарам"
+
+    def __str__(self) -> str:
+        return f"{self.campaign} / {self.product} / clusters / {self.stats_date}"
+
+
 class DailyProductKeywordStat(TimeStampedModel):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="daily_keyword_stats")
-    stats_date = models.DateField(verbose_name="Р”Р°С‚Р° СЃС‚Р°С‚РёСЃС‚РёРєРё")
-    query_text = models.CharField(max_length=255, verbose_name="РџРѕРёСЃРєРѕРІС‹Р№ Р·Р°РїСЂРѕСЃ")
-    frequency = models.PositiveIntegerField(default=0, verbose_name="Р§Р°СЃС‚РѕС‚Р°")
-    organic_position = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="РџРѕР·РёС†РёСЏ РѕСЂРіР°РЅРёРєРё")
-    organic_orders = models.PositiveIntegerField(default=0, verbose_name="Р—Р°РєР°Р·С‹ РѕСЂРіР°РЅРёРєРё")
-    boosted_position = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="РџРѕР·РёС†РёСЏ Р±СѓСЃС‚Р°")
-    boosted_ctr = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="CTR Р±СѓСЃС‚Р°")
-    boosted_views = models.PositiveIntegerField(default=0, verbose_name="РџРѕРєР°Р·С‹ Р±СѓСЃС‚Р°")
-    boosted_clicks = models.PositiveIntegerField(default=0, verbose_name="РљР»РёРєРё Р±СѓСЃС‚Р°")
-    raw_payload = models.JSONField(default=dict, blank=True, verbose_name="РЎС‹СЂРѕР№ РѕС‚РІРµС‚ API")
+    stats_date = models.DateField(verbose_name="Дата статистики")
+    query_text = models.CharField(max_length=255, verbose_name="Поисковый запрос")
+    frequency = models.PositiveIntegerField(default=0, verbose_name="Частота")
+    organic_position = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Позиция органики")
+    organic_orders = models.PositiveIntegerField(default=0, verbose_name="Заказы органики")
+    boosted_position = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="Позиция буста")
+    boosted_ctr = models.DecimalField(max_digits=10, decimal_places=2, default=0, verbose_name="CTR буста")
+    boosted_views = models.PositiveIntegerField(default=0, verbose_name="Показы буста")
+    boosted_clicks = models.PositiveIntegerField(default=0, verbose_name="Клики буста")
+    raw_payload = models.JSONField(default=dict, blank=True, verbose_name="Сырой ответ API")
 
     class Meta:
         ordering = ["-stats_date", "product_id", "query_text"]
@@ -300,11 +328,11 @@ class DailyProductKeywordStat(TimeStampedModel):
                 name="uniq_daily_product_keyword_stat",
             ),
         ]
-        verbose_name = "Р”РЅРµРІРЅР°СЏ РјРµС‚СЂРёРєР° РєР»СЋС‡Р°"
-        verbose_name_plural = "Р”РЅРµРІРЅС‹Рµ РјРµС‚СЂРёРєРё РєР»СЋС‡РµР№"
+        verbose_name = "Дневная метрика ключа"
+        verbose_name_plural = "Дневные метрики ключей"
 
     def __str__(self) -> str:
-        return f"{self.product} / РєР»СЋС‡ / {self.query_text} / {self.stats_date}"
+        return f"{self.product} / ключ / {self.query_text} / {self.stats_date}"
 
 
 class DailyProductNote(TimeStampedModel):
@@ -357,10 +385,6 @@ class MonitoringSettings(TimeStampedModel):
     sync_minute = models.PositiveSmallIntegerField(default=15, verbose_name="Минута ежедневной синхронизации")
     overwrite_within_day = models.BooleanField(default=True, verbose_name="Перезаписывать данные в рамках суток")
     monitoring_history_days = models.PositiveSmallIntegerField(default=14, verbose_name="Дней в мониторинге")
-    google_sheets_enabled = models.BooleanField(default=False, verbose_name="Включить Google Sheets")
-    google_sheets_auto_sync = models.BooleanField(default=True, verbose_name="Автообновление Google Sheets после WB sync")
-    google_spreadsheet_id = models.CharField(max_length=255, blank=True, verbose_name="ID Google таблицы")
-    google_dashboard_sheet_name = models.CharField(max_length=100, default="Dashboard", verbose_name="Лист сводки")
     visible_warehouses_note = models.TextField(blank=True, verbose_name="Комментарий по складам")
     campaign_grouping_note = models.TextField(blank=True, verbose_name="Комментарий по группировке РК")
 
@@ -383,9 +407,6 @@ class MonitoringSettings(TimeStampedModel):
                 "sync_minute": 15,
                 "overwrite_within_day": True,
                 "monitoring_history_days": 14,
-                "google_sheets_enabled": False,
-                "google_sheets_auto_sync": True,
-                "google_dashboard_sheet_name": "Dashboard",
             },
         )[0]
 

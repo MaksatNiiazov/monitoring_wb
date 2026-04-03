@@ -1,4 +1,6 @@
 from io import BytesIO
+import json
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import patch
@@ -12,6 +14,7 @@ from monitoring.models import (
     CampaignMonitoringGroup,
     CampaignZone,
     DailyCampaignProductStat,
+    DailyCampaignSearchClusterStat,
     DailyProductKeywordStat,
     DailyProductMetrics,
     DailyProductNote,
@@ -26,20 +29,17 @@ from monitoring.models import (
     SyncStatus,
     Warehouse,
 )
-from monitoring.forms import ProductSettingsForm
+from monitoring.forms import ProductSettingsForm, ReportsFilterForm, SyncForm
 from monitoring.services.config import build_workspace_overview
 from monitoring.services.demo import seed_demo_dataset
 from monitoring.services.exporters import exporter_rows
-from monitoring.services.monitoring_table import export_monitoring_workbook_bytes
-from monitoring.services.monitoring_table import build_day_block
-from monitoring.services.reporting_hub import build_reports_context
-from monitoring.services.google_sheets import (
-    GoogleSheetsSyncError,
-    _ensure_google_dependencies,
-    _sheet_values_for_locale,
-    _sparse_value_updates,
-    build_sheet_payloads,
+from monitoring.services.monitoring_table import (
+    build_day_block,
+    build_monitoring_sheet_payloads,
+    build_table_view_payloads,
+    export_monitoring_workbook_bytes,
 )
+from monitoring.services.reporting_hub import build_reports_context
 from monitoring.services.reports import build_dashboard_context, build_product_report
 from monitoring.services.sync import (
     aggregate_offices_from_sizes,
@@ -47,7 +47,9 @@ from monitoring.services.sync import (
     next_run_at,
     resolve_office_id,
     run_sync,
+    SyncServiceError,
 )
+from monitoring.templatetags.monitoring_extras import css_percent
 from monitoring.services.wb_client import AnalyticsWBClient, WBApiError
 
 
@@ -145,7 +147,7 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         rows = exporter_rows(report)
-        self.assertEqual(rows[0][2], "ОБРАЗЕЦ (17.03.2026)")
+        self.assertEqual(rows[0][2], "17.03.2026")
         self.assertEqual(rows[4][0], "Затраты (руб)")
 
     def test_exporter_uses_overall_funnel_in_summary_column(self) -> None:
@@ -158,6 +160,20 @@ class ReportingTests(TestCase):
         self.assertEqual(rows[10][7], "50")
         self.assertEqual(rows[11][7], "10")
         self.assertEqual(rows[12][7], "10000")
+
+    def test_exporter_normalizes_buyout_percent_when_saved_as_fraction(self) -> None:
+        ProductEconomicsVersion.objects.filter(
+            product=self.product,
+            effective_from=date(2026, 3, 1),
+        ).update(buyout_percent=Decimal("0.24"))
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        rows = exporter_rows(report)
+        self.assertEqual(rows[19][2], "24%")
+        self.assertEqual(rows[13][7], "2400")
 
     def test_dashboard_context_builds_aggregated_totals(self) -> None:
         context = build_dashboard_context(stats_date=date(2026, 3, 16), stock_date=date(2026, 3, 17))
@@ -174,6 +190,40 @@ class ReportingTests(TestCase):
         self.assertIn("insights", report)
         self.assertEqual(len(report["traffic_cards"]), 5)
 
+    def test_product_report_uses_search_cluster_stats_for_zone_split(self) -> None:
+        DailyCampaignSearchClusterStat.objects.create(
+            campaign=self.campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            impressions=200,
+            clicks=20,
+            spend=Decimal("400.00"),
+            add_to_cart_count=5,
+            order_count=2,
+            units_ordered=2,
+        )
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        unified_search = report["blocks"]["unified_search"]
+        unified_shelves = report["blocks"]["unified_shelves"]
+
+        self.assertEqual(unified_search.impressions, 200)
+        self.assertEqual(unified_search.clicks, 20)
+        self.assertEqual(unified_search.spend, Decimal("400.00"))
+        self.assertEqual(unified_search.carts, 20)
+        self.assertEqual(unified_search.orders, 6)
+        self.assertEqual(unified_search.order_sum, Decimal("6000.00"))
+
+        self.assertEqual(unified_shelves.impressions, 800)
+        self.assertEqual(unified_shelves.clicks, 80)
+        self.assertEqual(unified_shelves.spend, Decimal("1600.00"))
+        self.assertEqual(unified_shelves.carts, 0)
+        self.assertEqual(unified_shelves.orders, 0)
+        self.assertEqual(unified_shelves.order_sum, Decimal("0.00"))
+
     def test_monitoring_day_block_uses_overall_totals_and_single_profit_cell(self) -> None:
         report = build_product_report(
             product=self.product,
@@ -183,8 +233,163 @@ class ReportingTests(TestCase):
         block = build_day_block(report, start_row=1, start_col=1)
         self.assertEqual(block[11][7], 10)
         self.assertEqual(block[11][8], "=H12-SUM(C12:G12)")
-        self.assertTrue(block[18][2].startswith("=(("))
+        self.assertTrue(block[18][2].startswith("=IFERROR(IF("))
+        self.assertIn("*25/100", block[18][2])
         self.assertEqual(block[18][3:], ["", "", "", "", "", ""])
+
+    def test_monitoring_day_block_traffic_share_matches_template_logic(self) -> None:
+        manual_search_campaign = Campaign.objects.create(
+            external_id=28150155,
+            name="Руч. Поиск",
+            monitoring_group=CampaignMonitoringGroup.MANUAL_SEARCH,
+        )
+        manual_search_campaign.products.add(self.product)
+        manual_shelves_campaign = Campaign.objects.create(
+            external_id=28150156,
+            name="Руч. Полки",
+            monitoring_group=CampaignMonitoringGroup.MANUAL_SHELVES,
+        )
+        manual_shelves_campaign.products.add(self.product)
+
+        DailyCampaignProductStat.objects.create(
+            campaign=self.campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.RECOMMENDATION,
+            impressions=500,
+            clicks=50,
+            spend=Decimal("900.00"),
+            add_to_cart_count=10,
+            order_count=2,
+            order_sum=Decimal("1800.00"),
+        )
+        DailyCampaignProductStat.objects.create(
+            campaign=self.campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.CATALOG,
+            impressions=3000,
+            clicks=120,
+            spend=Decimal("1400.00"),
+            add_to_cart_count=8,
+            order_count=1,
+            order_sum=Decimal("900.00"),
+        )
+        DailyCampaignProductStat.objects.create(
+            campaign=manual_search_campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.SEARCH,
+            impressions=200,
+            clicks=15,
+            spend=Decimal("300.00"),
+            add_to_cart_count=3,
+            order_count=1,
+            order_sum=Decimal("700.00"),
+        )
+        DailyCampaignProductStat.objects.create(
+            campaign=manual_shelves_campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.RECOMMENDATION,
+            impressions=180,
+            clicks=12,
+            spend=Decimal("260.00"),
+            add_to_cart_count=2,
+            order_count=1,
+            order_sum=Decimal("500.00"),
+        )
+
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        block = build_day_block(report, start_row=1, start_col=1)
+        traffic_row = block[3]
+
+        self.assertAlmostEqual(traffic_row[2], 0.6667, places=4)
+        self.assertAlmostEqual(traffic_row[3], 0.3333, places=4)
+        self.assertEqual(traffic_row[4], "")
+        self.assertEqual(traffic_row[5], 1)
+        self.assertEqual(traffic_row[6], 1)
+
+    def test_exporter_traffic_share_matches_template_logic(self) -> None:
+        manual_search_campaign = Campaign.objects.create(
+            external_id=28150157,
+            name="Руч. Поиск 2",
+            monitoring_group=CampaignMonitoringGroup.MANUAL_SEARCH,
+        )
+        manual_search_campaign.products.add(self.product)
+        manual_shelves_campaign = Campaign.objects.create(
+            external_id=28150158,
+            name="Руч. Полки 2",
+            monitoring_group=CampaignMonitoringGroup.MANUAL_SHELVES,
+        )
+        manual_shelves_campaign.products.add(self.product)
+
+        DailyCampaignProductStat.objects.create(
+            campaign=self.campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.RECOMMENDATION,
+            impressions=500,
+            clicks=50,
+            spend=Decimal("900.00"),
+            add_to_cart_count=10,
+            order_count=2,
+            order_sum=Decimal("1800.00"),
+        )
+        DailyCampaignProductStat.objects.create(
+            campaign=self.campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.CATALOG,
+            impressions=3000,
+            clicks=120,
+            spend=Decimal("1400.00"),
+            add_to_cart_count=8,
+            order_count=1,
+            order_sum=Decimal("900.00"),
+        )
+        DailyCampaignProductStat.objects.create(
+            campaign=manual_search_campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.SEARCH,
+            impressions=200,
+            clicks=15,
+            spend=Decimal("300.00"),
+            add_to_cart_count=3,
+            order_count=1,
+            order_sum=Decimal("700.00"),
+        )
+        DailyCampaignProductStat.objects.create(
+            campaign=manual_shelves_campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.RECOMMENDATION,
+            impressions=180,
+            clicks=12,
+            spend=Decimal("260.00"),
+            add_to_cart_count=2,
+            order_count=1,
+            order_sum=Decimal("500.00"),
+        )
+
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        rows = exporter_rows(report)
+        traffic_row = rows[3]
+
+        self.assertEqual(traffic_row[2], "66,67%")
+        self.assertEqual(traffic_row[3], "33,33%")
+        self.assertEqual(traffic_row[4], "")
+        self.assertEqual(traffic_row[5], "100%")
+        self.assertEqual(traffic_row[6], "100%")
 
     def test_monitoring_day_block_offsets_organic_formula_for_later_blocks(self) -> None:
         report = build_product_report(
@@ -302,6 +507,17 @@ class SyncTests(TestCase):
             monitoring_group=CampaignMonitoringGroup.OTHER,
         )
         self.campaign.products.add(self.product)
+
+    def test_run_sync_rejects_parallel_run_when_running_log_exists(self) -> None:
+        SyncLog.objects.create(
+            kind=SyncKind.FULL,
+            status=SyncStatus.RUNNING,
+            target_date=date(2026, 3, 17),
+            payload={},
+        )
+
+        with self.assertRaisesMessage(SyncServiceError, "Синхронизация уже выполняется"):
+            run_sync(reference_date=date(2026, 3, 17), overwrite=True)
 
     def test_build_product_stock_payload_from_sizes_sums_nested_metrics(self) -> None:
         payload = build_product_stock_payload_from_sizes(
@@ -601,7 +817,31 @@ class SyncTests(TestCase):
         self.assertEqual(note.seller_price, Decimal("3395.00"))
         self.assertEqual(note.wb_price, Decimal("2783.00"))
         self.assertEqual(note.negative_feedback, "1")
-        self.assertTrue(note.unified_enabled)
+        self.assertFalse(note.unified_enabled)
+        campaign_stat = DailyCampaignProductStat.objects.get(
+            campaign=campaign,
+            product=product,
+            stats_date=reference_date,
+            zone=CampaignZone.SEARCH,
+        )
+        self.assertEqual(campaign_stat.impressions, 100)
+        self.assertEqual(campaign_stat.clicks, 10)
+        self.assertEqual(campaign_stat.spend, Decimal("55.00"))
+        self.assertEqual(campaign_stat.add_to_cart_count, 2)
+        self.assertEqual(campaign_stat.order_count, 1)
+        self.assertEqual(campaign_stat.units_ordered, 1)
+        self.assertEqual(campaign_stat.order_sum, Decimal("1300.00"))
+        cluster_stat = DailyCampaignSearchClusterStat.objects.get(
+            campaign=campaign,
+            product=product,
+            stats_date=reference_date,
+        )
+        self.assertEqual(cluster_stat.impressions, 2424)
+        self.assertEqual(cluster_stat.clicks, 219)
+        self.assertEqual(cluster_stat.spend, Decimal("0.00"))
+        self.assertEqual(cluster_stat.add_to_cart_count, 0)
+        self.assertEqual(cluster_stat.order_count, 0)
+        self.assertEqual(cluster_stat.units_ordered, 0)
         primary_keyword = DailyProductKeywordStat.objects.get(
             product=product,
             stats_date=reference_date,
@@ -611,6 +851,173 @@ class SyncTests(TestCase):
         self.assertEqual(primary_keyword.organic_position, Decimal("4.00"))
         self.assertEqual(primary_keyword.boosted_position, Decimal("15.68"))
         self.assertEqual(primary_keyword.boosted_ctr, Decimal("9.21"))
+
+    def test_run_sync_range_updates_only_selected_dates(self) -> None:
+        range_start = date(2026, 3, 17)
+        range_end = date(2026, 3, 18)
+        product = self.product
+        campaign = self.campaign
+
+        DailyProductMetrics.objects.create(
+            product=product,
+            stats_date=date(2026, 3, 16),
+            open_count=999,
+        )
+
+        class FakeAnalyticsClient:
+            def get_sales_funnel_history(self, *, nm_ids, start_date, end_date):
+                return [
+                    {
+                        "product": {"nmId": product.nm_id, "name": "Updated title"},
+                        "history": [
+                            {
+                                "date": start_date.isoformat(),
+                                "openCount": start_date.day,
+                                "cartCount": 1,
+                                "orderCount": 1,
+                                "orderSum": "100",
+                                "buyoutCount": 1,
+                                "buyoutSum": "100",
+                                "addToWishlistCount": 0,
+                            },
+                            {
+                                "date": "2026-03-01",
+                                "openCount": 777,
+                                "cartCount": 0,
+                                "orderCount": 0,
+                                "orderSum": "0",
+                                "buyoutCount": 0,
+                                "buyoutSum": "0",
+                                "addToWishlistCount": 0,
+                            },
+                        ],
+                        "currency": "RUB",
+                    }
+                ]
+
+            def get_product_stocks(self, *, nm_ids, snapshot_date):
+                return {"data": {"items": []}}
+
+            def get_product_sizes(self, *, nm_id, snapshot_date):
+                return {"data": {"currency": "RUB", "sizes": []}}
+
+            def get_search_orders(self, *, nm_id, start_date, end_date, search_texts):
+                return {"data": {"items": []}}
+
+        class FakePromotionClient:
+            def get_campaigns(self, *, ids=None, statuses=None):
+                return {
+                    "adverts": [
+                        {
+                            "id": campaign.external_id,
+                            "bid_type": "unified",
+                            "status": 9,
+                            "settings": {
+                                "name": "Campaign refreshed",
+                                "payment_type": "cpm",
+                                "placements": {"search": True, "recommendations": True},
+                            },
+                            "nm_settings": [{"nm_id": product.nm_id, "vendorCode": product.vendor_code, "name": product.title}],
+                        }
+                    ]
+                }
+
+            def get_campaign_stats(self, *, ids, start_date, end_date):
+                return [
+                    {
+                        "advertId": campaign.external_id,
+                        "days": [
+                            {
+                                "date": f"{start_date.isoformat()}T00:00:00+00:00",
+                                "apps": [],
+                            }
+                        ],
+                    }
+                ]
+
+            def get_daily_search_cluster_stats(self, *, items, start_date, end_date):
+                return {"items": []}
+
+        class FakeStatisticsClient:
+            def get_supplier_orders(self, *, date_from, flag=1):
+                return [
+                    {"nmId": product.nm_id, "date": "2026-03-17T12:00:00Z", "spp": 10, "priceWithDisc": 100, "finishedPrice": 90},
+                    {"nmId": product.nm_id, "date": "2026-03-18T12:00:00Z", "spp": 11, "priceWithDisc": 110, "finishedPrice": 99},
+                ]
+
+        class FakePricesClient:
+            def get_goods_prices(self, *, nm_ids):
+                return {"data": {"listGoods": []}}
+
+        class FakeFeedbacksClient:
+            def get_feedbacks(self, *, nm_id, is_answered, take=100, skip=0):
+                return {"data": {"feedbacks": []}}
+
+        with patch("monitoring.services.sync.AnalyticsWBClient", return_value=FakeAnalyticsClient()):
+            with patch("monitoring.services.sync.PromotionWBClient", return_value=FakePromotionClient()):
+                with patch("monitoring.services.sync.StatisticsWBClient", return_value=FakeStatisticsClient()):
+                    with patch("monitoring.services.sync.PricesWBClient", return_value=FakePricesClient()):
+                        with patch("monitoring.services.sync.FeedbacksWBClient", return_value=FakeFeedbacksClient()):
+                            log = run_sync(
+                                date_from=range_start,
+                                date_to=range_end,
+                                overwrite=True,
+                            )
+
+        self.assertEqual(log.status, SyncStatus.SUCCESS)
+        self.assertEqual(log.payload.get("stats_date_from"), "2026-03-17")
+        self.assertEqual(log.payload.get("stats_date_to"), "2026-03-18")
+        self.assertEqual(log.payload.get("days_count"), 2)
+
+        metric_16 = DailyProductMetrics.objects.get(product=product, stats_date=date(2026, 3, 16))
+        self.assertEqual(metric_16.open_count, 999)
+        self.assertTrue(DailyProductMetrics.objects.filter(product=product, stats_date=range_start).exists())
+        self.assertTrue(DailyProductMetrics.objects.filter(product=product, stats_date=range_end).exists())
+        self.assertFalse(DailyProductMetrics.objects.filter(product=product, stats_date=date(2026, 3, 1)).exists())
+
+    def test_run_sync_range_skips_days_with_wb_api_day_limit(self) -> None:
+        def fake_single_day(*, reference_date, **kwargs):
+            if reference_date == date(2026, 3, 9):
+                raise SyncServiceError(
+                    "WB API 400: code=400, message={Invalid request body validate: invalid start day: excess limit on days}"
+                )
+            return SyncLog.objects.create(
+                kind=SyncKind.FULL,
+                status=SyncStatus.SUCCESS,
+                target_date=reference_date,
+                finished_at=timezone.now(),
+                message="ok",
+                payload={
+                    "stats_date": reference_date.isoformat(),
+                    "stock_date": reference_date.isoformat(),
+                    "progress": {"percent": 100, "stage": "Завершено", "detail": "ok"},
+                },
+            )
+
+        with patch("monitoring.services.sync._run_sync_single_day", side_effect=fake_single_day):
+            log = run_sync(
+                date_from=date(2026, 3, 9),
+                date_to=date(2026, 3, 10),
+                overwrite=True,
+            )
+
+        self.assertEqual(log.status, SyncStatus.SUCCESS)
+        self.assertEqual(log.payload.get("skipped_dates_due_api_limit"), ["2026-03-09"])
+        self.assertIn("Пропущено дат из-за ограничения WB Analytics", log.message)
+
+    def test_run_sync_range_raises_if_all_days_outside_wb_api_window(self) -> None:
+        with patch(
+            "monitoring.services.sync._run_sync_single_day",
+            side_effect=SyncServiceError(
+                "WB API 400: code=400, message={Invalid request body validate: invalid start day: excess limit on days}"
+            ),
+        ):
+            with self.assertRaisesMessage(SyncServiceError, "целиком вне допустимого окна API"):
+                run_sync(
+                    date_from=date(2026, 3, 9),
+                    date_to=date(2026, 3, 10),
+                    overwrite=True,
+                )
 
 
 class WBClientTests(TestCase):
@@ -700,7 +1107,7 @@ class PreparationTests(TestCase):
 
     def test_build_sheet_payloads_contains_dashboard_and_product(self) -> None:
         seed_demo_dataset()
-        payloads = build_sheet_payloads(reference_date=date.today(), history_days=3)
+        payloads = build_monitoring_sheet_payloads(reference_date=date.today(), history_days=3)
         self.assertGreaterEqual(len(payloads), 2)
         self.assertEqual(payloads[0].title, "Dashboard")
         self.assertEqual(len(payloads[1].rows[0]), 29)
@@ -721,18 +1128,18 @@ class PreparationTests(TestCase):
 
     def test_sheet_payload_dates_match_reference_date_logic(self) -> None:
         seed_demo_dataset()
-        payloads = build_sheet_payloads(reference_date=date(2026, 3, 18), history_days=3)
+        payloads = build_monitoring_sheet_payloads(reference_date=date(2026, 3, 18), history_days=3)
         dashboard = payloads[0]
         product_payload = next(payload for payload in payloads if payload.kind == "product")
         self.assertEqual(dashboard.rows[2][1], "2026-03-18")
         self.assertEqual(dashboard.rows[3][1], "2026-03-18")
-        self.assertEqual(product_payload.rows[0][2], "ОБРАЗЕЦ (16.03.2026)")
-        self.assertEqual(product_payload.rows[0][12], "ОБРАЗЕЦ (17.03.2026)")
-        self.assertEqual(product_payload.rows[0][22], "ОБРАЗЕЦ (18.03.2026)")
+        self.assertEqual(product_payload.rows[0][2], "16.03.2026")
+        self.assertEqual(product_payload.rows[0][12], "17.03.2026")
+        self.assertEqual(product_payload.rows[0][22], "18.03.2026")
 
     def test_workbook_headers_match_generated_sheet_payloads(self) -> None:
         seed_demo_dataset()
-        payloads = build_sheet_payloads(reference_date=date(2026, 3, 18), history_days=3)
+        payloads = build_monitoring_sheet_payloads(reference_date=date(2026, 3, 18), history_days=3)
         product_payload = next(payload for payload in payloads if payload.kind == "product")
         workbook = load_workbook(BytesIO(export_monitoring_workbook_bytes(reference_date=date(2026, 3, 18), history_days=3)))
         sheet = workbook[product_payload.title]
@@ -740,33 +1147,18 @@ class PreparationTests(TestCase):
         self.assertEqual(sheet["M1"].value, product_payload.rows[0][12])
         self.assertEqual(sheet["W1"].value, product_payload.rows[0][22])
 
-    def test_google_dependencies_error_is_lazy_and_explicit(self) -> None:
-        with patch("monitoring.services.google_sheets.GOOGLE_CLIENTS_AVAILABLE", False):
-            with self.assertRaisesMessage(GoogleSheetsSyncError, "python -m pip install -r requirements.txt"):
-                _ensure_google_dependencies()
-
-    def test_sparse_value_updates_preserve_non_contiguous_cells(self) -> None:
-        updates = _sparse_value_updates(
-            "Sheet1",
-            [
-                ["", "", "Header", "", "", "Tail"],
-                ["Value", "Dense", "Row"],
-            ],
+    def test_table_view_payloads_render_only_active_sheet_rows(self) -> None:
+        seed_demo_dataset()
+        payloads = build_table_view_payloads(
+            reference_date=date(2026, 3, 18),
+            history_days=3,
+            active_sheet_key="sheet-1",
         )
-        self.assertEqual(
-            updates,
-            [
-                {"range": "'Sheet1'!C1:C1", "values": [["Header"]]},
-                {"range": "'Sheet1'!F1:F1", "values": [["Tail"]]},
-            ],
-        )
-
-    def test_sheet_values_for_locale_converts_formulas_for_ru_locale(self) -> None:
-        rows = [["=IFERROR(C6/SUM(C6:E6),0)", "=IF(F6>0,1,0)", "Text"]]
-        converted = _sheet_values_for_locale(rows, "ru_RU")
-        self.assertEqual(converted[0][0], "=IFERROR(C6/SUM(C6:E6);0)")
-        self.assertEqual(converted[0][1], "=IF(F6>0;1;0)")
-        self.assertEqual(converted[0][2], "Text")
+        self.assertGreaterEqual(len(payloads), 2)
+        self.assertEqual(payloads[0].rows, [])
+        self.assertTrue(payloads[1].rows)
+        if len(payloads) > 2:
+            self.assertEqual(payloads[2].rows, [])
 
 
 class ProductOperationsTests(TestCase):
@@ -867,6 +1259,55 @@ class ProductOperationsTests(TestCase):
         self.assertTrue(any(card["label"] == "Руч. каталог" for card in report["traffic_cards"]))
         self.assertTrue(any(alert["tone"] == "info" for alert in report["alerts"]))
 
+    def test_add_product_redirects_to_next_when_provided(self) -> None:
+        with patch("monitoring.views.refresh_product_metadata"):
+            response = self.client.post(
+                "/products/add/",
+                {
+                    "nm_id": "22334455",
+                    "buyout_percent": "24.00",
+                    "unit_cost": "1000.00",
+                    "logistics_cost": "250.00",
+                    "primary_keyword": "",
+                    "secondary_keyword": "",
+                    "next": "/products/",
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/products/")
+        self.assertTrue(Product.objects.filter(nm_id=22334455).exists())
+
+    def test_update_product_settings_redirects_to_next_when_provided(self) -> None:
+        product = Product.objects.create(
+            nm_id=91919191,
+            title="Redirect target",
+            vendor_code="RT-1",
+            buyout_percent=Decimal("24.00"),
+            unit_cost=Decimal("1200.00"),
+            logistics_cost=Decimal("300.00"),
+        )
+        response = self.client.post(
+            f"/products/{product.pk}/settings/",
+            {
+                "title": "Redirect target updated",
+                "vendor_code": "RT-2",
+                "brand_name": "",
+                "subject_name": "",
+                "buyout_percent": "25.00",
+                "unit_cost": "1300.00",
+                "logistics_cost": "320.00",
+                "economics_effective_from": "2026-03-18",
+                "primary_keyword": "",
+                "secondary_keyword": "",
+                "visible_warehouses": [],
+                "visible_warehouse_names_extra": "",
+                "is_active": "on",
+                "next": f"/products/?edit={product.pk}",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"/products/?edit={product.pk}")
+
 
 class WorkspaceOverviewTests(TestCase):
     def test_workspace_overview_contains_schedule_and_sync_state(self) -> None:
@@ -874,7 +1315,6 @@ class WorkspaceOverviewTests(TestCase):
         settings_obj.report_timezone = "Asia/Bishkek"
         settings_obj.sync_hour = 10
         settings_obj.sync_minute = 0
-        settings_obj.google_spreadsheet_id = "test-sheet-id"
         settings_obj.save()
         product = Product.objects.create(nm_id=444555, title="Overview product")
         DailyProductMetrics.objects.create(
@@ -899,7 +1339,7 @@ class WorkspaceOverviewTests(TestCase):
         overview = build_workspace_overview()
 
         self.assertIn("signals", overview)
-        self.assertEqual(len(overview["signals"]), 4)
+        self.assertEqual(len(overview["signals"]), 3)
         self.assertIsNotNone(overview["next_run"])
 
 
@@ -912,7 +1352,15 @@ class ReportingHubTests(TestCase):
         self.assertIn("timeline_chart", context)
         self.assertIn("product_chart", context)
         self.assertEqual(context["timeline_chart"]["defaultMetric"], "revenue")
+        self.assertEqual(context["timeline_chart"]["defaultType"], "line")
         self.assertTrue(context["summary_cards"])
+        self.assertTrue(context["kpi_cards"])
+        self.assertIn("trend_rows", context)
+        self.assertIn("diagnostic_rows", context)
+        self.assertIn("cpo", context["timeline_chart"]["series"])
+        self.assertIn("drr", context["timeline_chart"]["series"])
+        self.assertIn("cpo", context["product_chart"]["series"])
+        self.assertIn("drr", context["product_chart"]["series"])
 
 
 class PageRenderTests(TestCase):
@@ -920,8 +1368,380 @@ class PageRenderTests(TestCase):
         seed_demo_dataset()
         product = Product.objects.filter(is_active=True).first()
         dashboard = self.client.get("/")
+        products_page = self.client.get("/products/")
         detail = self.client.get(f"/products/{product.pk}/")
         reports = self.client.get("/reports/")
         self.assertEqual(dashboard.status_code, 200)
+        self.assertEqual(products_page.status_code, 200)
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(reports.status_code, 200)
+        self.assertContains(products_page, "Список товаров")
+        self.assertContains(detail, 'data-detail-tab-trigger="overview"')
+        self.assertContains(reports, 'data-reports-tab-trigger="overview"')
+        self.assertNotContains(reports, 'data-reports-tab-trigger="analytics"')
+        self.assertNotContains(reports, 'data-reports-panel="analytics"')
+
+    def test_table_page_renders_monitoring_grid(self) -> None:
+        seed_demo_dataset()
+        response = self.client.get("/table/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "monitoring-grid-table")
+        self.assertContains(response, "data-sync-indicator")
+
+    def test_table_page_renders_inline_note_controls(self) -> None:
+        seed_demo_dataset()
+        response = self.client.get("/table/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-note-control="bool"')
+        self.assertContains(response, 'data-note-control="select"')
+        self.assertContains(response, 'data-note-control="input"')
+        self.assertContains(response, 'data-note-control="text"')
+        self.assertContains(response, "is-comment-span")
+        self.assertContains(response, 'colspan="7"')
+        self.assertContains(response, "is-stock-span")
+        self.assertContains(response, "data-stock-popup-button")
+        self.assertContains(response, 'id="table-modal-stocks"')
+        self.assertContains(response, 'data-table-action="fullscreen"')
+        self.assertContains(response, 'data-inline-status')
+        self.assertNotContains(response, "data-table-row-search")
+        self.assertContains(response, 'data-day-step="-1"')
+        self.assertContains(response, 'data-day-step="1"')
+        self.assertContains(response, 'data-day-meta')
+        self.assertContains(response, "Компактный режим")
+        self.assertNotContains(response, "Плотный режим")
+
+    def test_core_pages_render_utf8_without_mojibake(self) -> None:
+        seed_demo_dataset()
+        for url in ("/table/", "/products/", "/reports/", "/settings/"):
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("charset=utf-8", response["Content-Type"].lower())
+            html = response.content.decode("utf-8")
+            self.assertNotIn("РќР", html)
+
+    def test_reports_bar_width_styles_use_dot_separator(self) -> None:
+        seed_demo_dataset()
+        response = self.client.get("/reports/")
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode("utf-8")
+        self.assertIsNone(re.search(r'bar-fill (?:accent|warm)" style="width:\\s*\\d+,\\d+%;"', html))
+
+    def test_reports_page_accepts_explicit_date_range(self) -> None:
+        seed_demo_dataset()
+        response = self.client.get("/reports/?date_from=2026-03-12&date_to=2026-03-18")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["date_from"], date(2026, 3, 12))
+        self.assertEqual(response.context["date_to"], date(2026, 3, 18))
+        self.assertEqual(response.context["range_days"], 7)
+        self.assertContains(response, "12.03.2026 — 18.03.2026")
+
+    def test_reports_page_prefills_range_fields_from_reference_and_window_query(self) -> None:
+        seed_demo_dataset()
+        response = self.client.get("/reports/?reference_date=2026-03-18&range_days=14")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["date_from"], date(2026, 3, 5))
+        self.assertEqual(response.context["date_to"], date(2026, 3, 18))
+        self.assertContains(response, 'name="date_from"')
+        self.assertContains(response, 'value="2026-03-05"')
+        self.assertContains(response, 'name="date_to"')
+        self.assertContains(response, 'value="2026-03-18"')
+
+    def test_products_page_uses_modals_for_add_and_edit(self) -> None:
+        seed_demo_dataset()
+        product = Product.objects.filter(is_active=True).first()
+        response = self.client.get(f"/products/?edit={product.pk}&modal=edit")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="products-modal-add"')
+        self.assertContains(response, 'id="products-modal-edit"')
+        self.assertContains(response, 'data-modal-open="products-modal-add"')
+        self.assertContains(response, 'data-modal-open="products-modal-edit"')
+        self.assertContains(response, "table_grid_controls.js")
+        self.assertNotContains(response, 'id="product-edit"')
+
+
+class TemplateFilterTests(TestCase):
+    def test_css_percent_formats_for_inline_styles(self) -> None:
+        self.assertEqual(css_percent(Decimal("31.93")), "31.93")
+        self.assertEqual(css_percent("28,13"), "28.13")
+        self.assertEqual(css_percent(Decimal("-3.5")), "0.00")
+        self.assertEqual(css_percent(Decimal("130.777")), "100.00")
+
+
+class SyncFormTests(TestCase):
+    def test_sync_form_normalizes_single_side_range(self) -> None:
+        form = SyncForm(
+            data={
+                "date_from": "2026-03-18",
+                "force": "on",
+            }
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["date_from"], date(2026, 3, 18))
+        self.assertEqual(form.cleaned_data["date_to"], date(2026, 3, 18))
+
+    def test_sync_form_rejects_invalid_range(self) -> None:
+        form = SyncForm(
+            data={
+                "date_from": "2026-03-19",
+                "date_to": "2026-03-18",
+                "force": "on",
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("date_to", form.errors)
+
+
+class ReportsFilterFormTests(TestCase):
+    def test_reports_filter_form_accepts_explicit_date_range(self) -> None:
+        form = ReportsFilterForm(
+            data={
+                "date_from": "2026-03-11",
+                "date_to": "2026-03-18",
+                "reference_date": "2026-03-18",
+                "range_days": "14",
+            }
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["date_from"], date(2026, 3, 11))
+        self.assertEqual(form.cleaned_data["date_to"], date(2026, 3, 18))
+        self.assertEqual(form.cleaned_data["reference_date"], date(2026, 3, 18))
+        self.assertEqual(form.cleaned_data["range_days"], 8)
+
+    def test_reports_filter_form_builds_period_from_date_to_and_window(self) -> None:
+        form = ReportsFilterForm(
+            data={
+                "date_to": "2026-03-18",
+                "range_days": "14",
+            }
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["date_to"], date(2026, 3, 18))
+        self.assertEqual(form.cleaned_data["date_from"], date(2026, 3, 5))
+
+
+class SyncViewsTests(TestCase):
+    def test_sync_status_returns_idle_payload_when_no_logs(self) -> None:
+        response = self.client.get("/sync/status/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["has_sync"])
+        self.assertFalse(payload["is_running"])
+        self.assertEqual(payload["progress"]["percent"], 0)
+
+    def test_sync_status_returns_running_log_progress(self) -> None:
+        log = SyncLog.objects.create(
+            kind=SyncKind.FULL,
+            status=SyncStatus.RUNNING,
+            target_date=date(2026, 3, 18),
+            payload={
+                "progress": {
+                    "percent": 37,
+                    "stage": "Остатки",
+                    "detail": "Сбор остатков",
+                }
+            },
+        )
+        response = self.client.get("/sync/status/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["has_sync"])
+        self.assertTrue(payload["is_running"])
+        self.assertEqual(payload["id"], log.id)
+        self.assertEqual(payload["progress"]["percent"], 37)
+        self.assertEqual(payload["progress"]["stage"], "Остатки")
+        self.assertTrue(payload["can_cancel"])
+        self.assertFalse(payload["cancel_requested"])
+
+    def test_sync_cancel_requests_running_sync_stop(self) -> None:
+        log = SyncLog.objects.create(
+            kind=SyncKind.FULL,
+            status=SyncStatus.RUNNING,
+            target_date=date(2026, 3, 18),
+            payload={
+                "progress": {
+                    "percent": 96,
+                    "stage": "Финализация",
+                    "detail": "Формирование итогов.",
+                }
+            },
+        )
+        response = self.client.post(
+            "/sync/cancel/",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["sync_id"], log.id)
+
+        log.refresh_from_db()
+        self.assertEqual(log.status, SyncStatus.CANCELED)
+        self.assertIsNotNone(log.finished_at)
+        self.assertTrue(log.payload.get("cancel_requested"))
+        self.assertEqual((log.payload.get("progress") or {}).get("stage"), "Отменено")
+
+    def test_sync_cancel_returns_info_when_no_running_sync(self) -> None:
+        response = self.client.post(
+            "/sync/cancel/",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["has_running_sync"])
+
+    def test_sync_all_starts_background_worker(self) -> None:
+        with patch("monitoring.views.run_sync_in_background") as start_mock:
+            response = self.client.post(
+                "/sync/",
+                {
+                    "reference_date": "2026-03-18",
+                    "force": "on",
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+        start_mock.assert_called_once()
+        self.assertEqual(start_mock.call_args.kwargs["date_from"], date(2026, 3, 18))
+        self.assertEqual(start_mock.call_args.kwargs["date_to"], date(2026, 3, 18))
+        self.assertTrue(start_mock.call_args.kwargs["overwrite"])
+
+    def test_sync_all_accepts_date_range(self) -> None:
+        with patch("monitoring.views.run_sync_in_background") as start_mock:
+            response = self.client.post(
+                "/sync/",
+                {
+                    "date_from": "2026-03-17",
+                    "date_to": "2026-03-18",
+                    "force": "on",
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+        start_mock.assert_called_once()
+        self.assertEqual(start_mock.call_args.kwargs["date_from"], date(2026, 3, 17))
+        self.assertEqual(start_mock.call_args.kwargs["date_to"], date(2026, 3, 18))
+
+    def test_sync_product_starts_background_worker(self) -> None:
+        product = Product.objects.create(
+            nm_id=20260322,
+            title="Async sync product",
+            vendor_code="ASYNC-1",
+            buyout_percent=Decimal("24.00"),
+            unit_cost=Decimal("1200.00"),
+            logistics_cost=Decimal("300.00"),
+        )
+        with patch("monitoring.views.run_sync_in_background") as start_mock:
+            response = self.client.post(
+                f"/products/{product.pk}/sync/",
+                {
+                    "reference_date": "2026-03-18",
+                    "force": "on",
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+        start_mock.assert_called_once()
+        self.assertEqual(start_mock.call_args.kwargs["date_from"], date(2026, 3, 18))
+        self.assertEqual(start_mock.call_args.kwargs["date_to"], date(2026, 3, 18))
+
+
+class TableInlineNoteUpdateTests(TestCase):
+    def setUp(self) -> None:
+        self.product = Product.objects.create(
+            nm_id=99887766,
+            title="Inline note product",
+            vendor_code="INLINE-1",
+            buyout_percent=Decimal("24.00"),
+            unit_cost=Decimal("500.00"),
+            logistics_cost=Decimal("100.00"),
+        )
+        self.note = DailyProductNote.objects.create(
+            product=self.product,
+            note_date=date(2026, 3, 18),
+            promo_status="Не участвуем",
+            negative_feedback="Без изменений",
+            unified_enabled=False,
+        )
+
+    def test_table_note_cell_updates_boolean_field(self) -> None:
+        response = self.client.post(
+            "/table/note-cell/",
+            data=json.dumps(
+                {
+                    "product_id": self.product.id,
+                    "note_date": "2026-03-18",
+                    "field": "unified_enabled",
+                    "value": True,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["value"], "Да")
+
+        self.note.refresh_from_db()
+        self.assertTrue(self.note.unified_enabled)
+
+    def test_table_note_cell_updates_select_field(self) -> None:
+        response = self.client.post(
+            "/table/note-cell/",
+            data=json.dumps(
+                {
+                    "product_id": self.product.id,
+                    "note_date": "2026-03-18",
+                    "field": "promo_status",
+                    "value": "Тест",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["value"], "Тест")
+
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.promo_status, "Тест")
+    def test_table_note_cell_updates_decimal_note_field(self) -> None:
+        response = self.client.post(
+            "/table/note-cell/",
+            data=json.dumps(
+                {
+                    "product_id": self.product.id,
+                    "note_date": "2026-03-18",
+                    "field": "spp_percent",
+                    "value": "29,00",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["value"], "29")
+
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.spp_percent, Decimal("29.00"))
+
+    def test_table_note_cell_updates_economics_for_selected_date(self) -> None:
+        response = self.client.post(
+            "/table/note-cell/",
+            data=json.dumps(
+                {
+                    "product_id": self.product.id,
+                    "note_date": "2026-03-18",
+                    "field": "unit_cost",
+                    "value": "700,00",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["value"], "700")
+
+        version = ProductEconomicsVersion.objects.get(product=self.product, effective_from=date(2026, 3, 18))
+        self.assertEqual(version.unit_cost, Decimal("700.00"))

@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
+from functools import lru_cache
 from typing import Any
 
 from django.conf import settings
-from django.db.models import Avg, Max
+from django.db.models import Avg, Count, Max, Sum
 from django.utils import timezone
 
 from monitoring.models import (
     CampaignMonitoringGroup,
     CampaignZone,
     DailyCampaignProductStat,
+    DailyCampaignSearchClusterStat,
     DailyProductKeywordStat,
     DailyProductMetrics,
     DailyProductNote,
@@ -20,10 +23,12 @@ from monitoring.models import (
     DailyWarehouseStock,
     Product,
     ProductEconomicsVersion,
+    ProductCampaign,
     SyncLog,
 )
 
 ZERO = Decimal("0")
+ONE = Decimal("1")
 ONE_HUNDRED = Decimal("100")
 
 
@@ -33,6 +38,19 @@ def decimalize(value: Any) -> Decimal:
     if isinstance(value, Decimal):
         return value
     return Decimal(str(value))
+
+
+def percent_points(value: Any) -> Decimal:
+    number = decimalize(value)
+    if number == ZERO:
+        return ZERO
+    if -ONE <= number <= ONE:
+        return number * ONE_HUNDRED
+    return number
+
+
+def percent_fraction(value: Any) -> Decimal:
+    return safe_divide(percent_points(value), ONE_HUNDRED)
 
 
 def safe_divide(numerator: Decimal | int | float, denominator: Decimal | int | float) -> Decimal:
@@ -50,6 +68,7 @@ def normalize_search_text(value: str) -> str:
     return " ".join((value or "").strip().lower().split())
 
 
+@lru_cache(maxsize=1)
 def parse_zone_map() -> dict[int, str]:
     mapping: dict[int, str] = {}
     for chunk in settings.WB_APP_TYPE_ZONE_MAP.split(","):
@@ -111,6 +130,54 @@ class MetricCell:
         return safe_divide(self.impressions * 100, total_impressions)
 
 
+def clone_metric_cell(cell: MetricCell) -> MetricCell:
+    return MetricCell(
+        impressions=cell.impressions,
+        clicks=cell.clicks,
+        spend=decimalize(cell.spend),
+        carts=cell.carts,
+        orders=cell.orders,
+        order_sum=decimalize(cell.order_sum),
+        units=cell.units,
+    )
+
+
+def metric_cell_from_search_clusters(cluster_rows: list[DailyCampaignSearchClusterStat]) -> MetricCell:
+    cell = MetricCell()
+    for row in cluster_rows:
+        cell.impressions += int(row.impressions or 0)
+        cell.clicks += int(row.clicks or 0)
+        cell.spend += decimalize(row.spend)
+        cell.carts += int(row.add_to_cart_count or 0)
+        cell.orders += int(row.order_count or 0)
+        cell.units += int(row.units_ordered or 0)
+    return cell
+
+
+def clamp_metric_cell_to_total(cell: MetricCell, total: MetricCell) -> MetricCell:
+    clamped = clone_metric_cell(cell)
+    clamped.impressions = max(0, min(clamped.impressions, total.impressions))
+    clamped.clicks = max(0, min(clamped.clicks, total.clicks))
+    clamped.spend = max(ZERO, min(decimalize(clamped.spend), decimalize(total.spend)))
+    clamped.carts = max(0, min(clamped.carts, total.carts))
+    clamped.orders = max(0, min(clamped.orders, total.orders))
+    clamped.units = max(0, min(clamped.units, total.units))
+    clamped.order_sum = max(ZERO, min(decimalize(clamped.order_sum), decimalize(total.order_sum)))
+    return clamped
+
+
+def subtract_metric_cells(total: MetricCell, part: MetricCell) -> MetricCell:
+    return MetricCell(
+        impressions=max(total.impressions - part.impressions, 0),
+        clicks=max(total.clicks - part.clicks, 0),
+        spend=max(decimalize(total.spend) - decimalize(part.spend), ZERO),
+        carts=max(total.carts - part.carts, 0),
+        orders=max(total.orders - part.orders, 0),
+        order_sum=max(decimalize(total.order_sum) - decimalize(part.order_sum), ZERO),
+        units=max(total.units - part.units, 0),
+    )
+
+
 @dataclass(frozen=True)
 class ResolvedEconomics:
     effective_from: date | None
@@ -163,7 +230,7 @@ def estimate_buyout_sum(product_or_economics: Product | ResolvedEconomics, order
         if isinstance(product_or_economics, Product)
         else product_or_economics
     )
-    return quantize_money(order_sum * decimalize(economics.buyout_percent) / ONE_HUNDRED)
+    return quantize_money(order_sum * percent_fraction(economics.buyout_percent))
 
 
 def estimate_profit(
@@ -178,7 +245,7 @@ def estimate_profit(
         if isinstance(product_or_economics, Product)
         else product_or_economics
     )
-    buyout_units = decimalize(order_count) * decimalize(economics.buyout_percent) / ONE_HUNDRED
+    buyout_units = decimalize(order_count) * percent_fraction(economics.buyout_percent)
     estimated_sales = estimate_buyout_sum(economics, order_sum)
     goods_cost = buyout_units * decimalize(economics.unit_cost)
     logistics = buyout_units * decimalize(economics.logistics_cost)
@@ -189,6 +256,41 @@ def build_dashboard_context(*, stats_date: date | None = None, stock_date: date 
     stats_date = stats_date or get_default_dates()[0]
     stock_date = stock_date or get_default_dates()[1]
     products = list(Product.objects.filter(is_active=True).order_by("title", "nm_id"))
+    product_ids = [product.id for product in products]
+
+    metrics_by_product_id = {
+        item.product_id: item
+        for item in DailyProductMetrics.objects.filter(
+            product_id__in=product_ids,
+            stats_date=stats_date,
+        )
+    }
+    stocks_by_product_id = {
+        item.product_id: item
+        for item in DailyProductStock.objects.filter(
+            product_id__in=product_ids,
+            stats_date=stock_date,
+        )
+    }
+    spend_by_product_id = {
+        row["product_id"]: quantize_money(decimalize(row["spend"]))
+        for row in DailyCampaignProductStat.objects.filter(
+            product_id__in=product_ids,
+            stats_date=stats_date,
+        )
+        .values("product_id")
+        .annotate(spend=Sum("spend"))
+    }
+    campaigns_count_by_product_id = {
+        row["product_id"]: int(row["campaigns_count"] or 0)
+        for row in ProductCampaign.objects.filter(
+            product_id__in=product_ids,
+            campaign__is_active=True,
+        )
+        .values("product_id")
+        .annotate(campaigns_count=Count("campaign_id", distinct=True))
+    }
+
     cards: list[dict[str, Any]] = []
     total_orders = 0
     total_order_sum = ZERO
@@ -197,14 +299,10 @@ def build_dashboard_context(*, stats_date: date | None = None, stock_date: date 
     total_campaigns = 0
 
     for product in products:
-        metrics = product.daily_metrics.filter(stats_date=stats_date).first()
-        stock = product.daily_stocks.filter(stats_date=stock_date).first()
-        spend_values = product.campaign_stats.filter(
-            stats_date=stats_date,
-            campaign__products=product,
-        ).values_list("spend", flat=True)
-        product_spend = sum((decimalize(item) for item in spend_values), ZERO)
-        campaigns_count = product.campaigns.filter(is_active=True).count()
+        metrics = metrics_by_product_id.get(product.id)
+        stock = stocks_by_product_id.get(product.id)
+        product_spend = spend_by_product_id.get(product.id, ZERO)
+        campaigns_count = campaigns_count_by_product_id.get(product.id, 0)
         cards.append(
             {
                 "product": product,
@@ -242,25 +340,61 @@ def build_product_report(
     stats_date: date | None = None,
     stock_date: date | None = None,
     create_note: bool = True,
+    preloaded_metrics: dict[date, DailyProductMetrics] | None = None,
+    preloaded_stocks: dict[date, DailyProductStock] | None = None,
+    preloaded_notes: dict[date, DailyProductNote] | None = None,
+    preloaded_warehouse_rows: dict[date, list[DailyWarehouseStock]] | None = None,
+    preloaded_campaign_stats: dict[date, list[DailyCampaignProductStat]] | None = None,
+    preloaded_keyword_stats: dict[date, list[DailyProductKeywordStat]] | None = None,
+    preloaded_search_cluster_stats: dict[date, list[DailyCampaignSearchClusterStat]] | None = None,
+    preloaded_economics: dict[date, ResolvedEconomics] | None = None,
+    preloaded_visible_warehouse_names: set[str] | None = None,
+    preloaded_active_campaign_exists: bool | None = None,
+    preloaded_history: list[DailyProductMetrics] | None = None,
+    preloaded_rolling_avg_orders: Decimal | int | float | None = None,
 ) -> dict[str, Any]:
     stats_date = stats_date or get_default_dates(product)[0]
     stock_date = stock_date or get_default_dates(product)[1]
-    economics = resolve_product_economics(product, stock_date)
-    metrics = product.daily_metrics.filter(stats_date=stats_date).first()
-    stock = product.daily_stocks.filter(stats_date=stock_date).first()
+    economics = (
+        preloaded_economics.get(stock_date)
+        if preloaded_economics is not None
+        else resolve_product_economics(product, stock_date)
+    ) or resolve_product_economics(product, stock_date)
+    metrics = (
+        preloaded_metrics.get(stats_date)
+        if preloaded_metrics is not None
+        else product.daily_metrics.filter(stats_date=stats_date).first()
+    )
+    stock = (
+        preloaded_stocks.get(stock_date)
+        if preloaded_stocks is not None
+        else product.daily_stocks.filter(stats_date=stock_date).first()
+    )
     if create_note:
-        daily_note, _ = DailyProductNote.objects.get_or_create(product=product, note_date=stats_date)
+        if preloaded_notes is not None and stats_date in preloaded_notes:
+            daily_note = preloaded_notes[stats_date]
+        else:
+            daily_note, _ = DailyProductNote.objects.get_or_create(product=product, note_date=stats_date)
     else:
-        daily_note = DailyProductNote.objects.filter(product=product, note_date=stats_date).first() or DailyProductNote(
-            product=product,
-            note_date=stats_date,
+        daily_note = (
+            preloaded_notes.get(stats_date) if preloaded_notes is not None else None
+        ) or DailyProductNote.objects.filter(product=product, note_date=stats_date).first() or DailyProductNote(
+            product=product, note_date=stats_date
         )
-    preferred_warehouse_names = {normalize_warehouse_name(item) for item in product.visible_warehouse_names()}
-    warehouse_rows = list(
-        DailyWarehouseStock.objects.filter(
-            product=product,
-            stats_date=stock_date,
-        ).select_related("warehouse")
+    preferred_warehouse_names = (
+        set(preloaded_visible_warehouse_names)
+        if preloaded_visible_warehouse_names is not None
+        else {normalize_warehouse_name(item) for item in product.visible_warehouse_names()}
+    )
+    warehouse_rows = (
+        list(preloaded_warehouse_rows.get(stock_date) or [])
+        if preloaded_warehouse_rows is not None
+        else list(
+            DailyWarehouseStock.objects.filter(
+                product=product,
+                stats_date=stock_date,
+            ).select_related("warehouse")
+        )
     )
     if preferred_warehouse_names:
         warehouse_rows = [
@@ -268,30 +402,88 @@ def build_product_report(
         ]
     else:
         warehouse_rows = [row for row in warehouse_rows if row.warehouse.is_visible_in_monitoring]
-    campaign_stats = list(
-        DailyCampaignProductStat.objects.filter(
-            product=product,
-            stats_date=stats_date,
-            campaign__products=product,
+    campaign_stats = (
+        list(preloaded_campaign_stats.get(stats_date) or [])
+        if preloaded_campaign_stats is not None
+        else list(
+            DailyCampaignProductStat.objects.filter(
+                product=product,
+                stats_date=stats_date,
+                campaign__products=product,
+            )
+            .select_related("campaign")
+            .order_by("campaign__monitoring_group", "zone")
         )
-        .select_related("campaign")
-        .order_by("campaign__monitoring_group", "zone")
     )
-    keyword_stats = list(
-        DailyProductKeywordStat.objects.filter(
-            product=product,
-            stats_date=stats_date,
-        ).order_by("query_text")
+    keyword_stats = (
+        list(preloaded_keyword_stats.get(stats_date) or [])
+        if preloaded_keyword_stats is not None
+        else list(
+            DailyProductKeywordStat.objects.filter(
+                product=product,
+                stats_date=stats_date,
+            ).order_by("query_text")
+        )
     )
-
-    cells: dict[tuple[str, str], MetricCell] = {}
-    for stat in campaign_stats:
-        key = (stat.campaign.monitoring_group, stat.zone)
-        cells.setdefault(key, MetricCell()).add(stat)
 
     total_ad = MetricCell()
     for stat in campaign_stats:
         total_ad.add(stat)
+
+    legacy_cells: dict[tuple[str, str], MetricCell] = {}
+    for stat in campaign_stats:
+        key = (stat.campaign.monitoring_group, stat.zone)
+        legacy_cells.setdefault(key, MetricCell()).add(stat)
+
+    search_cluster_stats = (
+        list(preloaded_search_cluster_stats.get(stats_date) or [])
+        if preloaded_search_cluster_stats is not None
+        else list(
+            DailyCampaignSearchClusterStat.objects.filter(
+                product=product,
+                stats_date=stats_date,
+                campaign__products=product,
+            ).select_related("campaign")
+        )
+    )
+    search_clusters_by_group: dict[str, list[DailyCampaignSearchClusterStat]] = defaultdict(list)
+    for row in search_cluster_stats:
+        search_clusters_by_group[row.campaign.monitoring_group].append(row)
+
+    group_totals: dict[str, MetricCell] = defaultdict(MetricCell)
+    for stat in campaign_stats:
+        group_totals[stat.campaign.monitoring_group].add(stat)
+
+    def resolve_group_cells(group: str) -> tuple[MetricCell, MetricCell, MetricCell]:
+        cluster_rows = search_clusters_by_group.get(group, [])
+        if not cluster_rows:
+            return (
+                legacy_cells.get((group, CampaignZone.SEARCH), MetricCell()),
+                legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell()),
+                legacy_cells.get((group, CampaignZone.CATALOG), MetricCell()),
+            )
+        total = group_totals.get(group, MetricCell())
+        legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
+        search = clone_metric_cell(legacy_search)
+        search_cluster = metric_cell_from_search_clusters(cluster_rows)
+        search.impressions = search_cluster.impressions
+        search.clicks = search_cluster.clicks
+        search.spend = search_cluster.spend
+        search = clamp_metric_cell_to_total(search, total)
+        shelves = subtract_metric_cells(total, search)
+        return search, shelves, MetricCell()
+
+    cells: dict[tuple[str, str], MetricCell] = {}
+    for group in (
+        CampaignMonitoringGroup.UNIFIED,
+        CampaignMonitoringGroup.MANUAL_SEARCH,
+        CampaignMonitoringGroup.MANUAL_SHELVES,
+        CampaignMonitoringGroup.MANUAL_CATALOG,
+    ):
+        search_cell, shelves_cell, catalog_cell = resolve_group_cells(group)
+        cells[(group, CampaignZone.SEARCH)] = search_cell
+        cells[(group, CampaignZone.RECOMMENDATION)] = shelves_cell
+        cells[(group, CampaignZone.CATALOG)] = catalog_cell
 
     traffic_totals = {
         CampaignMonitoringGroup.UNIFIED: sum(
@@ -395,7 +587,12 @@ def build_product_report(
                 "detail": "Складские остатки для этой даты ещё не были собраны или были очищены.",
             }
         )
-    if not campaign_stats and product.campaigns.filter(is_active=True).exists():
+    active_campaign_exists = (
+        bool(preloaded_active_campaign_exists)
+        if preloaded_active_campaign_exists is not None
+        else product.campaigns.filter(is_active=True).exists()
+    )
+    if not campaign_stats and active_campaign_exists:
         alerts.append(
             {
                 "tone": "warning",
@@ -419,8 +616,16 @@ def build_product_report(
             }
         )
 
-    history = list(product.daily_metrics.order_by("-stats_date")[:14])
-    rolling_avg_orders_per_day = product.daily_metrics.order_by("-stats_date")[:7].aggregate(avg=Avg("order_count"))["avg"] or 0
+    history = (
+        list(preloaded_history)
+        if preloaded_history is not None
+        else list(product.daily_metrics.order_by("-stats_date")[:14])
+    )
+    rolling_avg_orders_per_day = (
+        preloaded_rolling_avg_orders
+        if preloaded_rolling_avg_orders is not None
+        else product.daily_metrics.order_by("-stats_date")[:7].aggregate(avg=Avg("order_count"))["avg"] or 0
+    )
     avg_orders_per_day = decimalize(stock.avg_orders_per_day if stock else 0) or decimalize(rolling_avg_orders_per_day)
     days_until_zero = decimalize(stock.days_until_zero if stock else 0)
     if days_until_zero == 0 and avg_orders_per_day:

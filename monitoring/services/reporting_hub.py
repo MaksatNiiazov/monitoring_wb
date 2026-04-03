@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.db.models import Sum
+from django.db.models import Count, Sum
 
 from monitoring.models import (
     CampaignMonitoringGroup,
@@ -12,8 +12,12 @@ from monitoring.models import (
     DailyProductStock,
     DailyWarehouseStock,
     Product,
+    ProductCampaign,
 )
-from monitoring.services.reports import build_product_report, decimalize, quantize_money, safe_divide
+from monitoring.services.reports import decimalize, quantize_money, safe_divide
+
+
+ZERO = Decimal("0")
 
 
 def _float(value) -> float:
@@ -42,33 +46,25 @@ def _format_percent(value) -> str:
     return f"{decimalize(value).quantize(Decimal('0.01'))}%".replace(".", ",")
 
 
-def _series_point(*, stock_date: date) -> dict:
-    stats_date = stock_date
-    funnel = DailyProductMetrics.objects.filter(stats_date=stats_date).aggregate(
-        opens=Sum("open_count"),
-        carts=Sum("add_to_cart_count"),
-        orders=Sum("order_count"),
-        revenue=Sum("order_sum"),
-    )
-    ad = DailyCampaignProductStat.objects.filter(stats_date=stats_date).aggregate(
-        clicks=Sum("clicks"),
-        carts=Sum("add_to_cart_count"),
-        orders=Sum("order_count"),
-        spend=Sum("spend"),
-        revenue=Sum("order_sum"),
-        impressions=Sum("impressions"),
-    )
-    stock = DailyProductStock.objects.filter(stats_date=stock_date).aggregate(
-        total_stock=Sum("total_stock"),
-        to_client=Sum("in_way_to_client"),
-    )
+def _sum_decimal_points(series_points: list[dict], key: str) -> Decimal:
+    return sum((decimalize(point.get(key)) for point in series_points), ZERO)
 
+
+def _sum_int_points(series_points: list[dict], key: str) -> int:
+    return sum((int(point.get(key) or 0) for point in series_points), 0)
+
+
+def _series_point_from_aggregates(*, stock_date: date, funnel: dict, ad: dict, stock: dict) -> dict:
+    stats_date = stock_date
     total_orders = _int(funnel.get("orders"))
     total_revenue = quantize_money(decimalize(funnel.get("revenue")))
     ad_orders = _int(ad.get("orders"))
     ad_revenue = quantize_money(decimalize(ad.get("revenue")))
+    ad_spend = quantize_money(decimalize(ad.get("spend")))
     organic_orders = max(total_orders - ad_orders, 0)
-    organic_revenue = quantize_money(max(total_revenue - ad_revenue, Decimal("0")))
+    organic_revenue = quantize_money(max(total_revenue - ad_revenue, ZERO))
+    ad_clicks = _int(ad.get("clicks"))
+    funnel_opens = _int(funnel.get("opens"))
 
     return {
         "stock_date": stock_date,
@@ -76,22 +72,79 @@ def _series_point(*, stock_date: date) -> dict:
         "label": stock_date.strftime("%d.%m"),
         "orders": total_orders,
         "revenue": _float(total_revenue),
-        "spend": _float(ad.get("spend")),
+        "spend": _float(ad_spend),
         "stock": _int(stock.get("total_stock")),
-        "clicks": _int(ad.get("clicks")) + max(_int(funnel.get("opens")) - _int(ad.get("clicks")), 0),
+        "clicks": ad_clicks + max(funnel_opens - ad_clicks, 0),
+        "funnel_opens": funnel_opens,
+        "ad_clicks": ad_clicks,
+        "ad_carts": _int(ad.get("carts")),
+        "ad_revenue": _float(ad_revenue),
         "organic_orders": organic_orders,
         "organic_revenue": _float(organic_revenue),
         "organic_share": _float(safe_divide(organic_orders * 100, total_orders)),
         "ad_orders": ad_orders,
         "impressions": _int(ad.get("impressions")),
         "to_client": _int(stock.get("to_client")),
+        "cpo": _float(safe_divide(ad_spend, ad_orders)),
+        "drr": _float(safe_divide(ad_spend * 100, ad_revenue)),
     }
+
+
+def _series_points_for_dates(*, stock_dates: list[date]) -> list[dict]:
+    if not stock_dates:
+        return []
+
+    start_date = min(stock_dates)
+    end_date = max(stock_dates)
+
+    funnel_by_date = {
+        row["stats_date"]: row
+        for row in DailyProductMetrics.objects.filter(stats_date__range=(start_date, end_date))
+        .values("stats_date")
+        .annotate(
+            opens=Sum("open_count"),
+            carts=Sum("add_to_cart_count"),
+            orders=Sum("order_count"),
+            revenue=Sum("order_sum"),
+        )
+    }
+    ad_by_date = {
+        row["stats_date"]: row
+        for row in DailyCampaignProductStat.objects.filter(stats_date__range=(start_date, end_date))
+        .values("stats_date")
+        .annotate(
+            clicks=Sum("clicks"),
+            carts=Sum("add_to_cart_count"),
+            orders=Sum("order_count"),
+            spend=Sum("spend"),
+            revenue=Sum("order_sum"),
+            impressions=Sum("impressions"),
+        )
+    }
+    stock_by_date = {
+        row["stats_date"]: row
+        for row in DailyProductStock.objects.filter(stats_date__range=(start_date, end_date))
+        .values("stats_date")
+        .annotate(total_stock=Sum("total_stock"), to_client=Sum("in_way_to_client"))
+    }
+
+    series_points: list[dict] = []
+    for stock_date in stock_dates:
+        series_points.append(
+            _series_point_from_aggregates(
+                stock_date=stock_date,
+                funnel=funnel_by_date.get(stock_date, {}),
+                ad=ad_by_date.get(stock_date, {}),
+                stock=stock_by_date.get(stock_date, {}),
+            )
+        )
+    return series_points
 
 
 def _timeline_dataset(series_points: list[dict]) -> dict:
     return {
         "defaultMetric": "revenue",
-        "defaultType": "area",
+        "defaultType": "line",
         "labels": [point["label"] for point in series_points],
         "series": {
             "orders": {
@@ -118,6 +171,16 @@ def _timeline_dataset(series_points: list[dict]) -> dict:
                 "label": "Доля органики",
                 "format": "percent",
                 "values": [point["organic_share"] for point in series_points],
+            },
+            "cpo": {
+                "label": "CPO",
+                "format": "money",
+                "values": [point["cpo"] for point in series_points],
+            },
+            "drr": {
+                "label": "ДРР",
+                "format": "percent",
+                "values": [point["drr"] for point in series_points],
             },
         },
     }
@@ -153,6 +216,16 @@ def _product_dataset(product_rows: list[dict]) -> dict:
                 "label": "Доля органики",
                 "format": "percent",
                 "values": [row["organic_share"] for row in product_rows],
+            },
+            "cpo": {
+                "label": "CPO",
+                "format": "money",
+                "values": [row["cpo"] for row in product_rows],
+            },
+            "drr": {
+                "label": "ДРР",
+                "format": "percent",
+                "values": [row["drr"] for row in product_rows],
             },
         },
     }
@@ -213,43 +286,269 @@ def _product_spotlights(product_rows: list[dict], reference_date: date) -> list[
     return cards
 
 
+def _kpi_cards(series_points: list[dict]) -> list[dict]:
+    if not series_points:
+        return []
+
+    days = max(len(series_points), 1)
+    total_orders = _sum_int_points(series_points, "orders")
+    ad_orders = _sum_int_points(series_points, "ad_orders")
+    ad_clicks = _sum_int_points(series_points, "ad_clicks")
+    ad_impressions = _sum_int_points(series_points, "impressions")
+    ad_spend = _sum_decimal_points(series_points, "spend")
+    ad_revenue = _sum_decimal_points(series_points, "ad_revenue")
+    stock_latest = int(series_points[-1].get("stock") or 0)
+    avg_daily_orders = safe_divide(total_orders, days)
+
+    roas = safe_divide(ad_revenue, ad_spend)
+    drr = safe_divide(ad_spend * 100, ad_revenue)
+    cpo = safe_divide(ad_spend, ad_orders)
+    cpc = safe_divide(ad_spend, ad_clicks)
+    ctr = safe_divide(ad_clicks * 100, ad_impressions)
+    ad_order_share = safe_divide(ad_orders * 100, total_orders)
+    coverage_days = safe_divide(stock_latest, avg_daily_orders)
+
+    return [
+        {
+            "label": "ROAS",
+            "value": _float(roas),
+            "format": "decimal",
+            "detail": f"Доход на 1 вложенный рубль за период ({days} дн.).",
+            "tone": "success" if roas >= 4 else "warning",
+        },
+        {
+            "label": "ДРР",
+            "value": _float(drr),
+            "format": "percent",
+            "detail": "Доля рекламного расхода в рекламной выручке.",
+            "tone": "success" if drr <= 25 else "warning",
+        },
+        {
+            "label": "CPO",
+            "value": _float(cpo),
+            "format": "money",
+            "detail": "Средняя стоимость одного рекламного заказа.",
+            "tone": "neutral",
+        },
+        {
+            "label": "CTR",
+            "value": _float(ctr),
+            "format": "percent",
+            "detail": "Кликабельность всех рекламных зон.",
+            "tone": "neutral",
+        },
+        {
+            "label": "CPC",
+            "value": _float(cpc),
+            "format": "money",
+            "detail": "Средняя цена клика по всем РК.",
+            "tone": "neutral",
+        },
+        {
+            "label": "Доля заказов из РК",
+            "value": _float(ad_order_share),
+            "format": "percent",
+            "detail": "Какую часть общих заказов формирует реклама.",
+            "tone": "neutral",
+        },
+        {
+            "label": "Покрытие остатком",
+            "value": _float(coverage_days),
+            "format": "decimal",
+            "detail": "Запас в днях при текущем среднем темпе.",
+            "tone": "danger" if coverage_days and coverage_days < 7 else "success",
+        },
+    ]
+
+
+def _trend_rows(series_points: list[dict]) -> list[dict]:
+    if len(series_points) < 4:
+        return []
+
+    pivot = max(1, len(series_points) // 2)
+    previous = series_points[:pivot]
+    current = series_points[pivot:]
+    if not previous or not current:
+        return []
+
+    def metric_delta(label: str, key: str, fmt: str, lower_is_better: bool = False) -> dict:
+        current_value = _sum_decimal_points(current, key)
+        previous_value = _sum_decimal_points(previous, key)
+        delta = current_value - previous_value
+        delta_pct = safe_divide(delta * 100, previous_value) if previous_value else ZERO
+        positive = delta_pct <= 0 if lower_is_better else delta_pct >= 0
+        return {
+            "label": label,
+            "current_value": _float(current_value),
+            "previous_value": _float(previous_value),
+            "delta_value": _float(delta_pct),
+            "format": fmt,
+            "tone": "success" if positive else "warning",
+        }
+
+    return [
+        metric_delta("Оборот", "revenue", "money"),
+        metric_delta("Заказы", "orders", "int"),
+        metric_delta("Расход рекламы", "spend", "money", lower_is_better=True),
+        metric_delta("Органическая выручка", "organic_revenue", "money"),
+    ]
+
+
+def _diagnostic_rows(product_rows: list[dict]) -> list[dict]:
+    rows = [row for row in product_rows if row["orders"] or row["spend"] or row["stock"]]
+    if not rows:
+        return []
+
+    cpo_candidates = [decimalize(row["cpo"]) for row in rows if row["orders"] > 0 and row["spend"] > 0]
+    avg_cpo = safe_divide(sum(cpo_candidates, ZERO), len(cpo_candidates)) if cpo_candidates else ZERO
+    diagnostics: list[dict] = []
+
+    for row in sorted(rows, key=lambda item: (-item["spend"], item["label"])):
+        if row["spend"] >= 1500 and row["orders"] == 0:
+            diagnostics.append(
+                {
+                    "label": row["label"],
+                    "title": "Расход без заказов",
+                    "detail": f"{row['spend_label']} расхода без заказов за текущий срез.",
+                    "tone": "danger",
+                }
+            )
+        elif avg_cpo > 0 and row["orders"] >= 3 and decimalize(row["cpo"]) >= avg_cpo * Decimal("1.7"):
+            diagnostics.append(
+                {
+                    "label": row["label"],
+                    "title": "Дорогой заказ относительно среднего",
+                    "detail": f"CPO {row['cpo_label']} при среднем по витрине {_format_money(avg_cpo)}.",
+                    "tone": "warning",
+                }
+            )
+        elif row["days_until_zero"] > 0 and row["days_until_zero"] <= 7 and row["orders"] > 0:
+            diagnostics.append(
+                {
+                    "label": row["label"],
+                    "title": "Риск по остаткам",
+                    "detail": f"Запас на {row['days_until_zero_label']} дня при текущем темпе.",
+                    "tone": "warning",
+                }
+            )
+        elif row["organic_share"] <= 20 and row["spend"] >= 2000:
+            diagnostics.append(
+                {
+                    "label": row["label"],
+                    "title": "Высокая зависимость от рекламы",
+                    "detail": f"Органика {row['organic_share_label']} при расходе {row['spend_label']}.",
+                    "tone": "neutral",
+                }
+            )
+
+        if len(diagnostics) >= 8:
+            break
+
+    if diagnostics:
+        return diagnostics
+    return [
+        {
+            "label": "Сезон без явных перекосов",
+            "title": "Критичных аномалий не найдено",
+            "detail": "По ключевым сигналам CPO, расходу и остаткам всё в рабочем коридоре.",
+            "tone": "success",
+        }
+    ]
+
+
 def build_reports_context(*, reference_date: date, range_days: int = 14) -> dict:
-    range_days = max(7, min(range_days, 60))
+    range_days = max(1, min(range_days, 60))
     stock_dates = [reference_date - timedelta(days=offset) for offset in reversed(range(range_days))]
-    series_points = [_series_point(stock_date=stock_date) for stock_date in stock_dates]
+    series_points = _series_points_for_dates(stock_dates=stock_dates)
 
     products = list(Product.objects.filter(is_active=True).order_by("vendor_code", "title", "nm_id"))
+    product_ids = [product.id for product in products]
+
+    metrics_by_product_id = {
+        row.product_id: row
+        for row in DailyProductMetrics.objects.filter(
+            product_id__in=product_ids,
+            stats_date=reference_date,
+        )
+    }
+    stocks_by_product_id = {
+        row.product_id: row
+        for row in DailyProductStock.objects.filter(
+            product_id__in=product_ids,
+            stats_date=reference_date,
+        )
+    }
+    campaign_totals_by_product_id = {
+        row["product_id"]: {
+            "spend": decimalize(row["spend"]),
+            "orders": int(row["orders"] or 0),
+            "revenue": decimalize(row["revenue"]),
+        }
+        for row in DailyCampaignProductStat.objects.filter(
+            product_id__in=product_ids,
+            stats_date=reference_date,
+        )
+        .values("product_id")
+        .annotate(
+            spend=Sum("spend"),
+            orders=Sum("order_count"),
+            revenue=Sum("order_sum"),
+        )
+    }
+    campaigns_count_by_product_id = {
+        row["product_id"]: int(row["campaigns_count"] or 0)
+        for row in ProductCampaign.objects.filter(
+            product_id__in=product_ids,
+            campaign__is_active=True,
+        )
+        .values("product_id")
+        .annotate(campaigns_count=Count("campaign_id", distinct=True))
+    }
+
     product_rows: list[dict] = []
     for product in products:
-        report = build_product_report(
-            product=product,
-            stats_date=reference_date,
-            stock_date=reference_date,
-            create_note=False,
+        metrics = metrics_by_product_id.get(product.id)
+        stock = stocks_by_product_id.get(product.id)
+        campaign_totals = campaign_totals_by_product_id.get(
+            product.id,
+            {"spend": ZERO, "orders": 0, "revenue": ZERO},
         )
-        days_until_zero = decimalize(report["days_until_zero"])
+        ad_spend = campaign_totals["spend"]
+        ad_orders = int(campaign_totals["orders"] or 0)
+        ad_revenue = campaign_totals["revenue"]
+        total_orders = int(metrics.order_count if metrics else 0)
+        organic_orders = max(total_orders - ad_orders, 0)
+        organic_share = safe_divide(organic_orders * 100, total_orders)
+        drr = safe_divide(ad_spend * 100, ad_revenue)
+        cpo = safe_divide(ad_spend, ad_orders)
+        days_until_zero = decimalize(stock.days_until_zero if stock else 0)
+
         product_rows.append(
             {
                 "label": product.vendor_code or product.title or f"WB {product.nm_id}",
                 "product": product,
-                "orders": report["metrics"].order_count if report["metrics"] else 0,
-                "revenue": _float(report["metrics"].order_sum if report["metrics"] else 0),
-                "revenue_label": _format_money(report["metrics"].order_sum if report["metrics"] else 0),
-                "spend": _float(report["total_ad"].spend),
-                "spend_label": _format_money(report["total_ad"].spend),
-                "stock": report["stock"].total_stock if report["stock"] else 0,
-                "organic_share": _float(report["insights"]["organic_orders_share"]),
-                "organic_share_label": _format_percent(report["insights"]["organic_orders_share"]),
+                "orders": total_orders,
+                "revenue": _float(metrics.order_sum if metrics else 0),
+                "revenue_label": _format_money(metrics.order_sum if metrics else 0),
+                "spend": _float(ad_spend),
+                "spend_label": _format_money(ad_spend),
+                "stock": stock.total_stock if stock else 0,
+                "organic_share": _float(organic_share),
+                "organic_share_label": _format_percent(organic_share),
+                "drr": _float(drr),
+                "drr_label": _format_percent(drr),
+                "cpo": _float(cpo),
+                "cpo_label": _format_money(cpo),
                 "days_until_zero": _float(days_until_zero),
                 "days_until_zero_label": _format_decimal(days_until_zero),
-                "campaigns_count": product.campaigns.filter(is_active=True).count(),
+                "campaigns_count": campaigns_count_by_product_id.get(product.id, 0),
             }
         )
 
     ranked_products = sorted(product_rows, key=lambda item: (-item["revenue"], -item["orders"], item["label"]))
 
     group_labels = dict(CampaignMonitoringGroup.choices)
-    total_campaign_spend = Decimal("0")
+    total_campaign_spend = ZERO
     campaign_mix_raw = list(
         DailyCampaignProductStat.objects.filter(stats_date=reference_date)
         .values("campaign__monitoring_group")
@@ -299,8 +598,8 @@ def build_reports_context(*, reference_date: date, range_days: int = 14) -> dict
 
     latest_point = series_points[-1] if series_points else {}
     previous_point = series_points[-2] if len(series_points) > 1 else latest_point
-    revenue_total = sum((Decimal(str(point["revenue"])) for point in series_points), Decimal("0"))
-    spend_total = sum((Decimal(str(point["spend"])) for point in series_points), Decimal("0"))
+    revenue_total = sum((Decimal(str(point["revenue"])) for point in series_points), ZERO)
+    spend_total = sum((Decimal(str(point["spend"])) for point in series_points), ZERO)
     orders_total = sum(point["orders"] for point in series_points)
     stock_total = latest_point.get("stock", 0)
     latest_orders = latest_point.get("orders", 0)
@@ -346,6 +645,9 @@ def build_reports_context(*, reference_date: date, range_days: int = 14) -> dict
         "range_days": range_days,
         "range_options": [7, 14, 30, 60],
         "summary_cards": summary_cards,
+        "kpi_cards": _kpi_cards(series_points),
+        "trend_rows": _trend_rows(series_points),
+        "diagnostic_rows": _diagnostic_rows(ranked_products),
         "spotlight_cards": _product_spotlights(ranked_products, reference_date),
         "timeline_points": series_points,
         "timeline_chart": _timeline_dataset(series_points),

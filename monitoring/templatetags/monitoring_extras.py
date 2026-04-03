@@ -49,6 +49,17 @@ def decimal2(value):
 
 
 @register.filter
+def css_percent(value):
+    number = _to_decimal(value)
+    if number is None and isinstance(value, str):
+        number = _to_decimal(value.replace(",", "."))
+    if number is None:
+        return "0"
+    clamped = min(max(number, Decimal("0")), Decimal("100"))
+    return format(clamped.quantize(Decimal("0.01")), "f")
+
+
+@register.filter
 def widget_type(bound_field):
     widget = getattr(getattr(bound_field, "field", None), "widget", None)
     if widget is None:

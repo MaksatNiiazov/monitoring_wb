@@ -1,4 +1,4 @@
-{% load static %}
+﻿{% load static %}
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -10,61 +10,46 @@
 <body>
     <a class="skip-link" href="#main-content">Перейти к содержимому</a>
     <div class="page-shell">
-        <aside class="sidebar-shell">
-            <div class="sidebar-panel">
-                <div class="brand-block">
-                    <p class="eyebrow">Wildberries Monitoring</p>
-                    <a class="brand" href="{% url 'monitoring:dashboard' %}">{% if workspace_settings.project_name %}{{ workspace_settings.project_name }}{% else %}Система мониторинга товаров и РК{% endif %}</a>
-                    <p class="brand-copy">Панель управления данными WB, мониторингом и итоговыми таблицами.</p>
-                </div>
-
-                <nav class="sidebar-nav">
-                    <p class="sidebar-label">Навигация</p>
-                    <a class="nav-pill {% if request.resolver_match.url_name == 'dashboard' or request.resolver_match.url_name == 'product_detail' %}active{% endif %}" href="{% url 'monitoring:dashboard' %}" {% if request.resolver_match.url_name == 'dashboard' or request.resolver_match.url_name == 'product_detail' %}aria-current="page"{% endif %}>Дашборд</a>
-                    <a class="nav-pill {% if request.resolver_match.url_name == 'reports' %}active{% endif %}" href="{% url 'monitoring:reports' %}" {% if request.resolver_match.url_name == 'reports' %}aria-current="page"{% endif %}>Отчёты</a>
-                    <a class="nav-pill {% if request.resolver_match.url_name == 'workspace_settings' %}active{% endif %}" href="{% url 'monitoring:workspace_settings' %}" {% if request.resolver_match.url_name == 'workspace_settings' %}aria-current="page"{% endif %}>Операции</a>
-                    <a class="nav-pill" href="{% url 'admin:index' %}">Админка</a>
-                </nav>
-
-                <div class="sidebar-card">
-                    <p class="sidebar-label">Системный контур</p>
-                    <div class="project-meta meta-stack">
-                        <span class="meta-chip">TZ {{ workspace_settings.report_timezone|default:"Asia/Bishkek" }}</span>
-                        <span class="meta-chip">Sync {{ workspace_settings.sync_hour|stringformat:"02d" }}:{{ workspace_settings.sync_minute|stringformat:"02d" }}</span>
-                        <span class="meta-chip">History {{ workspace_settings.monitoring_history_days|default:14 }}d</span>
-                    </div>
-                </div>
-            </div>
-        </aside>
-
         <main class="main-shell" id="main-content">
-            <header class="workspace-bar">
-                <div class="workspace-heading">
-                    <p class="eyebrow">Workspace</p>
-                    <strong>
-                        {% if request.resolver_match.url_name == 'workspace_settings' %}
-                            Операции проекта
-                        {% elif request.resolver_match.url_name == 'reports' %}
-                            Отчёты и аналитика
+            {% if not hide_workspace_header %}
+                <header class="workspace-bar">
+                    <div class="workspace-heading">
+                        <p class="eyebrow">Workspace</p>
+                        <strong>
+                            {% if request.resolver_match.url_name == 'workspace_settings' %}
+                                Настройки проекта
+                            {% elif request.resolver_match.url_name == 'reports' %}
+                                Аналитика и отчёты
+                            {% elif request.resolver_match.url_name == 'products' %}
+                                Каталог товаров
+                            {% elif request.resolver_match.url_name == 'product_detail' %}
+                                Карточка товара
+                            {% else %}
+                                Рабочая таблица
+                            {% endif %}
+                        </strong>
+                    </div>
+                    <nav class="workspace-tools" aria-label="Разделы workspace">
+                        <a class="utility-pill {% if request.resolver_match.url_name == 'table' or request.resolver_match.url_name == 'dashboard' %}is-active{% endif %}" href="{% url 'monitoring:table' %}">Таблица</a>
+                        <a class="utility-pill {% if request.resolver_match.url_name == 'products' or request.resolver_match.url_name == 'product_detail' %}is-active{% endif %}" href="{% url 'monitoring:products' %}">Товары</a>
+                        <a class="utility-pill {% if request.resolver_match.url_name == 'reports' %}is-active{% endif %}" href="{% url 'monitoring:reports' %}">Аналитика</a>
+                        <a class="utility-pill {% if request.resolver_match.url_name == 'workspace_settings' %}is-active{% endif %}" href="{% url 'monitoring:workspace_settings' %}">Настройки</a>
+                    </nav>
+                    <span class="workspace-context">
+                        {% if request.resolver_match.url_name == 'reports' %}
+                            Периоды, графики и сравнение SKU
+                        {% elif request.resolver_match.url_name == 'products' %}
+                            Список SKU, переход к статистике и редактированию
+                        {% elif request.resolver_match.url_name == 'workspace_settings' %}
+                            Интеграции, выгрузка и расписание
                         {% elif request.resolver_match.url_name == 'product_detail' %}
-                            Карточка товара
+                            Метрики, склады и настройки товара
                         {% else %}
-                            Дашборд мониторинга
+                            Табличный срез, зоны по дням и синхронизация
                         {% endif %}
-                    </strong>
-                </div>
-                <span class="workspace-context">
-                    {% if request.resolver_match.url_name == 'reports' %}
-                        Периоды, графики и сравнение SKU
-                    {% elif request.resolver_match.url_name == 'workspace_settings' %}
-                        Интеграции, выгрузка и расписание
-                    {% elif request.resolver_match.url_name == 'product_detail' %}
-                        Метрики, склады и настройки товара
-                    {% else %}
-                        Мониторинг, синхронизация и контроль
-                    {% endif %}
-                </span>
-            </header>
+                    </span>
+                </header>
+            {% endif %}
 
             {% if messages %}
                 <section class="messages">

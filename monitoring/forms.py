@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 import re
 from types import SimpleNamespace
 
@@ -272,10 +273,19 @@ class DailyNoteForm(StyledFormMixin, forms.ModelForm):
 
 class SyncForm(StyledFormMixin, forms.Form):
     help_texts = {
+        "product_ids": "Если не выбрать — обновятся все активные товары.",
+        "date_from": "Начало периода: с этой даты будут перезаписываться данные.",
+        "date_to": "Конец периода: обновятся только записи внутри выбранного диапазона.",
         "reference_date": "Остатки, реклама и воронка будут собраны на эту же дату.",
-        "force": "Перезапишет уже сохранённые данные за выбранную дату.",
+        "force": "Перезапишет уже сохранённые данные только за выбранный период.",
     }
 
+    product_ids = forms.ModelMultipleChoiceField(
+        queryset=Product.objects.filter(is_active=True).order_by("title", "nm_id"),
+        required=False,
+        label="Товары для синхронизации",
+        widget=forms.SelectMultiple(attrs={"size": 6}),
+    )
     reference_date = forms.DateField(
         required=False,
         initial=timezone.localdate,
@@ -283,6 +293,50 @@ class SyncForm(StyledFormMixin, forms.Form):
         widget=forms.DateInput(attrs={"type": "date"}),
     )
     force = forms.BooleanField(required=False, initial=True, label="Перезаписывать данные за дату")
+
+
+    date_from = forms.DateField(
+        required=False,
+        initial=timezone.localdate,
+        label="Дата с",
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
+    date_to = forms.DateField(
+        required=False,
+        initial=timezone.localdate,
+        label="Дата по",
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
+
+    def __init__(self, *args, show_products: bool = True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["reference_date"].widget = forms.HiddenInput()
+        if not show_products:
+            self.fields["product_ids"].widget = forms.HiddenInput()
+        self.order_fields(["product_ids", "date_from", "date_to", "force", "reference_date"])
+
+    def clean(self):
+        cleaned_data = super().clean()
+        date_from = cleaned_data.get("date_from")
+        date_to = cleaned_data.get("date_to")
+        reference_date = cleaned_data.get("reference_date") or timezone.localdate()
+
+        if not date_from and not date_to:
+            date_from = reference_date
+            date_to = reference_date
+        elif date_from and not date_to:
+            date_to = date_from
+        elif date_to and not date_from:
+            date_from = date_to
+
+        if date_from and date_to and date_from > date_to:
+            self.add_error("date_to", "Дата окончания должна быть не раньше даты начала.")
+
+        cleaned_data["date_from"] = date_from
+        cleaned_data["date_to"] = date_to
+        # Для обратной совместимости со старым single-day режимом.
+        cleaned_data["reference_date"] = date_to or reference_date
+        return cleaned_data
 
 
 class MonitoringWorkbookForm(StyledFormMixin, forms.Form):
@@ -295,13 +349,26 @@ class MonitoringWorkbookForm(StyledFormMixin, forms.Form):
         required=False,
         initial=timezone.localdate,
         label="Дата среза",
-        widget=forms.DateInput(attrs={"type": "date"}),
+        widget=forms.DateInput(
+            attrs={
+                "type": "date",
+                "autocomplete": "off",
+            }
+        ),
     )
     history_days = forms.IntegerField(
         min_value=1,
         max_value=90,
         initial=14,
         label="Дней в книге",
+        widget=forms.NumberInput(
+            attrs={
+                "min": 1,
+                "max": 90,
+                "step": 1,
+                "inputmode": "numeric",
+            }
+        ),
     )
 
 
@@ -314,14 +381,19 @@ class ReportsFilterForm(StyledFormMixin, forms.Form):
     )
 
     help_texts = {
-        "reference_date": "Дата единого среза для остатков, рекламы и общей воронки.",
+        "date_from": "Начало периода аналитики (включительно).",
+        "date_to": "Конец периода аналитики (включительно).",
         "range_days": "На такую глубину строятся графики и сравнительные отчёты.",
     }
 
-    reference_date = forms.DateField(
+    date_from = forms.DateField(
         required=False,
-        initial=timezone.localdate,
-        label="Дата среза",
+        label="Период с",
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
+    date_to = forms.DateField(
+        required=False,
+        label="Период по",
         widget=forms.DateInput(attrs={"type": "date"}),
     )
     range_days = forms.TypedChoiceField(
@@ -332,6 +404,47 @@ class ReportsFilterForm(StyledFormMixin, forms.Form):
         coerce=int,
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.order_fields(["date_from", "date_to", "range_days"])
+
+    def clean(self):
+        cleaned_data = super().clean()
+        reference_date = timezone.localdate()
+        range_days = cleaned_data.get("range_days") or 14
+        date_from = cleaned_data.get("date_from")
+        date_to = cleaned_data.get("date_to")
+
+        normalized_window = max(1, min(int(range_days), 60))
+        if date_from and not date_to:
+            date_to = date_from + timedelta(days=normalized_window - 1)
+        elif date_to and not date_from:
+            date_from = date_to - timedelta(days=normalized_window - 1)
+
+        if date_from and date_to:
+            if date_from > date_to:
+                self.add_error("date_to", "Дата окончания периода должна быть не раньше даты начала.")
+                return cleaned_data
+            selected_days = (date_to - date_from).days + 1
+            if selected_days > 60:
+                self.add_error("date_to", "Период аналитики не должен превышать 60 дней.")
+                return cleaned_data
+            reference_date = date_to
+            range_days = selected_days
+        else:
+            range_days = normalized_window
+            date_to = reference_date
+            date_from = reference_date - timedelta(days=range_days - 1)
+
+        cleaned_data["date_from"] = date_from
+        cleaned_data["date_to"] = date_to
+        # Сохраняем вычисленную опорную дату для обратной совместимости
+        # с существующим кодом контекста и шаблонов.
+        reference_date = date_to or reference_date
+        cleaned_data["reference_date"] = reference_date
+        cleaned_data["range_days"] = range_days
+        return cleaned_data
+
 
 class MonitoringSettingsForm(StyledFormMixin, forms.ModelForm):
     help_texts = {
@@ -341,10 +454,6 @@ class MonitoringSettingsForm(StyledFormMixin, forms.ModelForm):
         "sync_minute": "Минуты автосинхронизации.",
         "overwrite_within_day": "Повторный запуск в тот же день обновит данные за эту дату.",
         "monitoring_history_days": "Глубина истории для книги и витрины.",
-        "google_sheets_enabled": "Разрешает синк книги в Google Sheets.",
-        "google_sheets_auto_sync": "После WB sync книга автоматически уйдёт в Google Sheets.",
-        "google_spreadsheet_id": "Идентификатор таблицы из URL Google Sheets.",
-        "google_dashboard_sheet_name": "Название листа или шаблонного блока выгрузки.",
         "visible_warehouses_note": "Какие склады должны отображаться в мониторинге.",
         "campaign_grouping_note": "Как кампании раскладываются по группам мониторинга.",
     }
@@ -358,20 +467,13 @@ class MonitoringSettingsForm(StyledFormMixin, forms.ModelForm):
             "sync_minute",
             "overwrite_within_day",
             "monitoring_history_days",
-            "google_sheets_enabled",
-            "google_sheets_auto_sync",
-            "google_spreadsheet_id",
-            "google_dashboard_sheet_name",
             "visible_warehouses_note",
             "campaign_grouping_note",
         ]
         widgets = {
             "project_name": forms.TextInput(attrs={"placeholder": "Например, MB Bags / WB Monitoring"}),
             "report_timezone": forms.TextInput(attrs={"placeholder": "Asia/Bishkek"}),
-            "google_spreadsheet_id": forms.TextInput(
-                attrs={"placeholder": "Например, 1gtsD4_BL3QXOqXBSI970y7SfHtgWYvLwIcO94zMB-QE"}
-            ),
-            "google_dashboard_sheet_name": forms.TextInput(attrs={"placeholder": "Например, Dashboard"}),
             "visible_warehouses_note": forms.Textarea(attrs={"rows": 3}),
             "campaign_grouping_note": forms.Textarea(attrs={"rows": 3}),
         }
+

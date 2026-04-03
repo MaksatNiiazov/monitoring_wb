@@ -1,10 +1,15 @@
 (function () {
+    const REPORTS_TAB_STORAGE_KEY = "wb-reports-active-tab";
     const INT_FORMATTER = new Intl.NumberFormat("ru-RU");
     const MONEY_FORMATTER = new Intl.NumberFormat("ru-RU", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
     });
     const PERCENT_FORMATTER = new Intl.NumberFormat("ru-RU", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+    });
+    const DECIMAL_FORMATTER = new Intl.NumberFormat("ru-RU", {
         minimumFractionDigits: 0,
         maximumFractionDigits: 2,
     });
@@ -16,6 +21,9 @@
         }
         if (format === "percent") {
             return `${PERCENT_FORMATTER.format(number)}%`;
+        }
+        if (format === "decimal") {
+            return DECIMAL_FORMATTER.format(number);
         }
         return INT_FORMATTER.format(Math.round(number));
     }
@@ -71,7 +79,7 @@
             const scriptNode = document.getElementById(scriptId);
             this.data = scriptNode ? JSON.parse(scriptNode.textContent || "{}") : {};
             this.metric = this.data.defaultMetric || this.metricButtons[0]?.dataset.chartMetric || "orders";
-            this.type = this.data.defaultType || this.typeButtons[0]?.dataset.chartType || "line";
+            this.type = this.normalizeType(this.data.defaultType || this.typeButtons[0]?.dataset.chartType || "line");
 
             this.metricButtons.forEach((button) => {
                 button.addEventListener("click", () => {
@@ -81,7 +89,7 @@
             });
             this.typeButtons.forEach((button) => {
                 button.addEventListener("click", () => {
-                    this.type = button.dataset.chartType;
+                    this.type = this.normalizeType(button.dataset.chartType);
                     this.render();
                 });
             });
@@ -94,6 +102,14 @@
             }
 
             this.render();
+        }
+
+        normalizeType(nextType) {
+            const normalized = String(nextType || "").toLowerCase();
+            if (normalized === "bar" || normalized === "line") {
+                return normalized;
+            }
+            return this.typeButtons[0]?.dataset.chartType || "line";
         }
 
         renderEmpty() {
@@ -115,6 +131,7 @@
         }
 
         render() {
+            this.type = this.normalizeType(this.type);
             const labels = Array.isArray(this.data.labels) ? this.data.labels : [];
             const series = this.data.series?.[this.metric];
             if (!labels.length || !series || !Array.isArray(series.values) || !series.values.length) {
@@ -213,13 +230,11 @@
                 const baseLinePath = linePath(points);
                 const fillPath = areaPath(points, baseline);
                 seriesMarkup = [
-                    this.type === "area"
-                        ? svgEl("path", {
-                              d: fillPath,
-                              fill: "rgba(15,106,92,0.16)",
-                              stroke: "none",
-                          })
-                        : "",
+                    svgEl("path", {
+                        d: fillPath,
+                        fill: "rgba(15,106,92,0.16)",
+                        stroke: "none",
+                    }),
                     svgEl("path", {
                         d: baseLinePath,
                         fill: "none",
@@ -258,11 +273,7 @@
                     role: "img",
                     "aria-label": `${series.label}. ${labels[0]} — ${labels[labels.length - 1]}.`,
                 },
-                [
-                    gridLines,
-                    xLabels,
-                    seriesMarkup,
-                ].join("")
+                [gridLines, xLabels, seriesMarkup].join("")
             );
 
             const latest = values[values.length - 1] || 0;
@@ -288,6 +299,73 @@
         }
     }
 
+    function resolveSafeReportsTab(root, requestedTab) {
+        const availableTabs = Array.from(root.querySelectorAll("[data-reports-tab-trigger]")).map(
+            (node) => node.dataset.reportsTabTrigger
+        );
+        const normalized = String(requestedTab || "").trim();
+        if (normalized && availableTabs.includes(normalized)) {
+            return normalized;
+        }
+        return availableTabs[0] || "overview";
+    }
+
+    function syncReportsTab(root, nextTab) {
+        const activeTab = resolveSafeReportsTab(root, nextTab);
+        root.dataset.activeTab = activeTab;
+
+        root.querySelectorAll("[data-reports-tab-trigger]").forEach((trigger) => {
+            const isActive = trigger.dataset.reportsTabTrigger === activeTab;
+            trigger.classList.toggle("is-active", isActive);
+            trigger.setAttribute("aria-selected", isActive ? "true" : "false");
+            trigger.setAttribute("tabindex", isActive ? "0" : "-1");
+        });
+
+        root.querySelectorAll("[data-reports-panel]").forEach((panel) => {
+            panel.hidden = panel.dataset.reportsPanel !== activeTab;
+        });
+
+        try {
+            sessionStorage.setItem(REPORTS_TAB_STORAGE_KEY, activeTab);
+        } catch (_error) {
+            // Session storage can be unavailable.
+        }
+    }
+
+    function initReportsTabs() {
+        document.querySelectorAll("[data-reports-tabs-shell]").forEach((root) => {
+            if (root.dataset.reportsTabsBound === "1") {
+                return;
+            }
+            root.dataset.reportsTabsBound = "1";
+
+            const triggers = Array.from(root.querySelectorAll("[data-reports-tab-trigger]"));
+            triggers.forEach((trigger, index) => {
+                trigger.addEventListener("click", () => {
+                    syncReportsTab(root, trigger.dataset.reportsTabTrigger);
+                    trigger.focus();
+                });
+                trigger.addEventListener("keydown", (event) => {
+                    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") {
+                        return;
+                    }
+                    event.preventDefault();
+                    const direction = event.key === "ArrowRight" ? 1 : -1;
+                    const nextIndex = (index + direction + triggers.length) % triggers.length;
+                    triggers[nextIndex].click();
+                });
+            });
+
+            let preferredTab = root.dataset.activeTab || "overview";
+            try {
+                preferredTab = sessionStorage.getItem(REPORTS_TAB_STORAGE_KEY) || preferredTab;
+            } catch (_error) {
+                // Session storage can be unavailable.
+            }
+            syncReportsTab(root, preferredTab);
+        });
+    }
+
     function initCharts() {
         document.querySelectorAll(".chart-widget").forEach((node) => {
             if (!node.dataset.chartBound) {
@@ -297,9 +375,14 @@
         });
     }
 
-    if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", initCharts);
-    } else {
+    function bootstrap() {
+        initReportsTabs();
         initCharts();
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", bootstrap);
+    } else {
+        bootstrap();
     }
 })();

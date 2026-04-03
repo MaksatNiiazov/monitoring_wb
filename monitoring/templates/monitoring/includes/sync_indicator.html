@@ -1,0 +1,30 @@
+<article
+    class="sync-indicator"
+    data-sync-indicator
+    data-sync-status-url="{% url 'monitoring:sync_status' %}"
+    data-sync-cancel-url="{% url 'monitoring:sync_cancel' %}"
+    role="status"
+    aria-live="polite"
+    aria-atomic="true"
+>
+    <div class="sync-indicator-head">
+        <strong data-sync-title>Состояние синхронизации</strong>
+        <span class="status-chip neutral" data-sync-chip>Ожидание</span>
+    </div>
+    <p class="muted sync-indicator-message" data-sync-message>Статус обновляется автоматически.</p>
+    <div class="sync-progress" data-sync-progress-wrap hidden>
+        <div class="sync-progress-track">
+            <span class="sync-progress-fill" data-sync-progress-fill style="width: 0%"></span>
+        </div>
+        <div class="sync-progress-meta">
+            <span data-sync-progress-percent>0%</span>
+            <span data-sync-progress-stage>Ожидание</span>
+        </div>
+    </div>
+    <p class="muted sync-indicator-meta" data-sync-meta></p>
+    <div class="sync-indicator-actions">
+        <button class="secondary-button sync-cancel-button" type="button" data-sync-cancel hidden>
+            Отменить синхронизацию
+        </button>
+    </div>
+</article>
