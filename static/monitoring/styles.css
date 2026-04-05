@@ -2304,6 +2304,44 @@ body.is-modal-open {
     gap: 8px;
 }
 
+.grid-keyword-table {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+.grid-keyword-table-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.grid-keyword-title {
+    font-weight: 800;
+    color: var(--ink);
+}
+
+.grid-keyword-table-body {
+    display: grid;
+    gap: 6px;
+}
+
+.grid-keyword-table-grid {
+    display: grid;
+    grid-template-columns: minmax(140px, 1.6fr) minmax(70px, 0.7fr) minmax(110px, 1fr) minmax(110px, 1fr) minmax(90px, 0.8fr);
+    gap: 8px;
+    align-items: center;
+}
+
+.grid-keyword-table-grid-head {
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
 .grid-keyword-actions {
     display: inline-flex;
     align-items: center;
@@ -2404,6 +2442,11 @@ body.is-modal-open {
 .table-wrap.is-compact .grid-choice-btn {
     min-height: 20px;
     font-size: 0.68rem;
+}
+
+.table-wrap.is-compact .grid-keyword-table-grid {
+    grid-template-columns: minmax(110px, 1.4fr) minmax(54px, 0.65fr) minmax(92px, 0.9fr) minmax(92px, 0.9fr) minmax(72px, 0.75fr);
+    gap: 6px;
 }
 
 .table-wrap.is-compact .grid-select {

@@ -152,7 +152,7 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
 
-        self.assertEqual(len(report["keyword_rows"]), 8)
+        self.assertEqual(len(report["keyword_rows"]), 3)
         self.assertTrue(all(not row["query_text"] for row in report["keyword_rows"]))
 
     def test_export_contains_sample_header(self) -> None:
@@ -1493,7 +1493,6 @@ class PageRenderTests(TestCase):
         self.assertContains(response, 'data-note-control="select"')
         self.assertContains(response, 'data-note-control="input"')
         self.assertContains(response, 'data-note-control="text"')
-        self.assertContains(response, 'data-note-control="keyword-rows"')
         self.assertContains(response, "is-comment-span")
         self.assertContains(response, 'colspan="7"')
         self.assertContains(response, "is-stock-span")
@@ -1939,7 +1938,7 @@ class TableInlineNoteUpdateTests(TestCase):
 
     def test_table_note_cell_changes_keyword_rows_count(self) -> None:
         self.note.keywords = ["ключ 1", "ключ 2"]
-        self.note.keyword_rows_count = 8
+        self.note.keyword_rows_count = 3
         self.note.save(update_fields=["keywords", "keyword_rows_count", "updated_at"])
 
         response = self.client.post(
@@ -1956,7 +1955,7 @@ class TableInlineNoteUpdateTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.note.refresh_from_db()
-        self.assertEqual(self.note.keyword_rows_count, 9)
+        self.assertEqual(self.note.keyword_rows_count, 4)
 
         response = self.client.post(
             "/table/note-cell/",
@@ -1972,7 +1971,7 @@ class TableInlineNoteUpdateTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.note.refresh_from_db()
-        self.assertEqual(self.note.keyword_rows_count, 8)
+        self.assertEqual(self.note.keyword_rows_count, 3)
 
     def test_table_note_cell_trims_keywords_when_rows_are_removed(self) -> None:
         self.note.keywords = ["ключ 1", "ключ 2", "ключ 3"]

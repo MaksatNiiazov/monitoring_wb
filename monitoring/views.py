@@ -253,26 +253,11 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
     if active_sheet is not None:
         keyword_header_row = None
         overview_row = None
-        for row_index, row in enumerate(active_sheet.get("rows", []), start=1):
-            if not row:
-                continue
-            first_cell = str(row[0] or "").strip()
-            second_cell = str(row[1] or "").strip() if len(row) > 1 else ""
-            if keyword_header_row is None and first_cell == "Ключи":
-                keyword_header_row = row_index
-                continue
-            if keyword_header_row is not None and (first_cell == "Обзор:" or second_cell == "Обзор:"):
-                overview_row = row_index
-                break
-        keyword_rows_count = (
-            max(0, (overview_row - keyword_header_row - 1))
-            if keyword_header_row is not None and overview_row is not None
-            else 0
-        )
-        keyword_offset = max(0, keyword_rows_count - 2)
+        keyword_rows_count = 0
+        keyword_offset = 0
 
         def row_after_keywords(base_row: int) -> int:
-            return base_row + keyword_offset if base_row >= 37 else base_row
+            return base_row
 
         editable_controls: dict[tuple[int, int], dict[str, object]] = {
             (
@@ -307,65 +292,23 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 "centered": True,
             },
             (25, 1): {"type": "stock_popup"},
-            (row_after_keywords(38), 3): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%"},
-            (row_after_keywords(39), 5): {"type": "input", "field": "seller_price", "placeholder": "0,00"},
-            (row_after_keywords(40), 5): {"type": "input", "field": "wb_price", "placeholder": "0,00"},
-            (row_after_keywords(41), 5): {
+            (35, 3): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%"},
+            (36, 5): {"type": "input", "field": "seller_price", "placeholder": "0,00"},
+            (37, 5): {"type": "input", "field": "wb_price", "placeholder": "0,00"},
+            (38, 5): {
                 "type": "select",
                 "field": "promo_status",
                 "options": ["Не участвуем", "Участвуем", "Тест", "Акция"],
             },
-            (row_after_keywords(42), 5): {
+            (39, 5): {
                 "type": "select",
                 "field": "negative_feedback",
                 "options": ["Без изменений", "Есть негатив", "Нужна проверка", "Критично"],
             },
-            (row_after_keywords(44), 4): {"type": "bool", "field": "ads_enabled"},
-            (row_after_keywords(45), 4): {"type": "bool", "field": "price_changed"},
-            (row_after_keywords(46), 5): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
+            (41, 4): {"type": "bool", "field": "ads_enabled"},
+            (42, 4): {"type": "bool", "field": "price_changed"},
+            (43, 5): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
         }
-        if keyword_header_row is not None and overview_row is not None:
-            for row_number in range(keyword_header_row + 1, overview_row):
-                current_value = str(active_sheet["rows"][row_number - 1][0] or "").strip()
-                editable_controls[(row_number, 0)] = {
-                    "type": "input",
-                    "field": "keyword_query",
-                    "placeholder": "Ключ",
-                    "input_mode": "text",
-                    "keyword_prev": current_value,
-                }
-                editable_controls[(row_number, 1)] = {
-                    "type": "input",
-                    "field": "keyword_frequency",
-                    "placeholder": "0",
-                    "input_mode": "numeric",
-                    "keyword_prev": current_value,
-                    "centered": True,
-                }
-                editable_controls[(row_number, 2)] = {
-                    "type": "input",
-                    "field": "keyword_organic_position",
-                    "placeholder": "0,00",
-                    "input_mode": "decimal",
-                    "keyword_prev": current_value,
-                    "centered": True,
-                }
-                editable_controls[(row_number, 4)] = {
-                    "type": "input",
-                    "field": "keyword_boosted_position",
-                    "placeholder": "0,00",
-                    "input_mode": "decimal",
-                    "keyword_prev": current_value,
-                    "centered": True,
-                }
-                editable_controls[(row_number, 6)] = {
-                    "type": "input",
-                    "field": "keyword_boosted_ctr",
-                    "placeholder": "0,00",
-                    "input_mode": "decimal",
-                    "keyword_prev": current_value,
-                    "centered": True,
-                }
 
         display_spans: dict[tuple[int, int], dict[str, bool]] = {
             (21, 1): {"span_to_block_end": True, "centered": True},
@@ -417,6 +360,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         for row_index, row in enumerate(active_sheet["rows"]):
             prepared_cells: list[dict] = []
             row_number = row_index + 1
+
             column_index = 0
             while column_index < len(row):
                 value = row[column_index]
@@ -517,20 +461,6 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                             }
                             if in_block_col < BLOCK_WIDTH:
                                 colspan = max(1, BLOCK_WIDTH - in_block_col)
-                elif (
-                    active_sheet["kind"] == "product"
-                    and keyword_header_row is not None
-                    and row_number == keyword_header_row
-                    and in_block_col == 0
-                ):
-                    note_date = block_dates[block_index] if block_index < len(block_dates) else None
-                    if note_date:
-                        control = {
-                            "type": "keyword_rows",
-                            "field": "keyword_rows_count_delta",
-                            "note_date": note_date.isoformat(),
-                            "product_id": product_id,
-                        }
                 elif display_span_spec and in_block_col < BLOCK_WIDTH:
                     if display_span_spec.get("span_to_block_end"):
                         colspan = max(1, BLOCK_WIDTH - in_block_col)
@@ -548,13 +478,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                         "is_spacer_col": False,
                         "is_label_col": active_sheet["kind"] == "product" and in_block_col == 0 and not is_repeat_label_col,
                         "is_repeat_label_col": is_repeat_label_col,
-                        "is_keyword_label_col": (
-                            active_sheet["kind"] == "product"
-                            and in_block_col == 0
-                            and keyword_header_row is not None
-                            and overview_row is not None
-                            and keyword_header_row <= row_number < overview_row
-                        ),
+                        "is_keyword_label_col": False,
                         "control": control,
                         "colspan": colspan,
                         "is_comment_span": bool(control and control.get("type") == "textarea" and colspan > 1),

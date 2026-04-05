@@ -37,8 +37,8 @@ from monitoring.services.reports import (
     normalize_warehouse_name,
 )
 
-BASE_BLOCK_HEIGHT = 46
-BASE_KEYWORD_ROWS = 2
+BASE_BLOCK_HEIGHT = 43
+BASE_KEYWORD_ROWS = 0
 BLOCK_WIDTH = 8
 BLOCK_GAP = 1
 SHEETS_MAX_TITLE_LENGTH = 100
@@ -131,7 +131,7 @@ def _keyword_money(value: Decimal | int | float | str | None, *, has_data: bool)
 
 
 def _keyword_offset(keyword_rows: list[dict[str, Any]]) -> int:
-    return max(0, len(keyword_rows) - BASE_KEYWORD_ROWS)
+    return 0
 
 
 def _block_height(keyword_rows: list[dict[str, Any]]) -> int:
@@ -212,8 +212,7 @@ def build_day_block(
 ) -> list[list[Any]]:
     product = report["product"]
     economics = report["economics"]
-    keyword_rows = report["keyword_rows"]
-    keyword_offset = _keyword_offset(keyword_rows)
+    keyword_offset = 0
     note = report["note"]
     stock = report["stock"]
     metrics = report["metrics"]
@@ -270,12 +269,12 @@ def build_day_block(
         return _fraction(decimalize(cell.impressions) * Decimal("100") / decimalize(unified_total))
 
     def row_after_keywords(base_row: int) -> int:
-        return base_row + keyword_offset if base_row >= 37 else base_row
+        return base_row
 
     seller_price_ref = _cell_ref(
         start_row=start_row,
         start_col=start_col,
-        relative_row=row_after_keywords(39),
+        relative_row=row_after_keywords(36),
         relative_col=6,
     )
     buyout_percent_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=22, relative_col=2)
@@ -377,22 +376,7 @@ def build_day_block(
         ["", "Дней до АУТА", "", "", days_until_zero_value(), "", "", ""],
         ["", "ТУТ БЫЛ СКРИНШОТ С ОСТАТКАМИ", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", ""],
-        ["Ключи", "Частота", "Позиция ОРГАНИЧЕСКАЯ", "", "Позиция БУСТОВАЯ", "", "CTR (%)", ""],
     ]
-    for keyword_row in keyword_rows:
-        rows.append(
-            [
-                keyword_row["query_text"],
-                _keyword_int(keyword_row["frequency"], has_data=keyword_row["has_data"]),
-                _keyword_money(keyword_row["organic_position"], has_data=keyword_row["has_data"]),
-                "",
-                _keyword_money(keyword_row["boosted_position"], has_data=keyword_row["has_data"]),
-                "",
-                _keyword_money(keyword_row["boosted_ctr"], has_data=keyword_row["has_data"]),
-                "",
-            ]
-        )
-
     rows.extend(
         [
             ["", "Обзор:", "", "", "", "", "", ""],
@@ -766,12 +750,12 @@ def _apply_dashboard_style(sheet) -> None:
 
 def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> None:
     sheet.freeze_panes = "B4"
-    keyword_offset = max(0, block_height - BASE_BLOCK_HEIGHT)
-    percent_rows = {4, 12, 14, 19, 20, 22, 38 + keyword_offset}
-    money_rows = {5, 15, 16, 21, 23, 24, 39 + keyword_offset, 40 + keyword_offset}
+    keyword_offset = 0
+    percent_rows = {4, 12, 14, 19, 20, 22, 35}
+    money_rows = {5, 15, 16, 21, 23, 24, 36, 37}
     integer_rows = {6, 10, 11, 13, 26, 27, 28}
     decimal_rows = {7, 8, 9, 17, 18, 29, 30, 31}
-    section_rows = {25, 32, 34, 37 + keyword_offset, 43 + keyword_offset}
+    section_rows = {25, 32, 34, 40}
 
     for row_idx in range(1, block_height + 1):
         if row_idx in (1, 2, 3):
@@ -830,7 +814,7 @@ def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> N
                 separator_cell.value = ""
                 separator_cell.fill = BLOCK_SEPARATOR_FILL
                 separator_cell.border = NO_BORDER
-    sheet.row_dimensions[46 + keyword_offset].height = 42
+    sheet.row_dimensions[43].height = 42
 
 
 def build_monitoring_workbook(

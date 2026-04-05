@@ -99,18 +99,93 @@
                                                 {% endif %}
                                             </span>
                                         </button>
-                                    {% elif cell.control and cell.control.type == "keyword_rows" %}
-                                        <div class="grid-keyword-header">
-                                            <span data-row-label>{{ cell.value|default_if_none:"" }}</span>
-                                            <div
-                                                class="grid-keyword-actions"
-                                                data-note-control="keyword-rows"
-                                                data-product-id="{{ cell.control.product_id }}"
-                                                data-note-date="{{ cell.control.note_date }}"
-                                                data-field="{{ cell.control.field }}"
-                                            >
-                                                <button type="button" class="grid-keyword-action" data-delta="-1" aria-label="Убрать строку ключа">-</button>
-                                                <button type="button" class="grid-keyword-action" data-delta="1" aria-label="Добавить строку ключа">+</button>
+                                    {% elif cell.control and cell.control.type == "keyword_table" %}
+                                        <div class="grid-keyword-table">
+                                            <div class="grid-keyword-table-head">
+                                                <span class="grid-keyword-title">{{ cell.value|default_if_none:"" }}</span>
+                                                <div
+                                                    class="grid-keyword-actions"
+                                                    data-note-control="keyword-rows"
+                                                    data-product-id="{{ cell.control.product_id }}"
+                                                    data-note-date="{{ cell.control.note_date }}"
+                                                    data-field="{{ cell.control.field }}"
+                                                >
+                                                    <button type="button" class="grid-keyword-action" data-delta="-1" aria-label="Убрать строку ключа">-</button>
+                                                    <button type="button" class="grid-keyword-action" data-delta="1" aria-label="Добавить строку ключа">+</button>
+                                                </div>
+                                            </div>
+                                            <div class="grid-keyword-table-grid grid-keyword-table-grid-head">
+                                                <span>Ключ</span>
+                                                <span>Частота</span>
+                                                <span>Позиция ОРГАНИЧЕСКАЯ</span>
+                                                <span>Позиция БУСТОВАЯ</span>
+                                                <span>CTR (%)</span>
+                                            </div>
+                                            <div class="grid-keyword-table-body">
+                                                {% for keyword_row in cell.control.rows %}
+                                                    <div class="grid-keyword-table-grid grid-keyword-entry" data-keyword-entry>
+                                                        <input
+                                                            class="grid-input"
+                                                            type="text"
+                                                            inputmode="text"
+                                                            data-note-control="input"
+                                                            data-product-id="{{ cell.control.product_id }}"
+                                                            data-note-date="{{ cell.control.note_date }}"
+                                                            data-field="keyword_query"
+                                                            data-keyword-prev="{{ keyword_row.query }}"
+                                                            value="{{ keyword_row.query }}"
+                                                            placeholder="Ключ"
+                                                        >
+                                                        <input
+                                                            class="grid-input grid-input-centered"
+                                                            type="text"
+                                                            inputmode="numeric"
+                                                            data-note-control="input"
+                                                            data-product-id="{{ cell.control.product_id }}"
+                                                            data-note-date="{{ cell.control.note_date }}"
+                                                            data-field="keyword_frequency"
+                                                            data-keyword-prev="{{ keyword_row.query }}"
+                                                            value="{{ keyword_row.frequency }}"
+                                                            placeholder="0"
+                                                        >
+                                                        <input
+                                                            class="grid-input grid-input-centered"
+                                                            type="text"
+                                                            inputmode="decimal"
+                                                            data-note-control="input"
+                                                            data-product-id="{{ cell.control.product_id }}"
+                                                            data-note-date="{{ cell.control.note_date }}"
+                                                            data-field="keyword_organic_position"
+                                                            data-keyword-prev="{{ keyword_row.query }}"
+                                                            value="{{ keyword_row.organic_position }}"
+                                                            placeholder="0,00"
+                                                        >
+                                                        <input
+                                                            class="grid-input grid-input-centered"
+                                                            type="text"
+                                                            inputmode="decimal"
+                                                            data-note-control="input"
+                                                            data-product-id="{{ cell.control.product_id }}"
+                                                            data-note-date="{{ cell.control.note_date }}"
+                                                            data-field="keyword_boosted_position"
+                                                            data-keyword-prev="{{ keyword_row.query }}"
+                                                            value="{{ keyword_row.boosted_position }}"
+                                                            placeholder="0,00"
+                                                        >
+                                                        <input
+                                                            class="grid-input grid-input-centered"
+                                                            type="text"
+                                                            inputmode="decimal"
+                                                            data-note-control="input"
+                                                            data-product-id="{{ cell.control.product_id }}"
+                                                            data-note-date="{{ cell.control.note_date }}"
+                                                            data-field="keyword_boosted_ctr"
+                                                            data-keyword-prev="{{ keyword_row.query }}"
+                                                            value="{{ keyword_row.boosted_ctr }}"
+                                                            placeholder="0,00"
+                                                        >
+                                                    </div>
+                                                {% endfor %}
                                             </div>
                                         </div>
                                     {% elif cell.control and cell.control.type == "bool" %}

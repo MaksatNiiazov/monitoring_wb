@@ -30,8 +30,8 @@ from monitoring.models import (
 ZERO = Decimal("0")
 ONE = Decimal("1")
 ONE_HUNDRED = Decimal("100")
-MIN_KEYWORD_ROWS = 8
-KEYWORD_ROW_BUFFER = 3
+MIN_KEYWORD_ROWS = 1
+KEYWORD_ROW_BUFFER = 1
 
 
 def decimalize(value: Any) -> Decimal:

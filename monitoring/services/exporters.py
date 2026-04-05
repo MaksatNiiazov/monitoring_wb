@@ -128,7 +128,6 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
     negative_feedback_value = (note.negative_feedback or "").strip() or "Без изменений"
     total_ad = report["total_ad"]
     organic = report["organic"]
-    keyword_rows = report["keyword_rows"]
 
     unified_search = cell_for(report, CampaignMonitoringGroup.UNIFIED, CampaignZone.SEARCH)
     unified_shelves = cell_for(report, CampaignMonitoringGroup.UNIFIED, CampaignZone.RECOMMENDATION)
@@ -286,22 +285,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
         ["", "Дней до АУТА", "", "", format_optional_decimal(report["days_until_zero_from_stock_drop"]), "", "", ""],
         ["", "ТУТ БЫЛ СКРИНШОТ С ОСТАТКАМИ", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", ""],
-        ["Ключи", "Частота", "Позиция ОРГАНИЧЕСКАЯ", "", "Позиция БУСТОВАЯ", "", "CTR (%)", ""],
     ]
-    for keyword_row in keyword_rows:
-        rows.append(
-            [
-                keyword_row["query_text"],
-                format_keyword_int(keyword_row["frequency"], has_data=keyword_row["has_data"]),
-                format_keyword_decimal(keyword_row["organic_position"], has_data=keyword_row["has_data"]),
-                "",
-                format_keyword_decimal(keyword_row["boosted_position"], has_data=keyword_row["has_data"]),
-                "",
-                format_keyword_decimal(keyword_row["boosted_ctr"], has_data=keyword_row["has_data"]),
-                "",
-            ]
-        )
-
     rows.extend(
         [
             ["", "Обзор:", "", "", "", "", "", ""],

@@ -75,7 +75,6 @@
             return;
         }
 
-        const keywordOffset = Number.parseInt(tableWrap.dataset.keywordOffset || "0", 10) || 0;
         const ROW = {
             CLICKS: 10,
             CARTS: 11,
@@ -92,7 +91,7 @@
             STOCK_TOTAL: 26,
             AVG_STOCK_DROP: 30,
             DAYS_UNTIL_ZERO: 31,
-            SELLER_PRICE: 39 + keywordOffset,
+            SELLER_PRICE: 36,
         };
         const COL = {
             OVERALL: 6,
@@ -272,12 +271,10 @@
                 payload.keyword_prev = input.dataset.keywordPrev || "";
             }
             if (keywordField) {
-                const cell = input.closest("td[data-row][data-block]");
-                const row = cell ? cell.dataset.row : "";
-                const block = cell ? cell.dataset.block : "";
-                const queryInput = table.querySelector(
-                    `td[data-row="${row}"][data-block="${block}"][data-in-block-col="0"] [data-note-control='input']`
-                );
+                const keywordEntry = input.closest("[data-keyword-entry]");
+                const queryInput = keywordEntry
+                    ? keywordEntry.querySelector("[data-field='keyword_query']")
+                    : null;
                 payload.keyword_query = queryInput ? queryInput.value.trim() : "";
             }
             try {
@@ -290,13 +287,8 @@
                     input.dataset.keywordPrev = serverValue;
                 }
                 if (input.dataset.field === "keyword_query") {
-                    const cell = input.closest("td[data-row][data-block]");
-                    const row = cell ? cell.dataset.row : "";
-                    const block = cell ? cell.dataset.block : "";
-                    table
-                        .querySelectorAll(
-                            `td[data-row="${row}"][data-block="${block}"] [data-note-control='input'][data-keyword-prev]`
-                        )
+                    const keywordEntry = input.closest("[data-keyword-entry]");
+                    (keywordEntry ? keywordEntry.querySelectorAll("[data-note-control='input'][data-keyword-prev]") : [])
                         .forEach((relatedInput) => {
                             relatedInput.dataset.keywordPrev = serverValue;
                         });
