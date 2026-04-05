@@ -502,38 +502,76 @@
             document.body.classList.toggle("is-modal-open", openedModals().length > 0);
         };
 
-        const parseStockRows = (rawRows) => {
-            if (!rawRows) {
-                return [];
+        const parseStockPayload = (rawPayload) => {
+            const fallback = {
+                mode: "flat",
+                columns: [
+                    { id: "warehouse", label: "Склад", numeric: false, blank_zero: false },
+                    { id: "stock", label: "Остаток", numeric: true, blank_zero: false },
+                ],
+                rows: [],
+                empty_message: "Нет данных по складам для выбранной даты.",
+            };
+            if (!rawPayload) {
+                return fallback;
             }
             try {
-                const parsed = JSON.parse(rawRows);
-                if (!Array.isArray(parsed)) {
-                    return [];
+                const parsed = JSON.parse(rawPayload);
+                if (!parsed || !Array.isArray(parsed.columns) || !Array.isArray(parsed.rows)) {
+                    return fallback;
                 }
-                return parsed
-                    .map((row) => {
-                        const warehouse = String(row && row.warehouse ? row.warehouse : "").trim();
-                        const stockValue = Number.parseInt(String(row && row.stock ? row.stock : "0"), 10);
-                        if (!warehouse) {
+                const columns = parsed.columns
+                    .map((column) => {
+                        const id = String(column && column.id ? column.id : "").trim();
+                        const label = String(column && column.label ? column.label : "").trim();
+                        if (!id || !label) {
                             return null;
                         }
                         return {
-                            warehouse,
-                            stock: Number.isFinite(stockValue) ? stockValue : 0,
+                            id,
+                            label,
+                            numeric: Boolean(column && column.numeric),
+                            blank_zero: Boolean(column && column.blank_zero),
                         };
                     })
-                    .filter((row) => Boolean(row));
+                    .filter((column) => Boolean(column));
+                if (!columns.length) {
+                    return fallback;
+                }
+                return {
+                    mode: parsed.mode === "matrix" ? "matrix" : "flat",
+                    columns,
+                    rows: parsed.rows.filter((row) => row && typeof row === "object"),
+                    empty_message: String(parsed.empty_message || fallback.empty_message),
+                };
             } catch (error) {
-                return [];
+                return fallback;
             }
         };
 
-        const hydrateStocksModal = (trigger) => {
-            if (!stocksModal || !stocksModalMeta || !stocksModalBody || !trigger) {
+        const renderStocksModalHead = (headNode, columns) => {
+            if (!headNode) {
                 return;
             }
-            const rows = parseStockRows(trigger.getAttribute("data-stock-rows") || "[]");
+            headNode.innerHTML = "";
+            const row = document.createElement("tr");
+            columns.forEach((column) => {
+                const cell = document.createElement("th");
+                cell.textContent = column.label;
+                if (column.numeric) {
+                    cell.className = "is-numeric";
+                }
+                row.appendChild(cell);
+            });
+            headNode.appendChild(row);
+        };
+
+        const hydrateStocksModal = (trigger) => {
+            const stocksModalHead = stocksModal ? stocksModal.querySelector("[data-stocks-modal-head]") : null;
+            if (!stocksModal || !stocksModalMeta || !stocksModalBody || !stocksModalHead || !trigger) {
+                return;
+            }
+            const payload = parseStockPayload(trigger.getAttribute("data-stock-payload") || "");
             const dateLabel = String(trigger.getAttribute("data-stock-date") || "").trim();
             const totalValue = Number.parseInt(String(trigger.getAttribute("data-stock-total") || "0"), 10);
             const totalLabel = Number.isFinite(totalValue) ? totalValue.toLocaleString("ru-RU") : "0";
@@ -541,27 +579,37 @@
                 ? `Срез на ${dateLabel}. Итого по складам: ${totalLabel} шт.`
                 : `Итого по складам: ${totalLabel} шт.`;
             stocksModalBody.innerHTML = "";
+            renderStocksModalHead(stocksModalHead, payload.columns);
 
-            if (!rows.length) {
+            if (!payload.rows.length) {
                 const emptyRow = document.createElement("tr");
                 const emptyCell = document.createElement("td");
-                emptyCell.colSpan = 2;
+                emptyCell.colSpan = payload.columns.length;
                 emptyCell.className = "table-stocks-modal-empty";
-                emptyCell.textContent = "Нет данных по складам для выбранной даты.";
+                emptyCell.textContent = payload.empty_message;
                 emptyRow.appendChild(emptyCell);
                 stocksModalBody.appendChild(emptyRow);
                 return;
             }
 
-            rows.forEach((row) => {
+            payload.rows.forEach((row) => {
                 const tableRow = document.createElement("tr");
-                const warehouseCell = document.createElement("td");
-                warehouseCell.textContent = row.warehouse;
-                const stockCell = document.createElement("td");
-                stockCell.className = "is-numeric";
-                stockCell.textContent = row.stock.toLocaleString("ru-RU");
-                tableRow.appendChild(warehouseCell);
-                tableRow.appendChild(stockCell);
+                payload.columns.forEach((column) => {
+                    const cell = document.createElement("td");
+                    const rawValue = row[column.id];
+                    if (column.numeric) {
+                        const numericValue = Number.parseInt(String(rawValue ?? ""), 10);
+                        cell.className = "is-numeric";
+                        if (Number.isFinite(numericValue) && (!column.blank_zero || numericValue !== 0)) {
+                            cell.textContent = numericValue.toLocaleString("ru-RU");
+                        } else {
+                            cell.textContent = "";
+                        }
+                    } else {
+                        cell.textContent = String(rawValue ?? "").trim();
+                    }
+                    tableRow.appendChild(cell);
+                });
                 stocksModalBody.appendChild(tableRow);
             });
         };

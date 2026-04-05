@@ -50,6 +50,7 @@ from monitoring.services.sync import (
     SyncServiceError,
 )
 from monitoring.templatetags.monitoring_extras import css_percent
+from monitoring.views import _build_stock_popup_payload
 from monitoring.services.wb_client import AnalyticsWBClient, WBApiError
 
 
@@ -1460,6 +1461,78 @@ class ReportingHubTests(TestCase):
         self.assertIn("drr", context["product_chart"]["series"])
 
 
+class StockPopupPayloadTests(TestCase):
+    def test_stock_popup_builds_size_matrix_when_raw_sizes_exist(self) -> None:
+        product = Product.objects.create(
+            nm_id=998001,
+            title="Stock matrix product",
+            vendor_code="W-RSS01-GRY",
+        )
+        ProductVisibleWarehouse.objects.bulk_create(
+            [
+                ProductVisibleWarehouse(product=product, warehouse_name="Коледино"),
+                ProductVisibleWarehouse(product=product, warehouse_name="Казань"),
+                ProductVisibleWarehouse(product=product, warehouse_name="Электросталь"),
+            ]
+        )
+        stock_row = DailyProductStock.objects.create(
+            product=product,
+            stats_date=date(2026, 4, 5),
+            total_stock=29,
+            raw_payload={
+                "raw_payload": {
+                    "data": {
+                        "sizes": [
+                            {
+                                "name": "42",
+                                "offices": [
+                                    {"officeName": "Коледино", "metrics": {"stockCount": 1}},
+                                    {"officeName": "Казань", "metrics": {"stockCount": 12}},
+                                    {"officeName": "Электросталь", "metrics": {"stockCount": 1}},
+                                ],
+                            },
+                            {
+                                "name": "44",
+                                "offices": [
+                                    {"officeName": "Коледино", "metrics": {"stockCount": 1}},
+                                    {"officeName": "Казань", "metrics": {"stockCount": 5}},
+                                ],
+                            },
+                        ]
+                    }
+                }
+            },
+        )
+
+        payload = _build_stock_popup_payload(
+            product=product,
+            stock_row=stock_row,
+            warehouse_rows=[
+                {"warehouse": "Коледино", "stock": 2, "to_client": 0, "from_client": 0, "size_names": ["42", "44"]},
+                {"warehouse": "Казань", "stock": 17, "to_client": 0, "from_client": 0, "size_names": ["42", "44"]},
+                {"warehouse": "Электросталь", "stock": 1, "to_client": 0, "from_client": 0, "size_names": ["42"]},
+            ],
+            visible_warehouse_names=["Коледино", "Казань", "Электросталь"],
+            preferred_warehouse_names={"коледино", "казань", "электросталь"},
+        )
+
+        self.assertEqual(payload["mode"], "matrix")
+        self.assertEqual(payload["title"], "Остатки")
+        parsed = json.loads(payload["payload_json"])
+        self.assertEqual(parsed["columns"][0]["label"], "Артикул продавца")
+        self.assertEqual(parsed["columns"][1]["label"], "Размер вещи")
+        self.assertEqual([column["label"] for column in parsed["columns"][2:]], ["Коледино", "Казань", "Электросталь"])
+        self.assertEqual(parsed["rows"][0]["vendor_code"], "W-RSS01-GRY")
+        self.assertEqual(parsed["rows"][0]["size"], "42")
+        self.assertEqual(parsed["rows"][0]["коледино"], 1)
+        self.assertEqual(parsed["rows"][0]["казань"], 12)
+        self.assertEqual(parsed["rows"][0]["электросталь"], 1)
+        self.assertEqual(parsed["rows"][1]["size"], "44")
+        self.assertEqual(parsed["rows"][1]["коледино"], 1)
+        self.assertEqual(parsed["rows"][1]["казань"], 5)
+        self.assertNotIn("электросталь", parsed["rows"][1])
+
+
 class PageRenderTests(TestCase):
     def test_dashboard_and_product_detail_pages_render(self) -> None:
         seed_demo_dataset()
@@ -1497,6 +1570,8 @@ class PageRenderTests(TestCase):
         self.assertContains(response, 'colspan="7"')
         self.assertContains(response, "is-stock-span")
         self.assertContains(response, "data-stock-popup-button")
+        self.assertContains(response, "data-stock-payload")
+        self.assertNotContains(response, "\\u0022mode\\u0022")
         self.assertContains(response, 'id="table-modal-stocks"')
         self.assertContains(response, 'data-table-action="fullscreen"')
         self.assertContains(response, 'data-inline-status')

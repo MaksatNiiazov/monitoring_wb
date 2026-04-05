@@ -124,6 +124,194 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
     return result
 
 
+def _parse_stock_int(raw_value: object) -> int:
+    try:
+        value = int(raw_value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(value, 0)
+
+
+def _collect_size_payloads(stock_row: DailyProductStock | None) -> list[dict[str, object]]:
+    if stock_row is None or not isinstance(stock_row.raw_payload, dict):
+        return []
+    nested_payload = stock_row.raw_payload.get("raw_payload")
+    payload_data = nested_payload if isinstance(nested_payload, dict) else stock_row.raw_payload
+    return list((((payload_data.get("data") or {}).get("sizes")) or []))
+
+
+def _build_stock_popup_payload(
+    *,
+    product: Product,
+    stock_row: DailyProductStock | None,
+    warehouse_rows: list[dict[str, object]],
+    visible_warehouse_names: list[str],
+    preferred_warehouse_names: set[str],
+) -> dict[str, object]:
+    warehouse_total = sum(_parse_stock_int(item.get("stock")) for item in warehouse_rows)
+    flat_rows: list[dict[str, object]] = []
+    for row in warehouse_rows:
+        size_names = [str(value).strip() for value in (row.get("size_names") or []) if str(value).strip()]
+        size_preview = ", ".join(size_names[:3])
+        if len(size_names) > 3:
+            size_preview = f"{size_preview} и ещё {len(size_names) - 3}"
+        flat_rows.append(
+            {
+                "warehouse": str(row.get("warehouse") or "").strip(),
+                "stock": _parse_stock_int(row.get("stock")),
+                "to_client": _parse_stock_int(row.get("to_client")),
+                "from_client": _parse_stock_int(row.get("from_client")),
+                "sizes": size_preview,
+            }
+        )
+
+    size_payloads = _collect_size_payloads(stock_row)
+    if not size_payloads:
+        return {
+            "mode": "flat",
+            "title": "Остатки по складам",
+            "summary_text": (
+                f"Итого: {warehouse_total} шт. Нажмите для деталей"
+                if flat_rows
+                else "Нет данных по складам на эту дату"
+            ),
+            "payload_json": json.dumps(
+                {
+                    "mode": "flat",
+                    "columns": [
+                        {"id": "warehouse", "label": "Склад"},
+                        {"id": "stock", "label": "Остаток", "numeric": True},
+                        {"id": "to_client", "label": "К клиенту", "numeric": True},
+                        {"id": "from_client", "label": "Возвраты", "numeric": True},
+                        {"id": "sizes", "label": "Размеры"},
+                    ],
+                    "rows": flat_rows,
+                    "empty_message": "Нет данных по складам для выбранной даты.",
+                },
+                ensure_ascii=False,
+            ),
+            "total": warehouse_total,
+            "has_rows": bool(flat_rows),
+        }
+
+    visible_names_in_order = _dedupe_preserve_order(visible_warehouse_names)
+    allowed_names = {normalize_warehouse_name(row.get("warehouse") or "") for row in warehouse_rows if row.get("warehouse")}
+    discovered_names: dict[str, str] = {}
+    warehouse_order: list[str] = []
+    matrix_rows: list[dict[str, object]] = []
+    used_warehouse_names: set[str] = set()
+
+    def register_warehouse(display_name: str) -> str:
+        normalized_name = normalize_warehouse_name(display_name)
+        if not normalized_name:
+            return ""
+        discovered_names.setdefault(normalized_name, display_name)
+        return normalized_name
+
+    for warehouse_name in visible_names_in_order:
+        normalized_name = register_warehouse(warehouse_name)
+        if normalized_name and normalized_name not in warehouse_order:
+            warehouse_order.append(normalized_name)
+
+    for warehouse_row in warehouse_rows:
+        normalized_name = register_warehouse(str(warehouse_row.get("warehouse") or ""))
+        if normalized_name and normalized_name not in warehouse_order:
+            warehouse_order.append(normalized_name)
+
+    for size_payload in size_payloads:
+        size_name = str(size_payload.get("name") or "").strip()
+        if not size_name:
+            continue
+        row_values: dict[str, object] = {
+            "vendor_code": product.vendor_code or str(product.nm_id),
+            "size": size_name,
+        }
+        row_total = 0
+        offices = size_payload.get("offices") or []
+        for office in offices:
+            office_name = str((office or {}).get("officeName") or "").strip()
+            normalized_name = register_warehouse(office_name)
+            if not normalized_name:
+                continue
+            if preferred_warehouse_names and normalized_name not in preferred_warehouse_names:
+                continue
+            if allowed_names and normalized_name not in allowed_names:
+                continue
+            if normalized_name not in warehouse_order:
+                warehouse_order.append(normalized_name)
+            stock_value = _parse_stock_int(((office or {}).get("metrics") or {}).get("stockCount"))
+            if stock_value > 0:
+                row_values[normalized_name] = stock_value
+                row_total += stock_value
+                used_warehouse_names.add(normalized_name)
+        if row_total > 0:
+            matrix_rows.append(row_values)
+
+    warehouse_columns = [name for name in warehouse_order if name in used_warehouse_names]
+    if not matrix_rows or not warehouse_columns:
+        return {
+            "mode": "flat",
+            "title": "Остатки по складам",
+            "summary_text": (
+                f"Итого: {warehouse_total} шт. Нажмите для деталей"
+                if flat_rows
+                else "Нет данных по складам на эту дату"
+            ),
+            "payload_json": json.dumps(
+                {
+                    "mode": "flat",
+                    "columns": [
+                        {"id": "warehouse", "label": "Склад"},
+                        {"id": "stock", "label": "Остаток", "numeric": True},
+                        {"id": "to_client", "label": "К клиенту", "numeric": True},
+                        {"id": "from_client", "label": "Возвраты", "numeric": True},
+                        {"id": "sizes", "label": "Размеры"},
+                    ],
+                    "rows": flat_rows,
+                    "empty_message": "Нет данных по складам для выбранной даты.",
+                },
+                ensure_ascii=False,
+            ),
+            "total": warehouse_total,
+            "has_rows": bool(flat_rows),
+        }
+
+    matrix_column_specs = [
+        {"id": "vendor_code", "label": "Артикул продавца"},
+        {"id": "size", "label": "Размер вещи"},
+    ]
+    for warehouse_name in warehouse_columns:
+        matrix_column_specs.append(
+            {
+                "id": warehouse_name,
+                "label": discovered_names.get(warehouse_name, warehouse_name),
+                "numeric": True,
+                "blank_zero": True,
+            }
+        )
+
+    matrix_total = sum(
+        sum(_parse_stock_int(row.get(warehouse_name)) for warehouse_name in warehouse_columns)
+        for row in matrix_rows
+    )
+    return {
+        "mode": "matrix",
+        "title": "Остатки",
+        "summary_text": f"Итого: {matrix_total} шт. По размерам и складам",
+        "payload_json": json.dumps(
+            {
+                "mode": "matrix",
+                "columns": matrix_column_specs,
+                "rows": matrix_rows,
+                "empty_message": "Нет детализированных остатков по размерам для выбранной даты.",
+            },
+            ensure_ascii=False,
+        ),
+        "total": matrix_total,
+        "has_rows": bool(matrix_rows),
+    }
+
+
 def _resolve_daily_keyword_stat(
     *,
     product: Product,
@@ -322,11 +510,19 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         if active_sheet["kind"] == "product" and product_id and block_dates:
             product = Product.objects.filter(pk=product_id).first()
             if product is not None:
+                visible_warehouse_names = product.visible_warehouse_names()
                 preferred_warehouse_names = {
                     normalize_warehouse_name(warehouse_name)
-                    for warehouse_name in product.visible_warehouse_names()
+                    for warehouse_name in visible_warehouse_names
                 }
                 warehouse_rows_by_date: dict[date, list[dict[str, object]]] = defaultdict(list)
+                product_stock_rows_by_date = {
+                    row.stats_date: row
+                    for row in DailyProductStock.objects.filter(
+                        product_id=product_id,
+                        stats_date__in=block_dates,
+                    )
+                }
                 warehouse_rows = (
                     DailyWarehouseStock.objects.filter(
                         product_id=product_id,
@@ -346,15 +542,19 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                         {
                             "warehouse": warehouse_name,
                             "stock": int(warehouse_row.stock_count or 0),
+                            "to_client": int(warehouse_row.in_way_to_client or 0),
+                            "from_client": int(warehouse_row.in_way_from_client or 0),
+                            "size_names": list((warehouse_row.raw_payload or {}).get("sizeNames") or []),
                         }
                     )
                 for stock_date in block_dates:
-                    rows = warehouse_rows_by_date.get(stock_date, [])
-                    stock_popup_payloads[stock_date.isoformat()] = {
-                        "rows": rows,
-                        "rows_json": json.dumps(rows, ensure_ascii=False),
-                        "total": sum(int(item.get("stock") or 0) for item in rows),
-                    }
+                    stock_popup_payloads[stock_date.isoformat()] = _build_stock_popup_payload(
+                        product=product,
+                        stock_row=product_stock_rows_by_date.get(stock_date),
+                        warehouse_rows=warehouse_rows_by_date.get(stock_date, []),
+                        visible_warehouse_names=visible_warehouse_names,
+                        preferred_warehouse_names=preferred_warehouse_names,
+                    )
 
         prepared_rows: list[dict] = []
         for row_index, row in enumerate(active_sheet["rows"]):
@@ -446,18 +646,24 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                             popup_payload = stock_popup_payloads.get(
                                 note_date.isoformat(),
                                 {
-                                    "rows": [],
-                                    "rows_json": "[]",
+                                    "mode": "flat",
+                                    "title": "Остатки по складам",
+                                    "summary_text": "Нет данных по складам на эту дату",
+                                    "payload_json": "{\"mode\":\"flat\",\"columns\":[],\"rows\":[]}",
                                     "total": 0,
+                                    "has_rows": False,
                                 },
                             )
                             control = {
                                 "type": "stock_popup",
                                 "stock_date": note_date.isoformat(),
                                 "stock_date_label": note_date.strftime("%d.%m.%Y"),
-                                "rows_json": str(popup_payload.get("rows_json") or "[]"),
+                                "mode": str(popup_payload.get("mode") or "flat"),
+                                "title": str(popup_payload.get("title") or "Остатки по складам"),
+                                "summary_text": str(popup_payload.get("summary_text") or ""),
+                                "payload_json": str(popup_payload.get("payload_json") or "{\"mode\":\"flat\",\"columns\":[],\"rows\":[]}"),
                                 "total": int(popup_payload.get("total") or 0),
-                                "has_rows": bool(popup_payload.get("rows")),
+                                "has_rows": bool(popup_payload.get("has_rows")),
                             }
                             if in_block_col < BLOCK_WIDTH:
                                 colspan = max(1, BLOCK_WIDTH - in_block_col)

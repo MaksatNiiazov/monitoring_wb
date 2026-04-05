@@ -1809,6 +1809,10 @@ body.is-modal-open {
     gap: 14px;
 }
 
+#table-modal-stocks .table-modal-dialog {
+    width: min(1180px, calc(100vw - 32px));
+}
+
 .table-modal-head {
     display: flex;
     justify-content: space-between;
@@ -1852,17 +1856,18 @@ body.is-modal-open {
 
 .table-stocks-modal-table {
     width: 100%;
-    min-width: 320px;
+    min-width: 560px;
     border-collapse: separate;
     border-spacing: 0;
 }
 
 .table-stocks-modal-table th,
 .table-stocks-modal-table td {
-    padding: 10px 12px;
+    padding: 8px 10px;
     border-bottom: 1px solid rgba(20, 33, 42, 0.08);
     text-align: left;
-    font-size: 0.88rem;
+    font-size: 0.82rem;
+    white-space: nowrap;
 }
 
 .table-stocks-modal-table thead th {
@@ -1871,9 +1876,10 @@ body.is-modal-open {
     z-index: 1;
     background: rgba(236, 242, 249, 0.96);
     color: var(--ink);
-    font-size: 0.78rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-size: 0.76rem;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    font-weight: 800;
 }
 
 .table-stocks-modal-table td.is-numeric,

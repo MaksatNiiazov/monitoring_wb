@@ -88,15 +88,11 @@
                                             data-modal-open="table-modal-stocks"
                                             data-stock-date="{{ cell.control.stock_date_label }}"
                                             data-stock-total="{{ cell.control.total }}"
-                                            data-stock-rows="{{ cell.control.rows_json|escapejs }}"
+                                            data-stock-payload="{{ cell.control.payload_json|escape }}"
                                         >
-                                            <span class="grid-stock-trigger-title">Остатки по складам</span>
+                                            <span class="grid-stock-trigger-title">{{ cell.control.title }}</span>
                                             <span class="grid-stock-trigger-meta">
-                                                {% if cell.control.has_rows %}
-                                                    Итого: {{ cell.control.total }} шт. Нажмите для деталей
-                                                {% else %}
-                                                    Нет данных по складам на эту дату
-                                                {% endif %}
+                                                {{ cell.control.summary_text }}
                                             </span>
                                         </button>
                                     {% elif cell.control and cell.control.type == "keyword_table" %}
@@ -364,12 +360,7 @@
         <p class="muted table-modal-copy" data-stocks-modal-meta></p>
         <div class="table-stocks-modal-scroll">
             <table class="table-stocks-modal-table">
-                <thead>
-                    <tr>
-                        <th>Склад</th>
-                        <th class="is-numeric">Остаток</th>
-                    </tr>
-                </thead>
+                <thead data-stocks-modal-head></thead>
                 <tbody data-stocks-modal-body>
                     <tr>
                         <td class="table-stocks-modal-empty" colspan="2">Нет данных</td>
