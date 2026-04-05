@@ -198,18 +198,47 @@ def resolve_product_economics(product: Product, effective_date: date) -> Resolve
         .first()
     )
     if snapshot:
-        return ResolvedEconomics(
+        resolved = ResolvedEconomics(
             effective_from=snapshot.effective_from,
             buyout_percent=decimalize(snapshot.buyout_percent),
             unit_cost=decimalize(snapshot.unit_cost),
             logistics_cost=decimalize(snapshot.logistics_cost),
         )
-    return ResolvedEconomics(
-        effective_from=None,
-        buyout_percent=decimalize(product.buyout_percent),
-        unit_cost=decimalize(product.unit_cost),
-        logistics_cost=decimalize(product.logistics_cost),
-    )
+    else:
+        resolved = ResolvedEconomics(
+            effective_from=None,
+            buyout_percent=decimalize(product.buyout_percent),
+            unit_cost=decimalize(product.unit_cost),
+            logistics_cost=decimalize(product.logistics_cost),
+        )
+
+    fallback_buyout = decimalize(product.buyout_percent)
+    fallback_unit_cost = decimalize(product.unit_cost)
+    fallback_logistics = decimalize(product.logistics_cost)
+
+    if resolved.buyout_percent == ZERO and fallback_buyout != ZERO:
+        resolved = ResolvedEconomics(
+            effective_from=resolved.effective_from,
+            buyout_percent=fallback_buyout,
+            unit_cost=resolved.unit_cost,
+            logistics_cost=resolved.logistics_cost,
+        )
+    if resolved.unit_cost == ZERO and fallback_unit_cost != ZERO:
+        resolved = ResolvedEconomics(
+            effective_from=resolved.effective_from,
+            buyout_percent=resolved.buyout_percent,
+            unit_cost=fallback_unit_cost,
+            logistics_cost=resolved.logistics_cost,
+        )
+    if resolved.logistics_cost == ZERO and fallback_logistics != ZERO:
+        resolved = ResolvedEconomics(
+            effective_from=resolved.effective_from,
+            buyout_percent=resolved.buyout_percent,
+            unit_cost=resolved.unit_cost,
+            logistics_cost=fallback_logistics,
+        )
+
+    return resolved
 
 
 def get_default_dates(product: Product | None = None) -> tuple[date, date]:

@@ -9,8 +9,7 @@ services:
       - .env
     environment:
       DJANGO_DEBUG: "1"
-      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost"
+      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,158.160.253.59"
     volumes:
       - .:/app
     command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
-

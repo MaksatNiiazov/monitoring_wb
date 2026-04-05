@@ -50,7 +50,7 @@ from .services.monitoring_table import (
     export_monitoring_workbook_bytes,
 )
 from .services.reporting_hub import build_reports_context
-from .services.reports import build_product_report, get_default_dates, normalize_warehouse_name
+from .services.reports import build_product_report, get_default_dates, normalize_warehouse_name, resolve_product_economics
 from .services.sync import (
     get_running_sync,
     mark_stale_running_syncs,
@@ -990,6 +990,14 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
             resolved_decimal = resolved_decimal.quantize(Decimal("0.01"))
             if resolved_decimal < 0:
                 return JsonResponse({"ok": False, "detail": "Value cannot be negative."}, status=400)
+
+        if resolved_decimal == 0:
+            current_defaults = resolve_product_economics(product, note_date)
+            fallback_value = getattr(current_defaults, field, Decimal("0"))
+            if fallback_value != 0:
+                resolved_decimal = fallback_value
+            else:
+                return JsonResponse({"ok": False, "detail": "Value cannot be 0."}, status=400)
 
         economics = ProductEconomicsVersion.objects.filter(product=product, effective_from=note_date).first()
         if economics:

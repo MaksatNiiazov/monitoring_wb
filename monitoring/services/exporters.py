@@ -175,6 +175,11 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             return ""
         return format_decimal(value)
 
+    def derived_percent(cell: MetricCell, value: Decimal | int | float | None) -> str:
+        if not is_active(cell):
+            return ""
+        return format_percent(value)
+
     overall_clicks = metrics.open_count if metrics else 0
     overall_carts = metrics.add_to_cart_count if metrics else 0
     overall_orders = metrics.order_count if metrics else 0
@@ -182,12 +187,13 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
     conversion_cart = safe_divide(decimalize(overall_carts) * 100, overall_clicks)
     conversion_order = safe_divide(decimalize(overall_orders) * 100, overall_carts)
     estimated_buyout_overall = estimate_buyout_sum(economics, decimalize(metrics.order_sum if metrics else 0))
+    drr_sales_ratio = safe_divide(total_ad.spend, estimated_buyout_overall)
     profit_overall = estimate_monitoring_profit(
         seller_price=note.seller_price,
         unit_cost=economics.unit_cost,
         logistics_cost=economics.logistics_cost,
         buyout_percent=economics.buyout_percent,
-        drr_sales_percent=safe_divide(decimalize(total_ad.spend) * 100, estimated_buyout_overall),
+        drr_sales_percent=drr_sales_ratio,
         total_orders=overall_orders,
     )
 
@@ -210,8 +216,8 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
         ["Выкупы ≈ (руб.)", "", derived_decimal(unified_search, estimate_buyout_sum(economics, unified_search.order_sum)), derived_decimal(unified_shelves, estimate_buyout_sum(economics, unified_shelves.order_sum)), derived_decimal(unified_catalog, estimate_buyout_sum(economics, unified_catalog.order_sum)), derived_decimal(manual_search, estimate_buyout_sum(economics, manual_search.order_sum)), derived_decimal(manual_shelves, estimate_buyout_sum(economics, manual_shelves.order_sum)), format_decimal(estimated_buyout_overall), "-"],
         ["Стоимость заказа", "", derived_decimal(unified_search, unified_search.order_cost), derived_decimal(unified_shelves, unified_shelves.order_cost), derived_decimal(unified_catalog, unified_catalog.order_cost), derived_decimal(manual_search, manual_search.order_cost), derived_decimal(manual_shelves, manual_shelves.order_cost), format_decimal(safe_divide(total_ad.spend, overall_orders)), "-"],
         ["Стоимость корзины", "", derived_decimal(unified_search, unified_search.cart_cost), derived_decimal(unified_shelves, unified_shelves.cart_cost), derived_decimal(unified_catalog, unified_catalog.cart_cost), derived_decimal(manual_search, manual_search.cart_cost), derived_decimal(manual_shelves, manual_shelves.cart_cost), format_decimal(safe_divide(total_ad.spend, overall_carts)), "-"],
-        ["ДРР от заказов (%)", "", derived_decimal(unified_search, safe_divide(unified_search.spend * 100, unified_search.order_sum)), derived_decimal(unified_shelves, safe_divide(unified_shelves.spend * 100, unified_shelves.order_sum)), derived_decimal(unified_catalog, safe_divide(unified_catalog.spend * 100, unified_catalog.order_sum)), derived_decimal(manual_search, safe_divide(manual_search.spend * 100, manual_search.order_sum)), derived_decimal(manual_shelves, safe_divide(manual_shelves.spend * 100, manual_shelves.order_sum)), format_decimal(safe_divide(total_ad.spend * 100, overall_order_sum)), "-"],
-        ["ДРР от продаж ≈ (%)", "", derived_decimal(unified_search, safe_divide(unified_search.spend * 100, estimate_buyout_sum(economics, unified_search.order_sum))), derived_decimal(unified_shelves, safe_divide(unified_shelves.spend * 100, estimate_buyout_sum(economics, unified_shelves.order_sum))), derived_decimal(unified_catalog, safe_divide(unified_catalog.spend * 100, estimate_buyout_sum(economics, unified_catalog.order_sum))), derived_decimal(manual_search, safe_divide(manual_search.spend * 100, estimate_buyout_sum(economics, manual_search.order_sum))), derived_decimal(manual_shelves, safe_divide(manual_shelves.spend * 100, estimate_buyout_sum(economics, manual_shelves.order_sum))), format_decimal(safe_divide(total_ad.spend * 100, estimated_buyout_overall)), "-"],
+        ["ДРР от заказов (%)", "", derived_percent(unified_search, safe_divide(unified_search.spend, unified_search.order_sum) * 100), derived_percent(unified_shelves, safe_divide(unified_shelves.spend, unified_shelves.order_sum) * 100), derived_percent(unified_catalog, safe_divide(unified_catalog.spend, unified_catalog.order_sum) * 100), derived_percent(manual_search, safe_divide(manual_search.spend, manual_search.order_sum) * 100), derived_percent(manual_shelves, safe_divide(manual_shelves.spend, manual_shelves.order_sum) * 100), format_percent(safe_divide(total_ad.spend, overall_order_sum) * 100), "-"],
+        ["ДРР от продаж ≈ (%)", "", derived_percent(unified_search, safe_divide(unified_search.spend, estimate_buyout_sum(economics, unified_search.order_sum)) * 100), derived_percent(unified_shelves, safe_divide(unified_shelves.spend, estimate_buyout_sum(economics, unified_shelves.order_sum)) * 100), derived_percent(unified_catalog, safe_divide(unified_catalog.spend, estimate_buyout_sum(economics, unified_catalog.order_sum)) * 100), derived_percent(manual_search, safe_divide(manual_search.spend, estimate_buyout_sum(economics, manual_search.order_sum)) * 100), derived_percent(manual_shelves, safe_divide(manual_shelves.spend, estimate_buyout_sum(economics, manual_shelves.order_sum)) * 100), format_percent(drr_sales_ratio * 100), "-"],
         ["Прибыль", "", format_decimal(profit_overall), "", "", "", "", "", ""],
         ["Процент выкупа %", "", format_percent(percent_points(economics.buyout_percent)), "", "", "", "", "", ""],
         ["Себестоимость", "", format_decimal(economics.unit_cost), "", "", "", "", "", ""],

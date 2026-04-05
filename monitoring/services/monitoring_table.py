@@ -277,7 +277,7 @@ def build_day_block(
         return f'={row_value_ref(5, relative_col)}/{row_value_ref(11, relative_col)}'
 
     def ratio_formula(relative_col: int, denominator_row: int) -> str:
-        return f'={row_value_ref(5, relative_col)}/({row_value_ref(denominator_row, relative_col)}/100)'
+        return f'={row_value_ref(5, relative_col)}/{row_value_ref(denominator_row, relative_col)}'
 
     def overall_profit_formula() -> str:
         buyout_fraction = f"IF({buyout_percent_ref}>1,{buyout_percent_ref}/100,{buyout_percent_ref})"
@@ -335,10 +335,7 @@ def build_day_block(
     def days_until_zero_formula() -> float | str:
         if stock and decimalize(stock.days_until_zero):
             return _money(stock.days_until_zero)
-        return (
-            f"=IFERROR(({row_value_ref(27, 8)}+({row_value_ref(28, 8)}-{row_value_ref(28, 8)}*{buyout_percent_ref})+"
-            f"{row_value_ref(29, 8)})/({row_value_ref(30, 8)}*{buyout_percent_ref}),0)"
-        )
+        return f"={row_value_ref(27, 8)}/{row_value_ref(31, 8)}"
 
     rows: list[list[Any]] = [
         ["", "", _block_header(report), "", "", "", "", "", ""],
@@ -477,6 +474,9 @@ def _build_prefetched_product_report_context(*, product: Product, stock_dates: l
             effective_from__lte=max_stock_date,
         ).order_by("-effective_from", "-id")
     )
+    fallback_buyout = decimalize(product.buyout_percent)
+    fallback_unit_cost = decimalize(product.unit_cost)
+    fallback_logistics = decimalize(product.logistics_cost)
     economics_by_date: dict[date, ResolvedEconomics] = {}
     for current_date in normalized_dates:
         economics_snapshot = next(
@@ -484,19 +484,25 @@ def _build_prefetched_product_report_context(*, product: Product, stock_dates: l
             None,
         )
         if economics_snapshot:
-            economics_by_date[current_date] = ResolvedEconomics(
+            resolved = ResolvedEconomics(
                 effective_from=economics_snapshot.effective_from,
                 buyout_percent=decimalize(economics_snapshot.buyout_percent),
                 unit_cost=decimalize(economics_snapshot.unit_cost),
                 logistics_cost=decimalize(economics_snapshot.logistics_cost),
             )
         else:
-            economics_by_date[current_date] = ResolvedEconomics(
+            resolved = ResolvedEconomics(
                 effective_from=None,
                 buyout_percent=decimalize(product.buyout_percent),
                 unit_cost=decimalize(product.unit_cost),
                 logistics_cost=decimalize(product.logistics_cost),
             )
+        economics_by_date[current_date] = ResolvedEconomics(
+            effective_from=resolved.effective_from,
+            buyout_percent=fallback_buyout if resolved.buyout_percent == 0 and fallback_buyout != 0 else resolved.buyout_percent,
+            unit_cost=fallback_unit_cost if resolved.unit_cost == 0 and fallback_unit_cost != 0 else resolved.unit_cost,
+            logistics_cost=fallback_logistics if resolved.logistics_cost == 0 and fallback_logistics != 0 else resolved.logistics_cost,
+        )
 
     visible_warehouse_names = {
         normalize_warehouse_name(name)
@@ -616,6 +622,7 @@ def build_product_monitoring_rows_display(
 
     stock_row_index = 26
     avg_drop_row_index = 30
+    days_until_zero_row_index = 31
     overall_col_offset = 7
     block_span = BLOCK_WIDTH + BLOCK_GAP
 
@@ -629,12 +636,23 @@ def build_product_monitoring_rows_display(
             if value is None:
                 continue
             values.append(value)
+        average_drop_value: Decimal | None
         if len(values) < 2:
+            average_drop_value = None
             average_drop = ""
         else:
             diffs = [values[index + 1] - values[index] for index in range(len(values) - 1)]
-            average_drop = format_decimal(sum(diffs) / Decimal(len(diffs)))
-        matrix[avg_drop_row_index][block_index * block_span + overall_col_offset] = average_drop
+            average_drop_value = sum(diffs) / Decimal(len(diffs))
+            average_drop = format_decimal(average_drop_value)
+        col_index = block_index * block_span + overall_col_offset
+        matrix[avg_drop_row_index][col_index] = average_drop
+
+        stock_value = parse_matrix_number(matrix[stock_row_index][col_index])
+        if stock_value is None or average_drop_value in (None, Decimal("0")):
+            days_until_zero = ""
+        else:
+            days_until_zero = format_decimal(stock_value / average_drop_value)
+        matrix[days_until_zero_row_index][col_index] = days_until_zero
     return matrix
 
 
@@ -784,10 +802,10 @@ def _apply_dashboard_style(sheet) -> None:
 def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> None:
     sheet.freeze_panes = "C4"
     keyword_offset = max(0, block_height - BASE_BLOCK_HEIGHT)
-    percent_rows = {4, 12, 14, 22, 37 + keyword_offset}
+    percent_rows = {4, 12, 14, 19, 20, 22, 37 + keyword_offset}
     money_rows = {5, 15, 16, 21, 23, 24, 38 + keyword_offset, 39 + keyword_offset}
     integer_rows = {6, 10, 11, 13, 27, 28, 29}
-    decimal_rows = {7, 8, 9, 17, 18, 19, 20, 30, 31, 32}
+    decimal_rows = {7, 8, 9, 17, 18, 30, 31, 32}
     section_rows = {25, 33, 36 + keyword_offset, 42 + keyword_offset, 47 + keyword_offset}
 
     for row_idx in range(1, block_height + 1):

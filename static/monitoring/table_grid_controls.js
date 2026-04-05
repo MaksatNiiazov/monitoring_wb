@@ -91,6 +91,7 @@
             LOGISTICS: 24,
             STOCK_TOTAL: 27,
             AVG_STOCK_DROP: 31,
+            DAYS_UNTIL_ZERO: 32,
             SELLER_PRICE: 38 + keywordOffset,
         };
         const COL = {
@@ -157,8 +158,8 @@
             const buyouts = orderSum && buyoutFraction ? orderSum * buyoutFraction : 0;
             setCellText(ROW.BUYOUTS, blockIndex, COL.OVERALL, formatDecimalValue(buyouts));
 
-            const drrSales = buyouts ? (spend || 0) * 100 / buyouts : 0;
-            setCellText(ROW.DRR_SALES, blockIndex, COL.OVERALL, formatDecimalValue(drrSales));
+            const drrSalesRatio = buyouts ? (spend || 0) / buyouts : 0;
+            setCellText(ROW.DRR_SALES, blockIndex, COL.OVERALL, formatPercentValue(drrSalesRatio * 100));
 
             const sellerPrice = readNumber(ROW.SELLER_PRICE, blockIndex, COL.SELLER_PRICE) || 0;
             const unitCost = readNumber(ROW.UNIT_COST, blockIndex, COL.INPUT_MAIN) || 0;
@@ -171,7 +172,7 @@
                 const margin =
                     sellerPrice -
                     unitCost -
-                    (sellerPrice * drrSales) / 100 -
+                    (sellerPrice * drrSalesRatio) / 100 -
                     sellerPrice * 0.25 -
                     logisticsAdjustment;
                 profit = margin * totalOrders * buyoutFraction;
@@ -196,17 +197,26 @@
                 }
                 if (values.length < 2) {
                     setCellText(ROW.AVG_STOCK_DROP, blockIndex, COL.OVERALL, "");
+                    setCellText(ROW.DAYS_UNTIL_ZERO, blockIndex, COL.OVERALL, "");
                     continue;
                 }
                 let sum = 0;
                 for (let index = 0; index < values.length - 1; index += 1) {
                     sum += values[index + 1] - values[index];
                 }
+                const averageDrop = sum / (values.length - 1);
+                setCellText(ROW.AVG_STOCK_DROP, blockIndex, COL.OVERALL, formatDecimalValue(averageDrop));
+
+                const stockTotal = readNumber(ROW.STOCK_TOTAL, blockIndex, COL.OVERALL);
+                if (!Number.isFinite(averageDrop) || averageDrop === 0 || stockTotal === null) {
+                    setCellText(ROW.DAYS_UNTIL_ZERO, blockIndex, COL.OVERALL, "");
+                    continue;
+                }
                 setCellText(
-                    ROW.AVG_STOCK_DROP,
+                    ROW.DAYS_UNTIL_ZERO,
                     blockIndex,
                     COL.OVERALL,
-                    formatDecimalValue(sum / (values.length - 1))
+                    formatDecimalValue(stockTotal / averageDrop)
                 );
             }
         };
