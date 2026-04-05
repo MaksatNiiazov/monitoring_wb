@@ -191,7 +191,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
         total_orders=overall_orders,
     )
 
-    return [
+    rows = [
         ["", "", f"{report['stock_date']:%d.%m.%Y}", "", "", "", "", "", ""],
         ["Тип рекламной кампании", "", "Единая ставка", "", "", "Руч. Поиск", "Руч. Полки", "Общая и органика", ""],
         ["Зоны показов", "", "Поиск", "Полки", "Каталог", "Поиск", "Полки", "Общая", "ОРГ"],
@@ -225,39 +225,37 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
         ["", "", "Ср. убыль остатков/день", "", "", "", "", "", ""],
         ["", "", "Дней до распродажи в 0", "", "", "", "", format_decimal(report["days_until_zero"]), ""],
         ["Ключи", "", "Частота", "поз. ОРГ", "", "", "", "поз. БУСТ", "CTR (%)"],
-        [
-            keyword_rows[0]["query_text"],
-            "",
-            format_keyword_int(keyword_rows[0]["frequency"], has_data=keyword_rows[0]["has_data"]),
-            format_keyword_decimal(keyword_rows[0]["organic_position"], has_data=keyword_rows[0]["has_data"]),
-            "",
-            "",
-            "",
-            format_keyword_decimal(keyword_rows[0]["boosted_position"], has_data=keyword_rows[0]["has_data"]),
-            format_keyword_decimal(keyword_rows[0]["boosted_ctr"], has_data=keyword_rows[0]["has_data"]),
-        ],
-        [
-            keyword_rows[1]["query_text"],
-            "",
-            format_keyword_int(keyword_rows[1]["frequency"], has_data=keyword_rows[1]["has_data"]),
-            format_keyword_decimal(keyword_rows[1]["organic_position"], has_data=keyword_rows[1]["has_data"]),
-            "",
-            "",
-            "",
-            format_keyword_decimal(keyword_rows[1]["boosted_position"], has_data=keyword_rows[1]["has_data"]),
-            format_keyword_decimal(keyword_rows[1]["boosted_ctr"], has_data=keyword_rows[1]["has_data"]),
-        ],
-        ["", "", "Обзор:", "", "", "", "", "", ""],
-        ["", "", "СПП", format_optional_percent(note.spp_percent), "", "", spp_change_label(report, previous_report), "", ""],
-        ["", "", "Цена WBSELLER (наша)", "", "", "", format_optional_decimal(note.seller_price), "", ""],
-        ["", "", "Цена WB (на сайте)", "", "", "", format_optional_decimal(note.wb_price), "", ""],
-        ["", "", "Акция", "", "", "", promo_status_value, "", ""],
-        ["", "", "Негативные отзывы", "", "", "", negative_feedback_value, "", ""],
-        ["", "", "Действия:", "", "", "", "", "", ""],
-        ["", "", "Включили РК единая ставка?", "", "", "", "Да" if note.unified_enabled else "Нет", "", ""],
-        ["", "", "Включили РК руч. поиск?", "", "", "", "Да" if note.manual_search_enabled else "Нет", "", ""],
-        ["", "", "Включили РК руч. полки?", "", "", "", "Да" if note.manual_shelves_enabled else "Нет", "", ""],
-        ["", "", "Меняли цену? (WBSeller)", "", "", "", "Да" if note.price_changed else "Нет", "", ""],
-        ["", "", "Комментарии:", "", "", "", "", "", ""],
-        ["", "", note.comment, "", "", "", "", "", ""],
     ]
+    for keyword_row in keyword_rows:
+        rows.append(
+            [
+                keyword_row["query_text"],
+                "",
+                format_keyword_int(keyword_row["frequency"], has_data=keyword_row["has_data"]),
+                format_keyword_decimal(keyword_row["organic_position"], has_data=keyword_row["has_data"]),
+                "",
+                "",
+                "",
+                format_keyword_decimal(keyword_row["boosted_position"], has_data=keyword_row["has_data"]),
+                format_keyword_decimal(keyword_row["boosted_ctr"], has_data=keyword_row["has_data"]),
+            ]
+        )
+
+    rows.extend(
+        [
+            ["", "", "Обзор:", "", "", "", "", "", ""],
+            ["", "", "СПП", format_optional_percent(note.spp_percent), "", "", spp_change_label(report, previous_report), "", ""],
+            ["", "", "Цена WBSELLER (наша)", "", "", "", format_optional_decimal(note.seller_price), "", ""],
+            ["", "", "Цена WB (на сайте)", "", "", "", format_optional_decimal(note.wb_price), "", ""],
+            ["", "", "Акция", "", "", "", promo_status_value, "", ""],
+            ["", "", "Негативные отзывы", "", "", "", negative_feedback_value, "", ""],
+            ["", "", "Действия:", "", "", "", "", "", ""],
+            ["", "", "Включили РК единая ставка?", "", "", "", "Да" if note.unified_enabled else "Нет", "", ""],
+            ["", "", "Включили РК руч. поиск?", "", "", "", "Да" if note.manual_search_enabled else "Нет", "", ""],
+            ["", "", "Включили РК руч. полки?", "", "", "", "Да" if note.manual_shelves_enabled else "Нет", "", ""],
+            ["", "", "Меняли цену? (WBSeller)", "", "", "", "Да" if note.price_changed else "Нет", "", ""],
+            ["", "", "Комментарии:", "", "", "", "", "", ""],
+            ["", "", note.comment, "", "", "", "", "", ""],
+        ]
+    )
+    return rows

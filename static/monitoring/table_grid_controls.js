@@ -75,6 +75,7 @@
             return;
         }
 
+        const keywordOffset = Number.parseInt(tableWrap.dataset.keywordOffset || "0", 10) || 0;
         const ROW = {
             CLICKS: 10,
             CARTS: 11,
@@ -90,7 +91,7 @@
             LOGISTICS: 24,
             STOCK_TOTAL: 27,
             AVG_STOCK_DROP: 31,
-            SELLER_PRICE: 38,
+            SELLER_PRICE: 38 + keywordOffset,
         };
         const COL = {
             OVERALL: 7,
@@ -290,12 +291,18 @@
                 field: input.dataset.field,
                 value: next,
             };
+            if (typeof input.dataset.keywordPrev !== "undefined") {
+                payload.keyword_prev = input.dataset.keywordPrev || "";
+            }
             try {
                 setInputPending(input, true);
                 const result = await saveCell(updateUrl, payload);
                 const serverValue = result && typeof result.value !== "undefined" ? String(result.value ?? "") : next;
                 input.value = serverValue;
                 input.dataset.previousValue = serverValue;
+                if (typeof input.dataset.keywordPrev !== "undefined") {
+                    input.dataset.keywordPrev = serverValue;
+                }
                 showStatus("Сохранено", "success");
                 const cell = input.closest("td[data-block]");
                 if (cell && typeof tableWrap._recalculateBlock === "function") {

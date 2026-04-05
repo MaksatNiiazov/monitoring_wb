@@ -28,9 +28,11 @@ load_env_file(BASE_DIR / ".env")
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-wb-monitoring-dev-key")
 DEBUG = env_bool("DJANGO_DEBUG", True)
-ALLOWED_HOSTS = env_csv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver")
+ALLOW_ALL_HOSTS = env_bool("DJANGO_ALLOW_ALL_HOSTS", False)
+ALLOWED_HOSTS = ["*"] if ALLOW_ALL_HOSTS else env_csv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver")
 CSRF_TRUSTED_ORIGINS = env_csv("DJANGO_CSRF_TRUSTED_ORIGINS", "")
 CORS_ALLOWED_ORIGINS = env_csv("DJANGO_CORS_ALLOWED_ORIGINS", "")
+CORS_ALLOW_ALL_ORIGINS = ALLOW_ALL_HOSTS
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -61,6 +63,10 @@ if CORS_ALLOWED_ORIGINS:
     else:
         INSTALLED_APPS.insert(0, "corsheaders")
         MIDDLEWARE.insert(1, "corsheaders.middleware.CorsMiddleware")
+
+if ALLOW_ALL_HOSTS:
+    # Dev-only: disable CSRF origin checks to allow ngrok URLs without whitelisting.
+    MIDDLEWARE = [mw for mw in MIDDLEWARE if mw != "django.middleware.csrf.CsrfViewMiddleware"]
 
 ROOT_URLCONF = "wb_monitoring.urls"
 

@@ -65,7 +65,7 @@
     {% endif %}
 
     {% if active_sheet %}
-        <div class="table-wrap monitoring-grid-wrap table-primary-wrap" data-note-update-url="{{ table_note_update_url }}" data-table-workspace>
+        <div class="table-wrap monitoring-grid-wrap table-primary-wrap" data-note-update-url="{{ table_note_update_url }}" data-table-workspace data-keyword-offset="{{ active_sheet.keyword_offset|default:0 }}">
             <table class="monitoring-grid-table {% if active_sheet.kind == 'product' %}is-product{% else %}is-dashboard{% endif %}">
                 <tbody>
                     {% for row in active_sheet.rows %}
@@ -125,11 +125,12 @@
                                         <input
                                             class="grid-input{% if cell.control.centered %} grid-input-centered{% endif %}"
                                             type="text"
-                                            inputmode="decimal"
+                                            inputmode="{{ cell.control.input_mode|default_if_none:'decimal' }}"
                                             data-note-control="input"
                                             data-product-id="{{ cell.control.product_id }}"
                                             data-note-date="{{ cell.control.note_date }}"
                                             data-field="{{ cell.control.field }}"
+                                            data-keyword-prev="{{ cell.control.keyword_prev|default_if_none:'' }}"
                                             value="{{ cell.control.value|default_if_none:'' }}"
                                             placeholder="{{ cell.control.placeholder|default_if_none:'' }}"
                                         >

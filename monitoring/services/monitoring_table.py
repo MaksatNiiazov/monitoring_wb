@@ -37,7 +37,8 @@ from monitoring.services.reports import (
     normalize_warehouse_name,
 )
 
-BLOCK_HEIGHT = 48
+BASE_BLOCK_HEIGHT = 48
+BASE_KEYWORD_ROWS = 2
 BLOCK_WIDTH = 9
 BLOCK_GAP = 1
 SHEETS_MAX_TITLE_LENGTH = 100
@@ -129,6 +130,14 @@ def _keyword_money(value: Decimal | int | float | str | None, *, has_data: bool)
     return _money(value or 0)
 
 
+def _keyword_offset(keyword_rows: list[dict[str, Any]]) -> int:
+    return max(0, len(keyword_rows) - BASE_KEYWORD_ROWS)
+
+
+def _block_height(keyword_rows: list[dict[str, Any]]) -> int:
+    return BASE_BLOCK_HEIGHT + _keyword_offset(keyword_rows)
+
+
 def _cell_ref(*, start_row: int, start_col: int, relative_row: int, relative_col: int) -> str:
     return f"{get_column_letter(start_col + relative_col - 1)}{start_row + relative_row - 1}"
 
@@ -180,6 +189,7 @@ def build_day_block(
     product = report["product"]
     economics = report["economics"]
     keyword_rows = report["keyword_rows"]
+    keyword_offset = _keyword_offset(keyword_rows)
     note = report["note"]
     stock = report["stock"]
     metrics = report["metrics"]
@@ -236,13 +246,26 @@ def build_day_block(
             return ""
         return _fraction(decimalize(cell.impressions) * Decimal("100") / decimalize(unified_total))
 
-    seller_price_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=38, relative_col=7)
+    def row_after_keywords(base_row: int) -> int:
+        return base_row + keyword_offset if base_row >= 36 else base_row
+
+    seller_price_ref = _cell_ref(
+        start_row=start_row,
+        start_col=start_col,
+        relative_row=row_after_keywords(38),
+        relative_col=7,
+    )
     buyout_percent_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=22, relative_col=3)
     unit_cost_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=23, relative_col=3)
     logistics_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=24, relative_col=3)
 
     def row_value_ref(relative_row: int, relative_col: int) -> str:
-        return _cell_ref(start_row=start_row, start_col=start_col, relative_row=relative_row, relative_col=relative_col)
+        return _cell_ref(
+            start_row=start_row,
+            start_col=start_col,
+            relative_row=row_after_keywords(relative_row),
+            relative_col=relative_col,
+        )
 
     def buyout_formula(relative_col: int) -> str:
         return f"={row_value_ref(15, relative_col)}*{buyout_percent_ref}"
@@ -351,42 +374,39 @@ def build_day_block(
         ["", "", "Ср. убыль остатков/день", "", "", "", "", average_stock_drop_formula(), ""],
         ["", "", "Дней до распродажи в 0", "", "", "", "", days_until_zero_formula(), ""],
         ["Ключи", "", "Частота", "поз. ОРГ", "", "", "", "поз. БУСТ", "CTR (%)"],
-        [
-            keyword_rows[0]["query_text"],
-            "",
-            _keyword_int(keyword_rows[0]["frequency"], has_data=keyword_rows[0]["has_data"]),
-            _keyword_money(keyword_rows[0]["organic_position"], has_data=keyword_rows[0]["has_data"]),
-            "",
-            "",
-            "",
-            _keyword_money(keyword_rows[0]["boosted_position"], has_data=keyword_rows[0]["has_data"]),
-            _keyword_money(keyword_rows[0]["boosted_ctr"], has_data=keyword_rows[0]["has_data"]),
-        ],
-        [
-            keyword_rows[1]["query_text"],
-            "",
-            _keyword_int(keyword_rows[1]["frequency"], has_data=keyword_rows[1]["has_data"]),
-            _keyword_money(keyword_rows[1]["organic_position"], has_data=keyword_rows[1]["has_data"]),
-            "",
-            "",
-            "",
-            _keyword_money(keyword_rows[1]["boosted_position"], has_data=keyword_rows[1]["has_data"]),
-            _keyword_money(keyword_rows[1]["boosted_ctr"], has_data=keyword_rows[1]["has_data"]),
-        ],
-        ["", "", "Обзор:", "", "", "", "", "", ""],
-        ["", "", "СПП", _optional_fraction(note.spp_percent), "", "", _spp_delta_value(report, previous_report), "", ""],
-        ["", "", "Цена WBSELLER (наша)", "", "", "", _optional_money(note.seller_price), "", ""],
-        ["", "", "Цена WB (на сайте)", "", "", "", _optional_money(note.wb_price), "", ""],
-        ["", "", "Акция", "", "", "", promo_status_value, "", ""],
-        ["", "", "Негативные отзывы", "", "", "", negative_feedback_value, "", ""],
-        ["", "", "Действия:", "", "", "", "", "", ""],
-        ["", "", "Включили РК единая ставка?", "", "", "", _bool_label(note.unified_enabled), "", ""],
-        ["", "", "Включили РК руч. поиск?", "", "", "", _bool_label(note.manual_search_enabled), "", ""],
-        ["", "", "Включили РК руч. полки?", "", "", "", _bool_label(note.manual_shelves_enabled), "", ""],
-        ["", "", "Меняли цену? (WBSeller)", "", "", "", _bool_label(note.price_changed), "", ""],
-        ["", "", "Комментарии:", "", "", "", "", "", ""],
-        ["", "", note.comment, "", "", "", "", "", ""],
     ]
+    for keyword_row in keyword_rows:
+        rows.append(
+            [
+                keyword_row["query_text"],
+                "",
+                _keyword_int(keyword_row["frequency"], has_data=keyword_row["has_data"]),
+                _keyword_money(keyword_row["organic_position"], has_data=keyword_row["has_data"]),
+                "",
+                "",
+                "",
+                _keyword_money(keyword_row["boosted_position"], has_data=keyword_row["has_data"]),
+                _keyword_money(keyword_row["boosted_ctr"], has_data=keyword_row["has_data"]),
+            ]
+        )
+
+    rows.extend(
+        [
+            ["", "", "Обзор:", "", "", "", "", "", ""],
+            ["", "", "СПП", _optional_fraction(note.spp_percent), "", "", _spp_delta_value(report, previous_report), "", ""],
+            ["", "", "Цена WBSELLER (наша)", "", "", "", _optional_money(note.seller_price), "", ""],
+            ["", "", "Цена WB (на сайте)", "", "", "", _optional_money(note.wb_price), "", ""],
+            ["", "", "Акция", "", "", "", promo_status_value, "", ""],
+            ["", "", "Негативные отзывы", "", "", "", negative_feedback_value, "", ""],
+            ["", "", "Действия:", "", "", "", "", "", ""],
+            ["", "", "Включили РК единая ставка?", "", "", "", _bool_label(note.unified_enabled), "", ""],
+            ["", "", "Включили РК руч. поиск?", "", "", "", _bool_label(note.manual_search_enabled), "", ""],
+            ["", "", "Включили РК руч. полки?", "", "", "", _bool_label(note.manual_shelves_enabled), "", ""],
+            ["", "", "Меняли цену? (WBSeller)", "", "", "", _bool_label(note.price_changed), "", ""],
+            ["", "", "Комментарии:", "", "", "", "", "", ""],
+            ["", "", note.comment, "", "", "", "", "", ""],
+        ]
+    )
     return rows
 
 
@@ -520,8 +540,9 @@ def build_product_monitoring_rows(*, product: Product, reference_date: date, his
         for stock_date in stock_dates
     ]
 
+    block_height = _block_height(reports[0]["keyword_rows"]) if reports else BASE_BLOCK_HEIGHT
     total_width = history_days * BLOCK_WIDTH + max(history_days - 1, 0) * BLOCK_GAP
-    matrix = [["" for _ in range(total_width)] for _ in range(BLOCK_HEIGHT)]
+    matrix = [["" for _ in range(total_width)] for _ in range(block_height)]
 
     for index, report in enumerate(reports):
         start_col = 1 + index * (BLOCK_WIDTH + BLOCK_GAP)
@@ -532,6 +553,8 @@ def build_product_monitoring_rows(*, product: Product, reference_date: date, his
             start_col=start_col,
         )
         for row_offset, block_row in enumerate(block):
+            if row_offset >= block_height:
+                break
             for col_offset, value in enumerate(block_row):
                 matrix[row_offset][start_col + col_offset - 1] = value
     return matrix
@@ -558,15 +581,16 @@ def build_product_monitoring_rows_display(
         for stock_date in resolved_stock_dates
     ]
 
+    block_height = _block_height(reports[0]["keyword_rows"]) if reports else BASE_BLOCK_HEIGHT
     total_width = resolved_history_days * BLOCK_WIDTH + max(resolved_history_days - 1, 0) * BLOCK_GAP
-    matrix = [["" for _ in range(total_width)] for _ in range(BLOCK_HEIGHT)]
+    matrix = [["" for _ in range(total_width)] for _ in range(block_height)]
 
     for index, report in enumerate(reports):
         previous_report = reports[index - 1] if index > 0 else None
         start_col = index * (BLOCK_WIDTH + BLOCK_GAP)
         block = exporter_rows(report, previous_report=previous_report)
         for row_offset, block_row in enumerate(block):
-            if row_offset >= BLOCK_HEIGHT:
+            if row_offset >= block_height:
                 break
             for col_offset, value in enumerate(block_row):
                 target_col = start_col + col_offset
@@ -621,7 +645,7 @@ def build_dashboard_rows(*, reference_date: date, history_days: int, product_ids
     rows: list[list[Any]] = [
         [settings.project_name, "", "", "", "", ""],
         ["Сформировано", timezone.localtime().strftime("%Y-%m-%d %H:%M"), "", "", "", ""],
-        ["??????? ???? ????????", reference_date.isoformat(), "???????, ????", history_days, "", ""],
+        ["Глубина по дням", reference_date.isoformat(), "Окно, дней", history_days, "", ""],
         ["Дата рекламной статистики", stats_date.isoformat(), "", "", "", ""],
         [],
         ["Лист", "nmID", "Товар", "Артикул продавца", "Заказы", "Расход РК", "Остаток WB", "К клиенту", "Кампаний"],
@@ -757,15 +781,16 @@ def _apply_dashboard_style(sheet) -> None:
                 cell.font = SECTION_FONT if cell.row == 6 else Font(bold=True)
 
 
-def _apply_product_sheet_style(sheet, history_days: int) -> None:
+def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> None:
     sheet.freeze_panes = "C4"
-    percent_rows = {4, 12, 14, 22, 37}
-    money_rows = {5, 15, 16, 21, 23, 24, 38, 39}
+    keyword_offset = max(0, block_height - BASE_BLOCK_HEIGHT)
+    percent_rows = {4, 12, 14, 22, 37 + keyword_offset}
+    money_rows = {5, 15, 16, 21, 23, 24, 38 + keyword_offset, 39 + keyword_offset}
     integer_rows = {6, 10, 11, 13, 27, 28, 29}
     decimal_rows = {7, 8, 9, 17, 18, 19, 20, 30, 31, 32}
-    section_rows = {25, 33, 36, 42, 47}
+    section_rows = {25, 33, 36 + keyword_offset, 42 + keyword_offset, 47 + keyword_offset}
 
-    for row_idx in range(1, BLOCK_HEIGHT + 1):
+    for row_idx in range(1, block_height + 1):
         if row_idx in (1, 2, 3):
             sheet.row_dimensions[row_idx].height = 24
         elif row_idx in section_rows:
@@ -781,7 +806,7 @@ def _apply_product_sheet_style(sheet, history_days: int) -> None:
         if block_index < history_days - 1:
             sheet.column_dimensions[get_column_letter(start_col + BLOCK_WIDTH)].width = 4
 
-        for row_idx in range(1, BLOCK_HEIGHT + 1):
+        for row_idx in range(1, block_height + 1):
             for col_offset in range(BLOCK_WIDTH):
                 cell = sheet.cell(row=row_idx, column=start_col + col_offset)
                 if col_offset == 0:
@@ -817,13 +842,12 @@ def _apply_product_sheet_style(sheet, history_days: int) -> None:
 
         if block_index < history_days - 1:
             separator_col = start_col + BLOCK_WIDTH
-            for row_idx in range(1, BLOCK_HEIGHT + 1):
+            for row_idx in range(1, block_height + 1):
                 separator_cell = sheet.cell(row=row_idx, column=separator_col)
                 separator_cell.value = ""
                 separator_cell.fill = BLOCK_SEPARATOR_FILL
                 separator_cell.border = NO_BORDER
-
-    sheet.row_dimensions[48].height = 42
+    sheet.row_dimensions[48 + keyword_offset].height = 42
 
 
 def build_monitoring_workbook(
@@ -850,7 +874,7 @@ def build_monitoring_workbook(
         if payload.kind == "dashboard":
             _apply_dashboard_style(sheet)
         else:
-            _apply_product_sheet_style(sheet, resolved_history_days)
+            _apply_product_sheet_style(sheet, resolved_history_days, sheet.max_row)
     return workbook
 
 

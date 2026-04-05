@@ -1745,3 +1745,24 @@ class TableInlineNoteUpdateTests(TestCase):
 
         version = ProductEconomicsVersion.objects.get(product=self.product, effective_from=date(2026, 3, 18))
         self.assertEqual(version.unit_cost, Decimal("700.00"))
+
+    def test_table_note_cell_updates_product_keywords(self) -> None:
+        response = self.client.post(
+            "/table/note-cell/",
+            data=json.dumps(
+                {
+                    "product_id": self.product.id,
+                    "note_date": "2026-03-18",
+                    "field": "primary_keyword",
+                    "value": "брюки мужские",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["value"], "брюки мужские")
+
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.primary_keyword, "брюки мужские")

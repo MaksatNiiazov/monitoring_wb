@@ -183,6 +183,26 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         active_sheet = next((item for item in sheet_tabs if item["kind"] == "product"), sheet_tabs[0] if sheet_tabs else None)
 
     if active_sheet is not None:
+        keyword_header_row = None
+        overview_row = None
+        for row_index, row in enumerate(active_sheet.get("rows", []), start=1):
+            first_cell = str(row[0] or "").strip()
+            if keyword_header_row is None and first_cell == "Ключи":
+                keyword_header_row = row_index
+                continue
+            if keyword_header_row is not None and first_cell == "Обзор:":
+                overview_row = row_index
+                break
+        keyword_rows_count = (
+            max(0, (overview_row - keyword_header_row - 1))
+            if keyword_header_row is not None and overview_row is not None
+            else 0
+        )
+        keyword_offset = max(0, keyword_rows_count - 2)
+
+        def row_after_keywords(base_row: int) -> int:
+            return base_row + keyword_offset if base_row >= 36 else base_row
+
         editable_controls: dict[tuple[int, int], dict[str, object]] = {
             (
                 22,
@@ -216,25 +236,36 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 "centered": True,
             },
             (25, 2): {"type": "stock_popup"},
-            (37, 3): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%"},
-            (38, 6): {"type": "input", "field": "seller_price", "placeholder": "0,00"},
-            (39, 6): {"type": "input", "field": "wb_price", "placeholder": "0,00"},
-            (40, 6): {
+            (row_after_keywords(37), 3): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%"},
+            (row_after_keywords(38), 6): {"type": "input", "field": "seller_price", "placeholder": "0,00"},
+            (row_after_keywords(39), 6): {"type": "input", "field": "wb_price", "placeholder": "0,00"},
+            (row_after_keywords(40), 6): {
                 "type": "select",
                 "field": "promo_status",
                 "options": ["Не участвуем", "Участвуем", "Тест", "Акция"],
             },
-            (41, 6): {
+            (row_after_keywords(41), 6): {
                 "type": "select",
                 "field": "negative_feedback",
                 "options": ["Без изменений", "Есть негатив", "Нужна проверка", "Критично"],
             },
-            (43, 6): {"type": "bool", "field": "unified_enabled"},
-            (44, 6): {"type": "bool", "field": "manual_search_enabled"},
-            (45, 6): {"type": "bool", "field": "manual_shelves_enabled"},
-            (46, 6): {"type": "bool", "field": "price_changed"},
-            (48, 2): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
+            (row_after_keywords(43), 6): {"type": "bool", "field": "unified_enabled"},
+            (row_after_keywords(44), 6): {"type": "bool", "field": "manual_search_enabled"},
+            (row_after_keywords(45), 6): {"type": "bool", "field": "manual_shelves_enabled"},
+            (row_after_keywords(46), 6): {"type": "bool", "field": "price_changed"},
+            (row_after_keywords(48), 2): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
         }
+        if keyword_header_row is not None and overview_row is not None:
+            for row_number in range(keyword_header_row + 1, overview_row):
+                current_value = str(active_sheet["rows"][row_number - 1][0] or "").strip()
+                editable_controls[(row_number, 0)] = {
+                    "type": "input",
+                    "field": "keyword_query",
+                    "placeholder": "Ключ",
+                    "input_mode": "text",
+                    "keyword_prev": current_value,
+                }
+
         display_spans: dict[tuple[int, int], dict[str, bool]] = {
             (21, 2): {"span_to_block_end": True, "centered": True},
         }
@@ -345,10 +376,13 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                                 "field": field_name,
                                 "value": current_value,
                                 "placeholder": str(control_spec.get("placeholder") or ""),
+                                "input_mode": str(control_spec.get("input_mode") or "decimal"),
                                 "note_date": note_date.isoformat(),
                                 "product_id": product_id,
                                 "centered": bool(control_spec.get("centered")),
                             }
+                            if control_spec.get("keyword_prev") is not None:
+                                control["keyword_prev"] = str(control_spec.get("keyword_prev") or "")
                             if control_spec.get("span_to_block_end") and in_block_col < BLOCK_WIDTH:
                                 colspan = max(1, BLOCK_WIDTH - in_block_col)
                         elif control_type == "textarea":
@@ -409,7 +443,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 )
                 column_index += colspan
             prepared_rows.append({"cells": prepared_cells})
-        active_sheet = {**active_sheet, "rows": prepared_rows}
+        active_sheet = {**active_sheet, "rows": prepared_rows, "keyword_offset": keyword_offset}
 
     context = {
         "reference_date": reference_date,
@@ -840,6 +874,7 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
     note_date_raw = payload.get("note_date")
     field = str(payload.get("field") or "").strip()
     raw_value = payload.get("value")
+    keyword_prev = str(payload.get("keyword_prev") or "").strip()
 
     try:
         product_id = int(str(product_id_raw))
@@ -859,6 +894,10 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
         "manual_shelves_enabled",
         "price_changed",
     }
+    product_text_fields = {
+        "primary_keyword",
+        "secondary_keyword",
+    }
     select_defaults = {
         "promo_status": "Не участвуем",
         "negative_feedback": "Без изменений",
@@ -871,7 +910,41 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
     note_update_fields: list[str] = []
     display_value = ""
 
-    if field in bool_fields:
+    if field == "keyword_query":
+        resolved_text = str(raw_value or "").strip()
+        prev_text = keyword_prev.strip()
+        keyword_list = [str(item).strip() for item in (note.keywords or []) if str(item).strip()]
+        updated = False
+        if prev_text:
+            try:
+                prev_index = keyword_list.index(prev_text)
+            except ValueError:
+                prev_index = None
+            if prev_index is not None:
+                if resolved_text:
+                    if keyword_list[prev_index] != resolved_text:
+                        keyword_list[prev_index] = resolved_text
+                        updated = True
+                else:
+                    keyword_list.pop(prev_index)
+                    updated = True
+            elif resolved_text:
+                keyword_list.append(resolved_text)
+                updated = True
+        elif resolved_text:
+            keyword_list.append(resolved_text)
+            updated = True
+
+        if updated:
+            note.keywords = keyword_list
+            note_update_fields = ["keywords", "updated_at"]
+        display_value = resolved_text[:255]
+    elif field in product_text_fields:
+        resolved_text = str(raw_value or "").strip()
+        setattr(product, field, resolved_text[:255])
+        product.save(update_fields=[field, "updated_at"])
+        display_value = resolved_text[:255]
+    elif field in bool_fields:
         normalized = str(raw_value or "").strip().lower()
         resolved_bool = normalized in {"1", "true", "yes", "on", "да"}
         setattr(note, field, resolved_bool)
@@ -968,7 +1041,12 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
         "negative_feedback": "Без изменений",
     }
 
-    if field in bool_fields:
+    if field in product_text_fields:
+        resolved = str(raw_value or "").strip()
+        setattr(product, field, resolved[:255])
+        product.save(update_fields=[field, "updated_at"])
+        display_value = resolved[:255]
+    elif field in bool_fields:
         normalized = str(raw_value or "").strip().lower()
         resolved = normalized in {"1", "true", "yes", "on", "да"}
         setattr(note, field, resolved)

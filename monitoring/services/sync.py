@@ -25,6 +25,7 @@ from monitoring.models import (
     DailyProductStock,
     DailyWarehouseStock,
     Product,
+    ProductKeyword,
     ProductCampaign,
     SyncKind,
     SyncLog,
@@ -167,11 +168,19 @@ def fetch_product_sizes_payloads(
 
 
 def collect_product_keywords(product: Product) -> list[str]:
-    return list(
-        dict.fromkeys(
-            [item.strip() for item in [product.primary_keyword, product.secondary_keyword] if item and item.strip()]
-        )
+    saved_keywords = list(
+        ProductKeyword.objects.filter(product=product)
+        .order_by("position", "query_text", "id")
+        .values_list("query_text", flat=True)
     )
+    keyword_texts = [item.strip() for item in saved_keywords if item and item.strip()]
+    if not keyword_texts:
+        keyword_texts = [
+            item.strip()
+            for item in [product.primary_keyword, product.secondary_keyword]
+            if item and item.strip()
+        ]
+    return list(dict.fromkeys(keyword_texts))
 
 
 def parse_wb_datetime(value: str | None) -> datetime | None:

@@ -17,6 +17,7 @@ from monitoring.models import (
     DailyCampaignProductStat,
     DailyCampaignSearchClusterStat,
     DailyProductKeywordStat,
+    ProductKeyword,
     DailyProductMetrics,
     DailyProductNote,
     DailyProductStock,
@@ -631,12 +632,13 @@ def build_product_report(
     if days_until_zero == 0 and avg_orders_per_day:
         days_until_zero = safe_divide(stock.total_stock if stock else 0, avg_orders_per_day)
 
-    keyword_stats_map = {
-        normalize_search_text(item.query_text): item
-        for item in keyword_stats
-    }
+    keyword_stats_map = {normalize_search_text(item.query_text): item for item in keyword_stats}
     keyword_rows: list[dict[str, Any]] = []
-    for query_text in [product.primary_keyword or "", product.secondary_keyword or ""]:
+    keyword_texts = []
+    if daily_note and isinstance(daily_note.keywords, list):
+        keyword_texts = [str(item).strip() for item in daily_note.keywords if str(item).strip()]
+
+    for query_text in keyword_texts:
         normalized_query = normalize_search_text(query_text)
         keyword_stat = keyword_stats_map.get(normalized_query)
         keyword_rows.append(
@@ -650,6 +652,17 @@ def build_product_report(
             }
         )
 
+    for _ in range(3):
+        keyword_rows.append(
+            {
+                "query_text": "",
+                "has_data": False,
+                "frequency": None,
+                "organic_position": None,
+                "boosted_position": None,
+                "boosted_ctr": None,
+            }
+        )
     report = {
         "product": product,
         "stats_date": stats_date,

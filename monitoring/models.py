@@ -73,6 +73,23 @@ class Product(TimeStampedModel):
         return list(self.visible_warehouse_rules.order_by("warehouse_name").values_list("warehouse_name", flat=True))
 
 
+class ProductKeyword(TimeStampedModel):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="keywords")
+    query_text = models.CharField(max_length=255, verbose_name="Ключ")
+    position = models.PositiveSmallIntegerField(default=0, verbose_name="Позиция")
+
+    class Meta:
+        ordering = ["position", "query_text", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["product", "query_text"], name="uniq_product_keyword"),
+        ]
+        verbose_name = "Ключ товара"
+        verbose_name_plural = "Ключи товаров"
+
+    def __str__(self) -> str:
+        return f"{self.product} / ключ / {self.query_text}"
+
+
 class ProductEconomicsVersion(TimeStampedModel):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="economics_versions")
     effective_from = models.DateField(verbose_name="Действует с")
@@ -348,6 +365,7 @@ class DailyProductNote(TimeStampedModel):
     manual_shelves_enabled = models.BooleanField(default=False, verbose_name="Включили РК руч. полки")
     price_changed = models.BooleanField(default=False, verbose_name="Меняли цену")
     comment = models.TextField(blank=True, verbose_name="Комментарий")
+    keywords = models.JSONField(default=list, blank=True, verbose_name="Ключи")
 
     class Meta:
         ordering = ["-note_date", "product_id"]
