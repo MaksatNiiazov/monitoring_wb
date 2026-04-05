@@ -25,6 +25,7 @@ from .forms import (
     SyncForm,
 )
 from .models import (
+    DailyProductKeywordStat,
     DailyProductMetrics,
     DailyProductNote,
     DailyProductStock,
@@ -50,7 +51,7 @@ from .services.monitoring_table import (
     export_monitoring_workbook_bytes,
 )
 from .services.reporting_hub import build_reports_context
-from .services.reports import build_product_report, get_default_dates, normalize_warehouse_name, resolve_product_economics
+from .services.reports import build_product_report, decimalize, get_default_dates, normalize_warehouse_name, resolve_product_economics
 from .services.sync import (
     get_running_sync,
     mark_stale_running_syncs,
@@ -109,6 +110,73 @@ def _format_decimal_input(value: Decimal) -> str:
     if "," in text:
         text = text.rstrip("0").rstrip(",")
     return text
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cleaned = str(value or "").strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        result.append(cleaned)
+    return result
+
+
+def _resolve_daily_keyword_stat(
+    *,
+    product: Product,
+    note_date: date,
+    keyword_text: str,
+    keyword_prev: str = "",
+) -> DailyProductKeywordStat:
+    resolved_text = keyword_text.strip()[:255]
+    previous_text = keyword_prev.strip()[:255]
+    stat = DailyProductKeywordStat.objects.filter(
+        product=product,
+        stats_date=note_date,
+        query_text=resolved_text,
+    ).first()
+    if stat is not None:
+        if previous_text and previous_text != resolved_text:
+            DailyProductKeywordStat.objects.filter(
+                product=product,
+                stats_date=note_date,
+                query_text=previous_text,
+            ).exclude(pk=stat.pk).delete()
+        return stat
+
+    if previous_text:
+        previous_stat = DailyProductKeywordStat.objects.filter(
+            product=product,
+            stats_date=note_date,
+            query_text=previous_text,
+        ).first()
+        if previous_stat is not None:
+            previous_stat.query_text = resolved_text
+            previous_stat.save(update_fields=["query_text", "updated_at"])
+            return previous_stat
+
+    return DailyProductKeywordStat.objects.create(
+        product=product,
+        stats_date=note_date,
+        query_text=resolved_text,
+    )
+
+
+def _keyword_stat_has_values(stat: DailyProductKeywordStat) -> bool:
+    return any(
+        [
+            int(stat.frequency or 0),
+            decimalize(stat.organic_position),
+            int(stat.organic_orders or 0),
+            decimalize(stat.boosted_position),
+            decimalize(stat.boosted_ctr),
+            int(stat.boosted_views or 0),
+            int(stat.boosted_clicks or 0),
+        ]
+    )
 
 
 def _safe_next_url(raw: str | None, fallback: str) -> str:
@@ -189,10 +257,11 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
             if not row:
                 continue
             first_cell = str(row[0] or "").strip()
+            second_cell = str(row[1] or "").strip() if len(row) > 1 else ""
             if keyword_header_row is None and first_cell == "Ключи":
                 keyword_header_row = row_index
                 continue
-            if keyword_header_row is not None and first_cell == "Обзор:":
+            if keyword_header_row is not None and (first_cell == "Обзор:" or second_cell == "Обзор:"):
                 overview_row = row_index
                 break
         keyword_rows_count = (
@@ -203,12 +272,12 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         keyword_offset = max(0, keyword_rows_count - 2)
 
         def row_after_keywords(base_row: int) -> int:
-            return base_row + keyword_offset if base_row >= 36 else base_row
+            return base_row + keyword_offset if base_row >= 37 else base_row
 
         editable_controls: dict[tuple[int, int], dict[str, object]] = {
             (
                 22,
-                2,
+                1,
             ): {
                 "type": "input",
                 "field": "buyout_percent",
@@ -219,7 +288,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
             },
             (
                 23,
-                2,
+                1,
             ): {
                 "type": "input",
                 "field": "unit_cost",
@@ -229,7 +298,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
             },
             (
                 24,
-                2,
+                1,
             ): {
                 "type": "input",
                 "field": "logistics_cost",
@@ -237,25 +306,23 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 "span_to_block_end": True,
                 "centered": True,
             },
-            (25, 2): {"type": "stock_popup"},
-            (row_after_keywords(37), 3): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%"},
-            (row_after_keywords(38), 6): {"type": "input", "field": "seller_price", "placeholder": "0,00"},
-            (row_after_keywords(39), 6): {"type": "input", "field": "wb_price", "placeholder": "0,00"},
-            (row_after_keywords(40), 6): {
+            (25, 1): {"type": "stock_popup"},
+            (row_after_keywords(38), 3): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%"},
+            (row_after_keywords(39), 5): {"type": "input", "field": "seller_price", "placeholder": "0,00"},
+            (row_after_keywords(40), 5): {"type": "input", "field": "wb_price", "placeholder": "0,00"},
+            (row_after_keywords(41), 5): {
                 "type": "select",
                 "field": "promo_status",
                 "options": ["Не участвуем", "Участвуем", "Тест", "Акция"],
             },
-            (row_after_keywords(41), 6): {
+            (row_after_keywords(42), 5): {
                 "type": "select",
                 "field": "negative_feedback",
                 "options": ["Без изменений", "Есть негатив", "Нужна проверка", "Критично"],
             },
-            (row_after_keywords(43), 6): {"type": "bool", "field": "unified_enabled"},
-            (row_after_keywords(44), 6): {"type": "bool", "field": "manual_search_enabled"},
-            (row_after_keywords(45), 6): {"type": "bool", "field": "manual_shelves_enabled"},
-            (row_after_keywords(46), 6): {"type": "bool", "field": "price_changed"},
-            (row_after_keywords(48), 2): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
+            (row_after_keywords(44), 4): {"type": "bool", "field": "ads_enabled"},
+            (row_after_keywords(45), 4): {"type": "bool", "field": "price_changed"},
+            (row_after_keywords(46), 5): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
         }
         if keyword_header_row is not None and overview_row is not None:
             for row_number in range(keyword_header_row + 1, overview_row):
@@ -267,9 +334,41 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                     "input_mode": "text",
                     "keyword_prev": current_value,
                 }
+                editable_controls[(row_number, 1)] = {
+                    "type": "input",
+                    "field": "keyword_frequency",
+                    "placeholder": "0",
+                    "input_mode": "numeric",
+                    "keyword_prev": current_value,
+                    "centered": True,
+                }
+                editable_controls[(row_number, 2)] = {
+                    "type": "input",
+                    "field": "keyword_organic_position",
+                    "placeholder": "0,00",
+                    "input_mode": "decimal",
+                    "keyword_prev": current_value,
+                    "centered": True,
+                }
+                editable_controls[(row_number, 4)] = {
+                    "type": "input",
+                    "field": "keyword_boosted_position",
+                    "placeholder": "0,00",
+                    "input_mode": "decimal",
+                    "keyword_prev": current_value,
+                    "centered": True,
+                }
+                editable_controls[(row_number, 6)] = {
+                    "type": "input",
+                    "field": "keyword_boosted_ctr",
+                    "placeholder": "0,00",
+                    "input_mode": "decimal",
+                    "keyword_prev": current_value,
+                    "centered": True,
+                }
 
         display_spans: dict[tuple[int, int], dict[str, bool]] = {
-            (21, 2): {"span_to_block_end": True, "centered": True},
+            (21, 1): {"span_to_block_end": True, "centered": True},
         }
         block_dates = active_sheet.get("block_dates") or []
         product_id = active_sheet.get("product_id")
@@ -326,7 +425,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 is_gap_col = active_sheet["kind"] == "product" and in_block_col == BLOCK_WIDTH
                 is_repeat_label_col = (
                     active_sheet["kind"] == "product"
-                    and in_block_col in (0, 1)
+                    and in_block_col == 0
                     and label_anchor_block_index >= 0
                     and block_index != label_anchor_block_index
                 )
@@ -432,8 +531,8 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                         "in_block_col": in_block_col,
                         "is_gap_col": is_gap_col,
                         "is_block_start": active_sheet["kind"] == "product" and in_block_col == 0,
-                        "is_spacer_col": active_sheet["kind"] == "product" and in_block_col == 1 and not is_repeat_label_col,
-                        "is_label_col": active_sheet["kind"] == "product" and in_block_col in (0, 1) and not is_repeat_label_col,
+                        "is_spacer_col": False,
+                        "is_label_col": active_sheet["kind"] == "product" and in_block_col == 0 and not is_repeat_label_col,
                         "is_repeat_label_col": is_repeat_label_col,
                         "control": control,
                         "colspan": colspan,
@@ -947,6 +1046,19 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
         setattr(product, field, resolved_text[:255])
         product.save(update_fields=[field, "updated_at"])
         display_value = resolved_text[:255]
+    elif field == "ads_enabled":
+        normalized = str(raw_value or "").strip().lower()
+        resolved_bool = normalized in {"1", "true", "yes", "on", "да"}
+        note.unified_enabled = resolved_bool
+        note.manual_search_enabled = resolved_bool
+        note.manual_shelves_enabled = resolved_bool
+        display_value = "Да" if resolved_bool else "Нет"
+        note_update_fields = [
+            "unified_enabled",
+            "manual_search_enabled",
+            "manual_shelves_enabled",
+            "updated_at",
+        ]
     elif field in bool_fields:
         normalized = str(raw_value or "").strip().lower()
         resolved_bool = normalized in {"1", "true", "yes", "on", "да"}

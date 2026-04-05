@@ -89,15 +89,16 @@
             BUYOUT_PERCENT: 22,
             UNIT_COST: 23,
             LOGISTICS: 24,
-            STOCK_TOTAL: 27,
-            AVG_STOCK_DROP: 31,
-            DAYS_UNTIL_ZERO: 32,
-            SELLER_PRICE: 38 + keywordOffset,
+            STOCK_TOTAL: 26,
+            AVG_STOCK_DROP: 30,
+            DAYS_UNTIL_ZERO: 31,
+            SELLER_PRICE: 39 + keywordOffset,
         };
         const COL = {
-            OVERALL: 7,
-            INPUT_MAIN: 2,
-            SELLER_PRICE: 6,
+            OVERALL: 6,
+            INPUT_MAIN: 1,
+            SELLER_PRICE: 5,
+            STOCK: 4,
         };
 
         const getCell = (row, block, inBlockCol) =>
@@ -180,53 +181,11 @@
             setCellText(ROW.PROFIT, blockIndex, COL.INPUT_MAIN, formatDecimalValue(profit));
         };
 
-        const recalcAvgStockDrop = () => {
-            const blocksCount = resolveBlocksCount();
-            for (let blockIndex = 0; blockIndex < blocksCount; blockIndex += 1) {
-                const values = [];
-                for (let offset = 0; offset < 5; offset += 1) {
-                    const sourceIndex = blockIndex - offset;
-                    if (sourceIndex < 0) {
-                        break;
-                    }
-                    const value = readNumber(ROW.STOCK_TOTAL, sourceIndex, COL.OVERALL);
-                    if (value === null) {
-                        continue;
-                    }
-                    values.push(value);
-                }
-                if (values.length < 2) {
-                    setCellText(ROW.AVG_STOCK_DROP, blockIndex, COL.OVERALL, "");
-                    setCellText(ROW.DAYS_UNTIL_ZERO, blockIndex, COL.OVERALL, "");
-                    continue;
-                }
-                let sum = 0;
-                for (let index = 0; index < values.length - 1; index += 1) {
-                    sum += values[index + 1] - values[index];
-                }
-                const averageDrop = sum / (values.length - 1);
-                setCellText(ROW.AVG_STOCK_DROP, blockIndex, COL.OVERALL, formatDecimalValue(averageDrop));
-
-                const stockTotal = readNumber(ROW.STOCK_TOTAL, blockIndex, COL.OVERALL);
-                if (!Number.isFinite(averageDrop) || averageDrop === 0 || stockTotal === null) {
-                    setCellText(ROW.DAYS_UNTIL_ZERO, blockIndex, COL.OVERALL, "");
-                    continue;
-                }
-                setCellText(
-                    ROW.DAYS_UNTIL_ZERO,
-                    blockIndex,
-                    COL.OVERALL,
-                    formatDecimalValue(stockTotal / averageDrop)
-                );
-            }
-        };
-
         const recalcAll = () => {
             const blocksCount = resolveBlocksCount();
             for (let blockIndex = 0; blockIndex < blocksCount; blockIndex += 1) {
                 recalcBlock(blockIndex);
             }
-            recalcAvgStockDrop();
         };
 
         tableWrap._recalculateBlock = recalcBlock;
@@ -442,8 +401,12 @@
             tableWrap.classList.toggle("is-compact", compact);
             button.textContent = compact ? "Обычный режим" : "Компактный режим";
         };
-        const saved = window.localStorage.getItem(key) === "compact";
+        const savedValue = window.localStorage.getItem(key);
+        const saved = savedValue ? savedValue === "compact" : true;
         apply(saved);
+        if (!savedValue) {
+            window.localStorage.setItem(key, saved ? "compact" : "normal");
+        }
         button.addEventListener("click", () => {
             const next = !tableWrap.classList.contains("is-compact");
             apply(next);

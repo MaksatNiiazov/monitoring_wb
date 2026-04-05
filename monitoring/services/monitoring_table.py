@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from io import BytesIO
 import re
 from typing import Any
@@ -27,7 +27,7 @@ from monitoring.models import (
     ProductEconomicsVersion,
 )
 from monitoring.services.config import get_monitoring_settings
-from monitoring.services.exporters import exporter_rows, format_decimal
+from monitoring.services.exporters import exporter_rows
 from monitoring.services.reports import (
     MetricCell,
     ResolvedEconomics,
@@ -37,9 +37,9 @@ from monitoring.services.reports import (
     normalize_warehouse_name,
 )
 
-BASE_BLOCK_HEIGHT = 48
+BASE_BLOCK_HEIGHT = 46
 BASE_KEYWORD_ROWS = 2
-BLOCK_WIDTH = 9
+BLOCK_WIDTH = 8
 BLOCK_GAP = 1
 SHEETS_MAX_TITLE_LENGTH = 100
 
@@ -165,18 +165,21 @@ def _block_header(report: dict[str, Any]) -> str:
     return f"{stock_date:%d.%m.%Y}"
 
 
-def _spp_delta_value(report: dict[str, Any], previous_report: dict[str, Any] | None) -> float | str:
+def _spp_delta_parts(
+    report: dict[str, Any],
+    previous_report: dict[str, Any] | None,
+) -> tuple[str, float | str]:
     current = decimalize(report["note"].spp_percent)
     if current == 0:
-        return ""
+        return ("", "")
     if previous_report is None:
-        return "Без изменений"
+        return ("Без изменений", "")
     previous = decimalize(previous_report["note"].spp_percent)
     delta = current - previous
     if delta == 0:
-        return "Без изменений"
+        return ("Без изменений", "")
     label = "Вырос на" if delta > 0 else "Упал на"
-    return f"{label} {delta.copy_abs().quantize(Decimal('0.01')).normalize()}%"
+    return (label, _optional_fraction(delta.copy_abs()))
 
 
 def build_day_block(
@@ -232,32 +235,31 @@ def build_day_block(
         return values
 
     def traffic_value(relative_col: int) -> float | str:
-        if relative_col == 5:
-            # В шаблонной матрице доля трафика рассчитывается только
-            # по зонам "Поиск" и "Полки". Каталог оставляем пустым.
+        if relative_col == 4:
+            # В шаблоне доля трафика рассчитывается только по зонам "Поиск" и "Полки".
             return ""
-        cell = columns[relative_col - 3]
+        if relative_col in (5, 6):
+            return ""
+        cell = columns[relative_col - 2]
         if not is_active(cell):
             return ""
-        if relative_col in (6, 7):
-            return 1
         unified_total = unified_search.impressions + unified_shelves.impressions
         if unified_total <= 0:
             return ""
         return _fraction(decimalize(cell.impressions) * Decimal("100") / decimalize(unified_total))
 
     def row_after_keywords(base_row: int) -> int:
-        return base_row + keyword_offset if base_row >= 36 else base_row
+        return base_row + keyword_offset if base_row >= 37 else base_row
 
     seller_price_ref = _cell_ref(
         start_row=start_row,
         start_col=start_col,
-        relative_row=row_after_keywords(38),
-        relative_col=7,
+        relative_row=row_after_keywords(39),
+        relative_col=6,
     )
-    buyout_percent_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=22, relative_col=3)
-    unit_cost_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=23, relative_col=3)
-    logistics_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=24, relative_col=3)
+    buyout_percent_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=22, relative_col=2)
+    unit_cost_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=23, relative_col=2)
+    logistics_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=24, relative_col=2)
 
     def row_value_ref(relative_row: int, relative_col: int) -> str:
         return _cell_ref(
@@ -283,13 +285,13 @@ def build_day_block(
         buyout_fraction = f"IF({buyout_percent_ref}>1,{buyout_percent_ref}/100,{buyout_percent_ref})"
         return (
             f"=IFERROR(IF({seller_price_ref}=0,0,"
-            f"(({seller_price_ref}-{unit_cost_ref}-({seller_price_ref}*({row_value_ref(20, 8)}/100)))-"
+            f"(({seller_price_ref}-{unit_cost_ref}-({seller_price_ref}*({row_value_ref(20, 7)}/100)))-"
             f"({seller_price_ref}*25/100)-(({logistics_ref}/{buyout_fraction})-50))*"
-            f"({row_value_ref(13, 8)}*{buyout_fraction})),0)"
+            f"({row_value_ref(13, 7)}*{buyout_fraction})),0)"
         )
 
     def maybe_formula(relative_col: int, formula: str) -> str:
-        return formula if active_columns[relative_col - 3] else ""
+        return formula if active_columns[relative_col - 2] else ""
 
     def average_orders_formula() -> float | str:
         if stock and decimalize(stock.avg_orders_per_day):
@@ -305,103 +307,92 @@ def build_day_block(
                     start_row=start_row,
                     start_col=block_start_col,
                     relative_row=13,
-                    relative_col=8,
+                    relative_col=7,
                 )
             )
         if len(refs) <= 1:
             return _money(report["avg_orders_per_day"])
         return f"=(({'+'.join(refs)})/{len(refs)})"
 
-    def average_stock_drop_formula() -> float | str:
-        block_span = BLOCK_WIDTH + BLOCK_GAP
-        refs: list[str] = []
-        for offset in range(5):
-            block_start_col = start_col - offset * block_span
-            if block_start_col < 1:
-                break
-            refs.append(
-                _cell_ref(
-                    start_row=start_row,
-                    start_col=block_start_col,
-                    relative_row=27,
-                    relative_col=8,
-                )
-            )
-        if len(refs) <= 1:
-            return ""
-        diffs = [f"({refs[index + 1]}-{refs[index]})" for index in range(len(refs) - 1)]
-        return f"=(({'+'.join(diffs)})/{len(diffs)})"
+    def average_stock_drop_value() -> float | str:
+        return _optional_money(report["avg_stock_drop_per_day"])
 
-    def days_until_zero_formula() -> float | str:
-        if stock and decimalize(stock.days_until_zero):
-            return _money(stock.days_until_zero)
-        return f"={row_value_ref(27, 8)}/{row_value_ref(31, 8)}"
+    def days_until_zero_value() -> float | str:
+        return _optional_money(report["days_until_zero_from_stock_drop"])
+
+    spp_delta_label, spp_delta_value = _spp_delta_parts(report, previous_report)
 
     rows: list[list[Any]] = [
-        ["", "", _block_header(report), "", "", "", "", "", ""],
-        ["Тип рекламной кампании", "", "Единая ставка", "", "", "Руч. Поиск", "Руч. Полки", "Общая и органика", ""],
-        ["Зоны показов", "", "Поиск", "Полки", "Каталог", "Поиск", "Полки", "Общая", "ОРГ"],
-        ["Доля трафика (%)", "", traffic_value(3), traffic_value(4), traffic_value(5), traffic_value(6), traffic_value(7), "-", "-"],
-        ["Затраты (руб)", "", *pick_numbers("spend"), f"=SUM({row_value_ref(5, 3)}:{row_value_ref(5, 7)})", "-"],
-        ["Показы ", "", *pick_numbers("impressions"), f"=SUM({row_value_ref(6, 3)}:{row_value_ref(6, 7)})", "-"],
-        ["CTR", "", maybe_formula(3, f'={row_value_ref(10, 3)}/{row_value_ref(6, 3)}*100'), maybe_formula(4, f'={row_value_ref(10, 4)}/{row_value_ref(6, 4)}*100'), maybe_formula(5, f'={row_value_ref(10, 5)}/{row_value_ref(6, 5)}*100'), maybe_formula(6, f'={row_value_ref(10, 6)}/{row_value_ref(6, 6)}*100'), maybe_formula(7, f'={row_value_ref(10, 7)}/{row_value_ref(6, 7)}*100'), "-", "-"],
-        ["CPM", "", maybe_formula(3, f'={row_value_ref(5, 3)}*1000/{row_value_ref(6, 3)}'), maybe_formula(4, f'={row_value_ref(5, 4)}*1000/{row_value_ref(6, 4)}'), maybe_formula(5, f'={row_value_ref(5, 5)}*1000/{row_value_ref(6, 5)}'), maybe_formula(6, f'={row_value_ref(5, 6)}*1000/{row_value_ref(6, 6)}'), maybe_formula(7, f'={row_value_ref(5, 7)}*1000/{row_value_ref(6, 7)}'), "-", "-"],
-        ["CPC", "", maybe_formula(3, f'={row_value_ref(5, 3)}/{row_value_ref(10, 3)}'), maybe_formula(4, f'={row_value_ref(5, 4)}/{row_value_ref(10, 4)}'), maybe_formula(5, f'={row_value_ref(5, 5)}/{row_value_ref(10, 5)}'), maybe_formula(6, f'={row_value_ref(5, 6)}/{row_value_ref(10, 6)}'), maybe_formula(7, f'={row_value_ref(5, 7)}/{row_value_ref(10, 7)}'), "-", "-"],
-        ["Клики ", "", *pick_numbers("clicks"), _int(metrics.open_count if metrics else 0), f'={row_value_ref(10, 8)}-SUM({row_value_ref(10, 3)}:{row_value_ref(10, 7)})'],
-        ["Корзины ", "", *pick_numbers("carts"), _int(metrics.add_to_cart_count if metrics else 0), f'={row_value_ref(11, 8)}-SUM({row_value_ref(11, 3)}:{row_value_ref(11, 7)})'],
-        ["Конверсия в корзину", "", "", "", "", "", "", f'={row_value_ref(11, 8)}/{row_value_ref(10, 8)}', ""],
-        ["Заказы", "", *pick_numbers("orders"), _int(metrics.order_count if metrics else 0), f'={row_value_ref(13, 8)}-SUM({row_value_ref(13, 3)}:{row_value_ref(13, 7)})'],
-        ["Конверсия в заказ", "", "", "", "", "", "", f'={row_value_ref(13, 8)}/{row_value_ref(11, 8)}', ""],
-        ["Заказы (руб.)", "", *pick_numbers("order_sum"), _money(metrics.order_sum if metrics else 0), f'={row_value_ref(15, 8)}-SUM({row_value_ref(15, 3)}:{row_value_ref(15, 7)})'],
-        ["Выкупы ≈ (руб.)", "", maybe_formula(3, buyout_formula(3)), maybe_formula(4, buyout_formula(4)), maybe_formula(5, buyout_formula(5)), maybe_formula(6, buyout_formula(6)), maybe_formula(7, buyout_formula(7)), buyout_formula(8), "-"],
-        ["Стоимость заказа", "", maybe_formula(3, cost_per_order_formula(3)), maybe_formula(4, cost_per_order_formula(4)), maybe_formula(5, cost_per_order_formula(5)), maybe_formula(6, cost_per_order_formula(6)), maybe_formula(7, cost_per_order_formula(7)), cost_per_order_formula(8), "-"],
-        ["Стоимость корзины", "", maybe_formula(3, cost_per_cart_formula(3)), maybe_formula(4, cost_per_cart_formula(4)), maybe_formula(5, cost_per_cart_formula(5)), maybe_formula(6, cost_per_cart_formula(6)), maybe_formula(7, cost_per_cart_formula(7)), cost_per_cart_formula(8), "-"],
-        ["ДРР от заказов (%)", "", maybe_formula(3, ratio_formula(3, 15)), maybe_formula(4, ratio_formula(4, 15)), maybe_formula(5, ratio_formula(5, 15)), maybe_formula(6, ratio_formula(6, 15)), maybe_formula(7, ratio_formula(7, 15)), ratio_formula(8, 15), "-"],
-        ["ДРР от продаж ≈ (%)", "", maybe_formula(3, ratio_formula(3, 16)), maybe_formula(4, ratio_formula(4, 16)), maybe_formula(5, ratio_formula(5, 16)), maybe_formula(6, ratio_formula(6, 16)), maybe_formula(7, ratio_formula(7, 16)), ratio_formula(8, 16), "-"],
-        ["Прибыль", "", overall_profit_formula(), "", "", "", "", "", ""],
-        ["Процент выкупа %", "", _fraction(economics.buyout_percent), "", "", "", "", "", ""],
-        ["Себестоимость", "", _money(economics.unit_cost), "", "", "", "", "", ""],
-        ["Логистика", "", _money(economics.logistics_cost), "", "", "", "", "", ""],
-        ["", "", "Остатки:", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", "", "", ""],
-        ["", "", "Остатки на складах WB", "", "", "", "", _int(stock.total_stock if stock else 0), ""],
-        ["", "", "Едут к клиенту", "", "", "", "", _int(stock.in_way_to_client if stock else 0), ""],
-        ["", "", "Возвращаются на склад", "", "", "", "", _int(stock.in_way_from_client if stock else 0), ""],
-        ["", "", "Ср. кол-во заказов/день", "", "", "", "", average_orders_formula(), ""],
-        ["", "", "Ср. убыль остатков/день", "", "", "", "", average_stock_drop_formula(), ""],
-        ["", "", "Дней до распродажи в 0", "", "", "", "", days_until_zero_formula(), ""],
-        ["Ключи", "", "Частота", "поз. ОРГ", "", "", "", "поз. БУСТ", "CTR (%)"],
+        ["", _block_header(report), "", "", "", "", "", ""],
+        ["Тип рекламной кампании", "Единая ставка", "", "", "Руч. Поиск", "Руч. Полки", "Общая", "Органика"],
+        ["Зоны показов", "Поиск", "Полки", "Каталог", "Поиск", "Полки", "Общая", "Органика"],
+        ["Доля трафика (%)", traffic_value(2), traffic_value(3), traffic_value(4), traffic_value(5), traffic_value(6), "-", "-"],
+        ["Затраты (руб)", *pick_numbers("spend"), f"=SUM({row_value_ref(5, 2)}:{row_value_ref(5, 6)})", "-"],
+        ["Показы ", *pick_numbers("impressions"), f"=SUM({row_value_ref(6, 2)}:{row_value_ref(6, 6)})", "-"],
+        ["CTR", maybe_formula(2, f'={row_value_ref(10, 2)}/{row_value_ref(6, 2)}*100'), maybe_formula(3, f'={row_value_ref(10, 3)}/{row_value_ref(6, 3)}*100'), maybe_formula(4, f'={row_value_ref(10, 4)}/{row_value_ref(6, 4)}*100'), maybe_formula(5, f'={row_value_ref(10, 5)}/{row_value_ref(6, 5)}*100'), maybe_formula(6, f'={row_value_ref(10, 6)}/{row_value_ref(6, 6)}*100'), "-", "-"],
+        ["CPM", maybe_formula(2, f'={row_value_ref(5, 2)}*1000/{row_value_ref(6, 2)}'), maybe_formula(3, f'={row_value_ref(5, 3)}*1000/{row_value_ref(6, 3)}'), maybe_formula(4, f'={row_value_ref(5, 4)}*1000/{row_value_ref(6, 4)}'), maybe_formula(5, f'={row_value_ref(5, 5)}*1000/{row_value_ref(6, 5)}'), maybe_formula(6, f'={row_value_ref(5, 6)}*1000/{row_value_ref(6, 6)}'), "-", "-"],
+        ["CPC", maybe_formula(2, f'={row_value_ref(5, 2)}/{row_value_ref(10, 2)}'), maybe_formula(3, f'={row_value_ref(5, 3)}/{row_value_ref(10, 3)}'), maybe_formula(4, f'={row_value_ref(5, 4)}/{row_value_ref(10, 4)}'), maybe_formula(5, f'={row_value_ref(5, 5)}/{row_value_ref(10, 5)}'), maybe_formula(6, f'={row_value_ref(5, 6)}/{row_value_ref(10, 6)}'), "-", "-"],
+        ["Клики ", *pick_numbers("clicks"), _int(metrics.open_count if metrics else 0), f'={row_value_ref(10, 7)}-SUM({row_value_ref(10, 2)}:{row_value_ref(10, 6)})'],
+        ["Корзины ", *pick_numbers("carts"), _int(metrics.add_to_cart_count if metrics else 0), f'={row_value_ref(11, 7)}-SUM({row_value_ref(11, 2)}:{row_value_ref(11, 6)})'],
+        ["Конверсия в корзину", "", "", "", "", "", f'={row_value_ref(11, 7)}/{row_value_ref(10, 7)}', ""],
+        ["Заказы", *pick_numbers("orders"), _int(metrics.order_count if metrics else 0), f'={row_value_ref(13, 7)}-SUM({row_value_ref(13, 2)}:{row_value_ref(13, 6)})'],
+        ["Конверсия в заказ", "", "", "", "", "", f'={row_value_ref(13, 7)}/{row_value_ref(11, 7)}', ""],
+        ["Заказы (руб.)", *pick_numbers("order_sum"), _money(metrics.order_sum if metrics else 0), f'={row_value_ref(15, 7)}-SUM({row_value_ref(15, 2)}:{row_value_ref(15, 6)})'],
+        ["Выкупы ≈ (руб.)", maybe_formula(2, buyout_formula(2)), maybe_formula(3, buyout_formula(3)), maybe_formula(4, buyout_formula(4)), maybe_formula(5, buyout_formula(5)), maybe_formula(6, buyout_formula(6)), buyout_formula(7), "-"],
+        ["Стоимость заказа", maybe_formula(2, cost_per_order_formula(2)), maybe_formula(3, cost_per_order_formula(3)), maybe_formula(4, cost_per_order_formula(4)), maybe_formula(5, cost_per_order_formula(5)), maybe_formula(6, cost_per_order_formula(6)), cost_per_order_formula(7), "-"],
+        ["Стоимость корзины", maybe_formula(2, cost_per_cart_formula(2)), maybe_formula(3, cost_per_cart_formula(3)), maybe_formula(4, cost_per_cart_formula(4)), maybe_formula(5, cost_per_cart_formula(5)), maybe_formula(6, cost_per_cart_formula(6)), cost_per_cart_formula(7), "-"],
+        ["ДРР от заказов (%)", maybe_formula(2, ratio_formula(2, 15)), maybe_formula(3, ratio_formula(3, 15)), maybe_formula(4, ratio_formula(4, 15)), maybe_formula(5, ratio_formula(5, 15)), maybe_formula(6, ratio_formula(6, 15)), ratio_formula(7, 15), "-"],
+        ["ДРР от продаж ≈ (%)", maybe_formula(2, ratio_formula(2, 16)), maybe_formula(3, ratio_formula(3, 16)), maybe_formula(4, ratio_formula(4, 16)), maybe_formula(5, ratio_formula(5, 16)), maybe_formula(6, ratio_formula(6, 16)), ratio_formula(7, 16), "-"],
+        ["Прибыль", overall_profit_formula(), "", "", "", "", "", ""],
+        ["Процент выкупа %", _fraction(economics.buyout_percent), "", "", "", "", "", ""],
+        ["Себестоимость", _money(economics.unit_cost), "", "", "", "", "", ""],
+        ["Логистика", _money(economics.logistics_cost), "", "", "", "", "", ""],
+        ["", "Остатки:", "", "", "", "", "", ""],
+        ["", "Остатки на складах WB", "", "", _int(stock.total_stock if stock else 0), "", "", ""],
+        ["", "Едут к клиенту", "", "", _int(stock.in_way_to_client if stock else 0), "", "", ""],
+        ["", "Возвращаются на склад", "", "", _int(stock.in_way_from_client if stock else 0), "", "", ""],
+        ["", "Ср. кол-во заказов/день", "", "", average_orders_formula(), "", "", ""],
+        ["", "Ср. убыль остатков/день", "", "", average_stock_drop_value(), "", "", ""],
+        ["", "Дней до АУТА", "", "", days_until_zero_value(), "", "", ""],
+        ["", "ТУТ БЫЛ СКРИНШОТ С ОСТАТКАМИ", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", ""],
+        ["Ключи", "Частота", "Позиция ОРГАНИЧЕСКАЯ", "", "Позиция БУСТОВАЯ", "", "CTR (%)", ""],
     ]
     for keyword_row in keyword_rows:
         rows.append(
             [
                 keyword_row["query_text"],
-                "",
                 _keyword_int(keyword_row["frequency"], has_data=keyword_row["has_data"]),
                 _keyword_money(keyword_row["organic_position"], has_data=keyword_row["has_data"]),
                 "",
-                "",
-                "",
                 _keyword_money(keyword_row["boosted_position"], has_data=keyword_row["has_data"]),
+                "",
                 _keyword_money(keyword_row["boosted_ctr"], has_data=keyword_row["has_data"]),
+                "",
             ]
         )
 
     rows.extend(
         [
-            ["", "", "Обзор:", "", "", "", "", "", ""],
-            ["", "", "СПП", _optional_fraction(note.spp_percent), "", "", _spp_delta_value(report, previous_report), "", ""],
-            ["", "", "Цена WBSELLER (наша)", "", "", "", _optional_money(note.seller_price), "", ""],
-            ["", "", "Цена WB (на сайте)", "", "", "", _optional_money(note.wb_price), "", ""],
-            ["", "", "Акция", "", "", "", promo_status_value, "", ""],
-            ["", "", "Негативные отзывы", "", "", "", negative_feedback_value, "", ""],
-            ["", "", "Действия:", "", "", "", "", "", ""],
-            ["", "", "Включили РК единая ставка?", "", "", "", _bool_label(note.unified_enabled), "", ""],
-            ["", "", "Включили РК руч. поиск?", "", "", "", _bool_label(note.manual_search_enabled), "", ""],
-            ["", "", "Включили РК руч. полки?", "", "", "", _bool_label(note.manual_shelves_enabled), "", ""],
-            ["", "", "Меняли цену? (WBSeller)", "", "", "", _bool_label(note.price_changed), "", ""],
-            ["", "", "Комментарии:", "", "", "", "", "", ""],
-            ["", "", note.comment, "", "", "", "", "", ""],
+            ["", "Обзор:", "", "", "", "", "", ""],
+            ["", "СПП", "", _optional_fraction(note.spp_percent), "", spp_delta_label, "", spp_delta_value],
+            ["", "Цена WBSELLER (наша)", "", "", "", _optional_money(note.seller_price), "", ""],
+            ["", "Цена WB (на сайте)", "", "", "", _optional_money(note.wb_price), "", ""],
+            ["", "Акция", "", "", "", promo_status_value, "", ""],
+            ["", "Негативные отзывы", "", "", "", negative_feedback_value, "", ""],
+            ["", "Действия:", "", "", "", "", "", ""],
+            [
+                "",
+                "Включили рекламу?",
+                "",
+                "",
+                _bool_label(note.unified_enabled or note.manual_search_enabled or note.manual_shelves_enabled),
+                "",
+                "",
+                "",
+            ],
+            ["", "Меняли цену?(WBSeller)", "", "", _bool_label(note.price_changed), "", "", ""],
+            ["", "Комментарии:", "", "", "", note.comment, "", ""],
         ]
     )
     return rows
@@ -604,55 +595,6 @@ def build_product_monitoring_rows_display(
                     break
                 matrix[row_offset][target_col] = value
 
-    def parse_matrix_number(value: Any) -> Decimal | None:
-        if value in (None, "", "-", "—"):
-            return None
-        text = (
-            str(value)
-            .strip()
-            .replace("\u00a0", "")
-            .replace(" ", "")
-            .replace("%", "")
-            .replace(",", ".")
-        )
-        try:
-            return Decimal(text)
-        except (InvalidOperation, ValueError):
-            return None
-
-    stock_row_index = 26
-    avg_drop_row_index = 30
-    days_until_zero_row_index = 31
-    overall_col_offset = 7
-    block_span = BLOCK_WIDTH + BLOCK_GAP
-
-    for block_index in range(resolved_history_days):
-        values: list[Decimal] = []
-        for offset in range(5):
-            source_index = block_index - offset
-            if source_index < 0:
-                break
-            value = parse_matrix_number(matrix[stock_row_index][source_index * block_span + overall_col_offset])
-            if value is None:
-                continue
-            values.append(value)
-        average_drop_value: Decimal | None
-        if len(values) < 2:
-            average_drop_value = None
-            average_drop = ""
-        else:
-            diffs = [values[index + 1] - values[index] for index in range(len(values) - 1)]
-            average_drop_value = sum(diffs) / Decimal(len(diffs))
-            average_drop = format_decimal(average_drop_value)
-        col_index = block_index * block_span + overall_col_offset
-        matrix[avg_drop_row_index][col_index] = average_drop
-
-        stock_value = parse_matrix_number(matrix[stock_row_index][col_index])
-        if stock_value is None or average_drop_value in (None, Decimal("0")):
-            days_until_zero = ""
-        else:
-            days_until_zero = format_decimal(stock_value / average_drop_value)
-        matrix[days_until_zero_row_index][col_index] = days_until_zero
     return matrix
 
 
@@ -800,13 +742,13 @@ def _apply_dashboard_style(sheet) -> None:
 
 
 def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> None:
-    sheet.freeze_panes = "C4"
+    sheet.freeze_panes = "B4"
     keyword_offset = max(0, block_height - BASE_BLOCK_HEIGHT)
-    percent_rows = {4, 12, 14, 19, 20, 22, 37 + keyword_offset}
-    money_rows = {5, 15, 16, 21, 23, 24, 38 + keyword_offset, 39 + keyword_offset}
-    integer_rows = {6, 10, 11, 13, 27, 28, 29}
-    decimal_rows = {7, 8, 9, 17, 18, 30, 31, 32}
-    section_rows = {25, 33, 36 + keyword_offset, 42 + keyword_offset, 47 + keyword_offset}
+    percent_rows = {4, 12, 14, 19, 20, 22, 38 + keyword_offset}
+    money_rows = {5, 15, 16, 21, 23, 24, 39 + keyword_offset, 40 + keyword_offset}
+    integer_rows = {6, 10, 11, 13, 26, 27, 28}
+    decimal_rows = {7, 8, 9, 17, 18, 29, 30, 31}
+    section_rows = {25, 32, 34, 37 + keyword_offset, 43 + keyword_offset}
 
     for row_idx in range(1, block_height + 1):
         if row_idx in (1, 2, 3):
@@ -818,7 +760,7 @@ def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> N
 
     for block_index in range(history_days):
         start_col = 1 + block_index * (BLOCK_WIDTH + BLOCK_GAP)
-        widths = [24, 3, 12, 12, 12, 12, 12, 12, 12]
+        widths = [24, 12, 12, 12, 12, 12, 12, 12]
         for offset, width in enumerate(widths):
             sheet.column_dimensions[get_column_letter(start_col + offset)].width = width
         if block_index < history_days - 1:
@@ -865,7 +807,7 @@ def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> N
                 separator_cell.value = ""
                 separator_cell.fill = BLOCK_SEPARATOR_FILL
                 separator_cell.border = NO_BORDER
-    sheet.row_dimensions[48 + keyword_offset].height = 42
+    sheet.row_dimensions[46 + keyword_offset].height = 42
 
 
 def build_monitoring_workbook(

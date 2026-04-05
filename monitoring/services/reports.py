@@ -17,7 +17,6 @@ from monitoring.models import (
     DailyCampaignProductStat,
     DailyCampaignSearchClusterStat,
     DailyProductKeywordStat,
-    ProductKeyword,
     DailyProductMetrics,
     DailyProductNote,
     DailyProductStock,
@@ -31,6 +30,8 @@ from monitoring.models import (
 ZERO = Decimal("0")
 ONE = Decimal("1")
 ONE_HUNDRED = Decimal("100")
+MIN_KEYWORD_ROWS = 8
+KEYWORD_ROW_BUFFER = 3
 
 
 def decimalize(value: Any) -> Decimal:
@@ -141,6 +142,19 @@ def clone_metric_cell(cell: MetricCell) -> MetricCell:
         order_sum=decimalize(cell.order_sum),
         units=cell.units,
     )
+
+
+def add_metric_cells(*cells: MetricCell) -> MetricCell:
+    combined = MetricCell()
+    for cell in cells:
+        combined.impressions += cell.impressions
+        combined.clicks += cell.clicks
+        combined.spend += decimalize(cell.spend)
+        combined.carts += cell.carts
+        combined.orders += cell.orders
+        combined.order_sum += decimalize(cell.order_sum)
+        combined.units += cell.units
+    return combined
 
 
 def metric_cell_from_search_clusters(cluster_rows: list[DailyCampaignSearchClusterStat]) -> MetricCell:
@@ -280,6 +294,20 @@ def estimate_profit(
     goods_cost = buyout_units * decimalize(economics.unit_cost)
     logistics = buyout_units * decimalize(economics.logistics_cost)
     return quantize_money(estimated_sales - spend - goods_cost - logistics)
+
+
+def average_stock_drop_for_product(*, product: Product, stock_date: date, window: int = 5) -> Decimal:
+    stock_rows = list(
+        DailyProductStock.objects.filter(product=product, stats_date__lte=stock_date)
+        .order_by("-stats_date")[:window]
+    )
+    if len(stock_rows) < 2:
+        return ZERO
+    values = [decimalize(row.total_stock) for row in stock_rows]
+    diffs = [values[index + 1] - values[index] for index in range(len(values) - 1)]
+    if not diffs:
+        return ZERO
+    return (sum(diffs, ZERO) / decimalize(len(diffs))).quantize(Decimal("0.01"))
 
 
 def build_dashboard_context(*, stats_date: date | None = None, stock_date: date | None = None) -> dict[str, Any]:
@@ -494,11 +522,27 @@ def build_product_report(
             )
         total = group_totals.get(group, MetricCell())
         legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
+        legacy_shelves = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
+        legacy_catalog = legacy_cells.get((group, CampaignZone.CATALOG), MetricCell())
         search = clone_metric_cell(legacy_search)
         search_cluster = metric_cell_from_search_clusters(cluster_rows)
         search.impressions = search_cluster.impressions
         search.clicks = search_cluster.clicks
         search.spend = search_cluster.spend
+        explicit_non_search = add_metric_cells(legacy_shelves, legacy_catalog)
+        if any(
+            [
+                explicit_non_search.impressions,
+                explicit_non_search.clicks,
+                explicit_non_search.carts,
+                explicit_non_search.orders,
+                decimalize(explicit_non_search.order_sum),
+                decimalize(explicit_non_search.spend),
+            ]
+        ):
+            search_total = subtract_metric_cells(total, explicit_non_search)
+            search = clamp_metric_cell_to_total(search, search_total)
+            return search, clone_metric_cell(legacy_shelves), clone_metric_cell(legacy_catalog)
         search = clamp_metric_cell_to_total(search, total)
         shelves = subtract_metric_cells(total, search)
         return search, shelves, MetricCell()
@@ -660,10 +704,14 @@ def build_product_report(
     days_until_zero = decimalize(stock.days_until_zero if stock else 0)
     if days_until_zero == 0 and avg_orders_per_day:
         days_until_zero = safe_divide(stock.total_stock if stock else 0, avg_orders_per_day)
+    avg_stock_drop_per_day = average_stock_drop_for_product(product=product, stock_date=stock_date)
+    days_until_zero_from_stock_drop = ZERO
+    if stock and avg_stock_drop_per_day > ZERO:
+        days_until_zero_from_stock_drop = safe_divide(stock.total_stock, avg_stock_drop_per_day)
 
     keyword_stats_map = {normalize_search_text(item.query_text): item for item in keyword_stats}
     keyword_rows: list[dict[str, Any]] = []
-    keyword_texts = []
+    keyword_texts: list[str] = []
     if daily_note and isinstance(daily_note.keywords, list):
         keyword_texts = [str(item).strip() for item in daily_note.keywords if str(item).strip()]
 
@@ -681,7 +729,8 @@ def build_product_report(
             }
         )
 
-    for _ in range(3):
+    total_keyword_rows = max(len(keyword_rows) + KEYWORD_ROW_BUFFER, MIN_KEYWORD_ROWS)
+    for _ in range(max(0, total_keyword_rows - len(keyword_rows))):
         keyword_rows.append(
             {
                 "query_text": "",
@@ -710,7 +759,11 @@ def build_product_report(
         "traffic_cards": traffic_cards,
         "insights": insights,
         "avg_orders_per_day": avg_orders_per_day.quantize(Decimal("0.01")) if avg_orders_per_day else ZERO,
+        "avg_stock_drop_per_day": avg_stock_drop_per_day.quantize(Decimal("0.01")) if avg_stock_drop_per_day else ZERO,
         "days_until_zero": days_until_zero.quantize(Decimal("0.01")) if days_until_zero else ZERO,
+        "days_until_zero_from_stock_drop": (
+            days_until_zero_from_stock_drop.quantize(Decimal("0.01")) if days_until_zero_from_stock_drop else ZERO
+        ),
         "traffic_totals": traffic_totals,
         "alerts": alerts,
         "campaign_stats_count": len(campaign_stats),
