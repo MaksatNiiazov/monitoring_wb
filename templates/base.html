@@ -7,7 +7,7 @@
     <title>{% block title %}Мониторинг WB{% endblock %}</title>
     <link rel="stylesheet" href="{% static 'monitoring/styles.css' %}">
 </head>
-<body>
+<body class="{{ body_class|default:'' }}">
     <a class="skip-link" href="#main-content">Перейти к содержимому</a>
     <div class="page-shell">
         <main class="main-shell" id="main-content">

@@ -466,6 +466,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         "workspace_overview": build_workspace_overview(),
         "table_note_update_url": reverse("monitoring:update_table_note_cell"),
         "hide_workspace_header": True,
+        "body_class": "is-table-fullscreen",
     }
     return render(request, "monitoring/table_workspace.html", context)
 

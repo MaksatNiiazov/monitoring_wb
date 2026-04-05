@@ -26,26 +26,23 @@
         </div>
     </div>
 
-    <form method="get" class="table-toolbar" data-table-filter-form>
-        <input type="hidden" name="sheet" value="{% if active_sheet %}{{ active_sheet.key }}{% endif %}">
-        {% for field in table_filters_form %}
-            {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
-        {% endfor %}
-        <button class="primary-button table-toolbar-submit" type="submit">Обновить</button>
-    </form>
-    <div class="table-toolbar-presets" data-table-filter-presets>
-        <button class="table-preset-button" type="button" data-filter-reference="today">Сегодня</button>
-        <button class="table-preset-button {% if history_days == 7 %}is-active{% endif %}" type="button" data-filter-days="7">7 дней</button>
-        <button class="table-preset-button {% if history_days == 14 %}is-active{% endif %}" type="button" data-filter-days="14">14 дней</button>
-        <button class="table-preset-button {% if history_days == 30 %}is-active{% endif %}" type="button" data-filter-days="30">30 дней</button>
-        <button class="table-preset-button {% if history_days == 60 %}is-active{% endif %}" type="button" data-filter-days="60">60 дней</button>
+    <div class="table-toolbar-shell" data-table-toolbar-shell>
+        <form method="get" class="table-toolbar" data-table-filter-form>
+            <input type="hidden" name="sheet" value="{% if active_sheet %}{{ active_sheet.key }}{% endif %}">
+            {% for field in table_filters_form %}
+                {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+            {% endfor %}
+            <button class="primary-button table-toolbar-submit" type="submit">Обновить</button>
+        </form>
+        <div class="table-toolbar-presets" data-table-filter-presets>
+            <button class="table-preset-button" type="button" data-filter-reference="today">Сегодня</button>
+            <button class="table-preset-button {% if history_days == 7 %}is-active{% endif %}" type="button" data-filter-days="7">7 дней</button>
+            <button class="table-preset-button {% if history_days == 14 %}is-active{% endif %}" type="button" data-filter-days="14">14 дней</button>
+            <button class="table-preset-button {% if history_days == 30 %}is-active{% endif %}" type="button" data-filter-days="30">30 дней</button>
+            <button class="table-preset-button {% if history_days == 60 %}is-active{% endif %}" type="button" data-filter-days="60">60 дней</button>
+        </div>
+        <p class="table-inline-status" data-inline-status aria-live="polite" hidden></p>
     </div>
-
-    <div class="table-workbench-tools">
-        <button class="secondary-button table-view-action" type="button" data-table-action="toggle-density">Компактный режим</button>
-        <button class="secondary-button table-view-action" type="button" data-table-action="fullscreen">Режим на весь экран</button>
-    </div>
-    <p class="table-inline-status" data-inline-status aria-live="polite" hidden></p>
 
     {% if sheet_tabs %}
         <div class="table-sheets-nav-shell" data-sheets-nav>
@@ -194,17 +191,31 @@
             <button class="secondary-button table-modal-close" type="button" data-modal-close>Закрыть</button>
         </div>
         <p class="muted table-modal-copy">Обновляет базу и таблицу мониторинга за выбранный период.</p>
-        {% include "monitoring/includes/sync_indicator.html" %}
+        <div class="sync-quick-panel">
+            <span class="sync-quick-label">Быстрый период</span>
+            <div class="sync-quick-actions">
+                <button class="secondary-button" type="button" data-sync-range="yesterday">Вчера</button>
+                <button class="secondary-button" type="button" data-sync-range="today">Сегодня</button>
+            </div>
+        </div>
         <form method="post" action="{% url 'monitoring:sync_all' %}" class="stack compact-form table-modal-form">
             {% csrf_token %}
+            {% if sync_form.product_ids %}
+                {% include "monitoring/includes/form_field.html" with field=sync_form.product_ids compact_help=True %}
+            {% endif %}
             {% for field in sync_form %}
-                {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                {% if field.name != "product_ids" %}
+                    {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                {% endif %}
             {% endfor %}
             <div class="table-modal-actions">
                 <button class="secondary-button" type="button" data-modal-close>Отмена</button>
                 <button class="primary-button" type="submit" data-sync-submit>Запустить</button>
             </div>
         </form>
+        <div class="table-modal-footer">
+            {% include "monitoring/includes/sync_indicator.html" %}
+        </div>
     </article>
 </section>
 

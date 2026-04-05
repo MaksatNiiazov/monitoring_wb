@@ -698,6 +698,229 @@
         });
     }
 
+    function initSyncQuickRanges() {
+        const modal = document.getElementById("table-modal-sync");
+        if (!modal) {
+            return;
+        }
+        const form = modal.querySelector("form");
+        if (!form) {
+            return;
+        }
+        const dateFrom = form.querySelector("input[name='date_from']");
+        const dateTo = form.querySelector("input[name='date_to']");
+        const reference = form.querySelector("input[name='reference_date']");
+        const buttons = Array.from(modal.querySelectorAll("[data-sync-range]"));
+        if (!buttons.length || (!dateFrom && !dateTo && !reference)) {
+            return;
+        }
+
+        const formatDate = (dateValue) => {
+            const year = dateValue.getFullYear();
+            const month = String(dateValue.getMonth() + 1).padStart(2, "0");
+            const day = String(dateValue.getDate()).padStart(2, "0");
+            return `${year}-${month}-${day}`;
+        };
+
+        const applyRange = (offsetDays) => {
+            const target = new Date();
+            target.setDate(target.getDate() + offsetDays);
+            const value = formatDate(target);
+            if (dateFrom) {
+                dateFrom.value = value;
+            }
+            if (dateTo) {
+                dateTo.value = value;
+            }
+            if (reference) {
+                reference.value = value;
+            }
+            buttons.forEach((button) => {
+                button.classList.toggle("is-active", button.dataset.syncRange === (offsetDays === 0 ? "today" : "yesterday"));
+            });
+        };
+
+        buttons.forEach((button) => {
+            button.addEventListener("click", () => {
+                const range = String(button.dataset.syncRange || "").toLowerCase();
+                if (range === "today") {
+                    applyRange(0);
+                    return;
+                }
+                if (range === "yesterday") {
+                    applyRange(-1);
+                }
+            });
+        });
+    }
+
+    function initSyncProductPicker() {
+        const selects = Array.from(document.querySelectorAll("select[data-sync-product-select]"));
+        if (!selects.length) {
+            return;
+        }
+
+        const normalize = (value) => String(value || "").trim().toLowerCase();
+
+        selects.forEach((select) => {
+            if (select.dataset.enhanced === "1") {
+                return;
+            }
+            select.dataset.enhanced = "1";
+            select.classList.add("is-enhanced");
+
+            const field = select.closest(".field") || select.parentElement;
+            if (!field) {
+                return;
+            }
+
+            const wrapper = document.createElement("div");
+            wrapper.className = "sync-product-picker";
+
+            const header = document.createElement("div");
+            header.className = "sync-product-picker-head";
+            const title = document.createElement("span");
+            title.className = "sync-product-picker-title";
+            title.textContent = "Выбор товаров";
+            const count = document.createElement("span");
+            count.className = "sync-product-picker-count";
+            header.append(title, count);
+
+            const search = document.createElement("input");
+            search.type = "search";
+            search.className = "sync-product-search";
+            search.placeholder = "Поиск товара по названию или nmID";
+
+            const actions = document.createElement("div");
+            actions.className = "sync-product-actions";
+            const selectAll = document.createElement("button");
+            selectAll.type = "button";
+            selectAll.className = "secondary-button sync-product-action";
+            selectAll.textContent = "Выбрать все";
+            const clearAll = document.createElement("button");
+            clearAll.type = "button";
+            clearAll.className = "secondary-button sync-product-action";
+            clearAll.textContent = "Очистить";
+            actions.append(selectAll, clearAll);
+
+            const list = document.createElement("div");
+            list.className = "sync-product-list";
+            const empty = document.createElement("div");
+            empty.className = "sync-product-empty";
+            empty.textContent = "Нет совпадений.";
+
+            const selected = document.createElement("div");
+            selected.className = "sync-product-selected";
+            const selectedLabel = document.createElement("span");
+            selectedLabel.className = "sync-product-selected-label";
+            selectedLabel.textContent = "Выбрано:";
+            const chips = document.createElement("div");
+            chips.className = "sync-product-chips";
+            selected.append(selectedLabel, chips);
+
+            wrapper.append(header, search, actions, list, empty, selected);
+            field.append(wrapper);
+
+            const options = Array.from(select.options).filter((option) => option.value !== "");
+            const rows = options.map((option) => {
+                const row = document.createElement("label");
+                row.className = "sync-product-row";
+                row.dataset.search = normalize(`${option.text} ${option.value}`);
+
+                const checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.value = option.value;
+                checkbox.checked = option.selected;
+                checkbox.disabled = option.disabled;
+
+                const text = document.createElement("span");
+                text.className = "sync-product-row-label";
+                text.textContent = option.text;
+
+                row.append(checkbox, text);
+                list.append(row);
+                return { row, checkbox, option };
+            });
+
+            const syncSelected = () => {
+                const selectedOptions = options.filter((option) => option.selected);
+                count.textContent = selectedOptions.length ? `Выбрано: ${selectedOptions.length}` : "Ничего не выбрано";
+                chips.innerHTML = "";
+                if (!selectedOptions.length) {
+                    selected.classList.add("is-empty");
+                    return;
+                }
+                selected.classList.remove("is-empty");
+                selectedOptions.forEach((option) => {
+                    const chip = document.createElement("button");
+                    chip.type = "button";
+                    chip.className = "sync-product-chip";
+                    chip.dataset.value = option.value;
+                    chip.innerHTML = `${option.text}<span aria-hidden=\"true\">×</span>`;
+                    chip.addEventListener("click", () => {
+                        option.selected = false;
+                        const targetRow = rows.find((item) => item.option.value === option.value);
+                        if (targetRow) {
+                            targetRow.checkbox.checked = false;
+                        }
+                        syncSelected();
+                    });
+                    chips.append(chip);
+                });
+            };
+
+            const applyFilter = () => {
+                const query = normalize(search.value);
+                let matches = 0;
+                rows.forEach(({ row }) => {
+                    const hit = !query || row.dataset.search.includes(query);
+                    row.hidden = !hit;
+                    if (hit) {
+                        matches += 1;
+                    }
+                });
+                empty.hidden = matches > 0;
+            };
+
+            rows.forEach(({ checkbox, option }) => {
+                checkbox.addEventListener("change", () => {
+                    option.selected = checkbox.checked;
+                    syncSelected();
+                });
+            });
+
+            selectAll.addEventListener("click", () => {
+                options.forEach((option) => {
+                    if (option.disabled) {
+                        return;
+                    }
+                    option.selected = true;
+                });
+                rows.forEach(({ checkbox, option }) => {
+                    if (!option.disabled) {
+                        checkbox.checked = true;
+                    }
+                });
+                syncSelected();
+            });
+
+            clearAll.addEventListener("click", () => {
+                options.forEach((option) => {
+                    option.selected = false;
+                });
+                rows.forEach(({ checkbox }) => {
+                    checkbox.checked = false;
+                });
+                syncSelected();
+            });
+
+            search.addEventListener("input", applyFilter);
+
+            syncSelected();
+            applyFilter();
+        });
+    }
+
     function initSheetsNavigation() {
         const nav = document.querySelector("[data-sheets-nav]");
         if (!nav) {
@@ -837,6 +1060,13 @@
             });
             return nearestIndex;
         };
+
+        const defaultIndex = chips.length > 1 ? chips.length - 2 : 0;
+        if (tableWrap.scrollLeft <= 1) {
+            window.requestAnimationFrame(() => {
+                scrollToDayIndex(defaultIndex, "auto");
+            });
+        }
 
         chips.forEach((chip) => {
             chip.addEventListener("click", () => {
@@ -979,6 +1209,8 @@
     function initTableControls() {
         initActionModals();
         initToolbarFilters();
+        initSyncQuickRanges();
+        initSyncProductPicker();
         initSheetsNavigation();
 
         const tableWrap = document.querySelector("[data-table-workspace]");

@@ -284,7 +284,7 @@ class SyncForm(StyledFormMixin, forms.Form):
         queryset=Product.objects.filter(is_active=True).order_by("title", "nm_id"),
         required=False,
         label="Товары для синхронизации",
-        widget=forms.SelectMultiple(attrs={"size": 6}),
+        widget=forms.SelectMultiple(attrs={"size": 6, "class": "sync-product-select", "data-sync-product-select": "1"}),
     )
     reference_date = forms.DateField(
         required=False,
