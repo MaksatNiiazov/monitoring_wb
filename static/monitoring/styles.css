@@ -1980,11 +1980,25 @@ body.is-modal-open {
     display: none;
 }
 
+.monitoring-grid-table td.is-keyword-label-col {
+    display: table-cell;
+    min-width: 136px;
+    width: 136px;
+    max-width: 136px;
+}
+
 .monitoring-grid-table.is-product td.is-label-col:not(.is-spacer-col) {
     position: sticky;
     left: 0;
     z-index: 4;
     box-shadow: 10px 0 16px rgba(19, 37, 49, 0.12);
+}
+
+.monitoring-grid-table.is-product td.is-keyword-label-col:not(.is-spacer-col) {
+    position: static;
+    left: auto;
+    z-index: auto;
+    box-shadow: none;
 }
 
 .monitoring-grid-table.is-product td.is-spacer-col {

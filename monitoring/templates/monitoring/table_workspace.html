@@ -78,7 +78,7 @@
                                     data-col="{{ cell.col_index }}"
                                     data-block="{{ cell.block_index }}"
                                     data-in-block-col="{{ cell.in_block_col }}"
-                                    class="{% if cell.is_gap_col %}is-gap-col{% endif %}{% if cell.is_block_start %} is-block-start{% endif %}{% if cell.is_spacer_col %} is-spacer-col{% endif %}{% if cell.is_label_col %} is-label-col{% endif %}{% if cell.is_repeat_label_col %} is-repeat-label-col{% endif %}{% if cell.control %} is-control-cell{% endif %}{% if cell.is_comment_span %} is-comment-span{% endif %}{% if cell.is_stock_span %} is-stock-span{% endif %}{% if cell.is_input_span %} is-input-span{% endif %}{% if cell.is_centered_value_span %} is-centered-value-span{% endif %}"
+                                    class="{% if cell.is_gap_col %}is-gap-col{% endif %}{% if cell.is_block_start %} is-block-start{% endif %}{% if cell.is_spacer_col %} is-spacer-col{% endif %}{% if cell.is_label_col %} is-label-col{% endif %}{% if cell.is_repeat_label_col %} is-repeat-label-col{% endif %}{% if cell.is_keyword_label_col %} is-keyword-label-col{% endif %}{% if cell.control %} is-control-cell{% endif %}{% if cell.is_comment_span %} is-comment-span{% endif %}{% if cell.is_stock_span %} is-stock-span{% endif %}{% if cell.is_input_span %} is-input-span{% endif %}{% if cell.is_centered_value_span %} is-centered-value-span{% endif %}"
                                 >
                                     {% if cell.control and cell.control.type == "stock_popup" %}
                                         <button

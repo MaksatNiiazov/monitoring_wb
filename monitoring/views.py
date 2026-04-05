@@ -548,6 +548,13 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                         "is_spacer_col": False,
                         "is_label_col": active_sheet["kind"] == "product" and in_block_col == 0 and not is_repeat_label_col,
                         "is_repeat_label_col": is_repeat_label_col,
+                        "is_keyword_label_col": (
+                            active_sheet["kind"] == "product"
+                            and in_block_col == 0
+                            and keyword_header_row is not None
+                            and overview_row is not None
+                            and keyword_header_row <= row_number < overview_row
+                        ),
                         "control": control,
                         "colspan": colspan,
                         "is_comment_span": bool(control and control.get("type") == "textarea" and colspan > 1),
