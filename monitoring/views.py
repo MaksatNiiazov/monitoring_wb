@@ -186,6 +186,8 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         keyword_header_row = None
         overview_row = None
         for row_index, row in enumerate(active_sheet.get("rows", []), start=1):
+            if not row:
+                continue
             first_cell = str(row[0] or "").strip()
             if keyword_header_row is None and first_cell == "Ключи":
                 keyword_header_row = row_index
