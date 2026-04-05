@@ -729,7 +729,8 @@ def build_product_report(
             }
         )
 
-    total_keyword_rows = max(len(keyword_rows) + KEYWORD_ROW_BUFFER, MIN_KEYWORD_ROWS)
+    keyword_rows_target = int(getattr(daily_note, "keyword_rows_count", MIN_KEYWORD_ROWS) or MIN_KEYWORD_ROWS)
+    total_keyword_rows = max(len(keyword_rows) + KEYWORD_ROW_BUFFER, keyword_rows_target, MIN_KEYWORD_ROWS)
     for _ in range(max(0, total_keyword_rows - len(keyword_rows))):
         keyword_rows.append(
             {

@@ -218,6 +218,13 @@
         input.disabled = pending;
     }
 
+    function setKeywordRowsPending(wrapper, pending) {
+        wrapper.classList.toggle("is-pending", pending);
+        wrapper.querySelectorAll(".grid-keyword-action").forEach((button) => {
+            button.disabled = pending;
+        });
+    }
+
     function initInlineControls(tableWrap, updateUrl) {
         const statusNode = document.querySelector("[data-inline-status]");
         let statusTimer = 0;
@@ -254,6 +261,7 @@
             if (next === previous) {
                 return;
             }
+            const keywordField = (input.dataset.field || "").startsWith("keyword_");
             const payload = {
                 product_id: input.dataset.productId,
                 note_date: input.dataset.noteDate,
@@ -263,6 +271,15 @@
             if (typeof input.dataset.keywordPrev !== "undefined") {
                 payload.keyword_prev = input.dataset.keywordPrev || "";
             }
+            if (keywordField) {
+                const cell = input.closest("td[data-row][data-block]");
+                const row = cell ? cell.dataset.row : "";
+                const block = cell ? cell.dataset.block : "";
+                const queryInput = table.querySelector(
+                    `td[data-row="${row}"][data-block="${block}"][data-in-block-col="0"] [data-note-control='input']`
+                );
+                payload.keyword_query = queryInput ? queryInput.value.trim() : "";
+            }
             try {
                 setInputPending(input, true);
                 const result = await saveCell(updateUrl, payload);
@@ -271,6 +288,18 @@
                 input.dataset.previousValue = serverValue;
                 if (typeof input.dataset.keywordPrev !== "undefined") {
                     input.dataset.keywordPrev = serverValue;
+                }
+                if (input.dataset.field === "keyword_query") {
+                    const cell = input.closest("td[data-row][data-block]");
+                    const row = cell ? cell.dataset.row : "";
+                    const block = cell ? cell.dataset.block : "";
+                    table
+                        .querySelectorAll(
+                            `td[data-row="${row}"][data-block="${block}"] [data-note-control='input'][data-keyword-prev]`
+                        )
+                        .forEach((relatedInput) => {
+                            relatedInput.dataset.keywordPrev = serverValue;
+                        });
                 }
                 showStatus("Сохранено", "success");
                 const cell = input.closest("td[data-block]");
@@ -289,6 +318,29 @@
         };
 
         tableWrap.addEventListener("click", async (event) => {
+            const keywordRowsButton = event.target.closest(".grid-keyword-action");
+            if (keywordRowsButton) {
+                const wrapper = keywordRowsButton.closest("[data-note-control='keyword-rows']");
+                if (!wrapper || wrapper.classList.contains("is-pending")) {
+                    return;
+                }
+                const payload = {
+                    product_id: wrapper.dataset.productId,
+                    note_date: wrapper.dataset.noteDate,
+                    field: wrapper.dataset.field,
+                    value: keywordRowsButton.dataset.delta,
+                };
+                try {
+                    setKeywordRowsPending(wrapper, true);
+                    await saveCell(updateUrl, payload);
+                    window.location.reload();
+                } catch (error) {
+                    showStatus(`Ошибка сохранения: ${error.message}`, "error");
+                    setKeywordRowsPending(wrapper, false);
+                }
+                return;
+            }
+
             const button = event.target.closest(".grid-choice-btn");
             if (!button) {
                 return;

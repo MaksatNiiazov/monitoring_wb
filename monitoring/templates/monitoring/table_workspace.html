@@ -99,6 +99,20 @@
                                                 {% endif %}
                                             </span>
                                         </button>
+                                    {% elif cell.control and cell.control.type == "keyword_rows" %}
+                                        <div class="grid-keyword-header">
+                                            <span data-row-label>{{ cell.value|default_if_none:"" }}</span>
+                                            <div
+                                                class="grid-keyword-actions"
+                                                data-note-control="keyword-rows"
+                                                data-product-id="{{ cell.control.product_id }}"
+                                                data-note-date="{{ cell.control.note_date }}"
+                                                data-field="{{ cell.control.field }}"
+                                            >
+                                                <button type="button" class="grid-keyword-action" data-delta="-1" aria-label="Убрать строку ключа">-</button>
+                                                <button type="button" class="grid-keyword-action" data-delta="1" aria-label="Добавить строку ключа">+</button>
+                                            </div>
+                                        </div>
                                     {% elif cell.control and cell.control.type == "bool" %}
                                         <div
                                             class="grid-choice"

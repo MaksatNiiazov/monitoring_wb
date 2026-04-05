@@ -152,7 +152,7 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
 
-        self.assertEqual(len(report["keyword_rows"]), 3)
+        self.assertEqual(len(report["keyword_rows"]), 8)
         self.assertTrue(all(not row["query_text"] for row in report["keyword_rows"]))
 
     def test_export_contains_sample_header(self) -> None:
@@ -1493,6 +1493,7 @@ class PageRenderTests(TestCase):
         self.assertContains(response, 'data-note-control="select"')
         self.assertContains(response, 'data-note-control="input"')
         self.assertContains(response, 'data-note-control="text"')
+        self.assertContains(response, 'data-note-control="keyword-rows"')
         self.assertContains(response, "is-comment-span")
         self.assertContains(response, 'colspan="7"')
         self.assertContains(response, "is-stock-span")
@@ -1863,3 +1864,148 @@ class TableInlineNoteUpdateTests(TestCase):
 
         self.product.refresh_from_db()
         self.assertEqual(self.product.primary_keyword, "брюки мужские")
+
+    def test_table_note_cell_updates_daily_keyword_query(self) -> None:
+        response = self.client.post(
+            "/table/note-cell/",
+            data=json.dumps(
+                {
+                    "product_id": self.product.id,
+                    "note_date": "2026-03-18",
+                    "field": "keyword_query",
+                    "value": "брюки мужские черные",
+                    "keyword_prev": "",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["value"], "брюки мужские черные")
+
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.keywords, ["брюки мужские черные"])
+
+    def test_table_note_cell_updates_daily_keyword_metrics(self) -> None:
+        self.note.keywords = ["брюки мужские черные"]
+        self.note.save(update_fields=["keywords", "updated_at"])
+
+        response = self.client.post(
+            "/table/note-cell/",
+            data=json.dumps(
+                {
+                    "product_id": self.product.id,
+                    "note_date": "2026-03-18",
+                    "field": "keyword_frequency",
+                    "value": "120",
+                    "keyword_prev": "брюки мужские черные",
+                    "keyword_query": "брюки мужские черные",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["value"], "120")
+
+        response = self.client.post(
+            "/table/note-cell/",
+            data=json.dumps(
+                {
+                    "product_id": self.product.id,
+                    "note_date": "2026-03-18",
+                    "field": "keyword_boosted_ctr",
+                    "value": "8,40",
+                    "keyword_prev": "брюки мужские черные",
+                    "keyword_query": "брюки мужские черные",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["value"], "8,4")
+
+        stat = DailyProductKeywordStat.objects.get(
+            product=self.product,
+            stats_date=date(2026, 3, 18),
+            query_text="брюки мужские черные",
+        )
+        self.assertEqual(stat.frequency, 120)
+        self.assertEqual(stat.boosted_ctr, Decimal("8.40"))
+
+    def test_table_note_cell_changes_keyword_rows_count(self) -> None:
+        self.note.keywords = ["ключ 1", "ключ 2"]
+        self.note.keyword_rows_count = 8
+        self.note.save(update_fields=["keywords", "keyword_rows_count", "updated_at"])
+
+        response = self.client.post(
+            "/table/note-cell/",
+            data=json.dumps(
+                {
+                    "product_id": self.product.id,
+                    "note_date": "2026-03-18",
+                    "field": "keyword_rows_count_delta",
+                    "value": "1",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.keyword_rows_count, 9)
+
+        response = self.client.post(
+            "/table/note-cell/",
+            data=json.dumps(
+                {
+                    "product_id": self.product.id,
+                    "note_date": "2026-03-18",
+                    "field": "keyword_rows_count_delta",
+                    "value": "-1",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.keyword_rows_count, 8)
+
+    def test_table_note_cell_trims_keywords_when_rows_are_removed(self) -> None:
+        self.note.keywords = ["ключ 1", "ключ 2", "ключ 3"]
+        self.note.keyword_rows_count = 3
+        self.note.save(update_fields=["keywords", "keyword_rows_count", "updated_at"])
+        DailyProductKeywordStat.objects.create(
+            product=self.product,
+            stats_date=date(2026, 3, 18),
+            query_text="ключ 3",
+            frequency=50,
+        )
+
+        response = self.client.post(
+            "/table/note-cell/",
+            data=json.dumps(
+                {
+                    "product_id": self.product.id,
+                    "note_date": "2026-03-18",
+                    "field": "keyword_rows_count_delta",
+                    "value": "-1",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.keyword_rows_count, 2)
+        self.assertEqual(self.note.keywords, ["ключ 1", "ключ 2"])
+        self.assertFalse(
+            DailyProductKeywordStat.objects.filter(
+                product=self.product,
+                stats_date=date(2026, 3, 18),
+                query_text="ключ 3",
+            ).exists()
+        )

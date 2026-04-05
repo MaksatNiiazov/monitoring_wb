@@ -138,6 +138,27 @@ def _block_height(keyword_rows: list[dict[str, Any]]) -> int:
     return BASE_BLOCK_HEIGHT + _keyword_offset(keyword_rows)
 
 
+def _normalize_keyword_rows_count(reports: list[dict[str, Any]]) -> None:
+    if not reports:
+        return
+    target = max(len(report.get("keyword_rows") or []) for report in reports)
+    for report in reports:
+        keyword_rows = report.get("keyword_rows") or []
+        missing = max(0, target - len(keyword_rows))
+        for _ in range(missing):
+            keyword_rows.append(
+                {
+                    "query_text": "",
+                    "has_data": False,
+                    "frequency": None,
+                    "organic_position": None,
+                    "boosted_position": None,
+                    "boosted_ctr": None,
+                }
+            )
+        report["keyword_rows"] = keyword_rows
+
+
 def _cell_ref(*, start_row: int, start_col: int, relative_row: int, relative_col: int) -> str:
     return f"{get_column_letter(start_col + relative_col - 1)}{start_row + relative_row - 1}"
 
@@ -536,6 +557,7 @@ def build_product_monitoring_rows(*, product: Product, reference_date: date, his
         )
         for stock_date in stock_dates
     ]
+    _normalize_keyword_rows_count(reports)
 
     block_height = _block_height(reports[0]["keyword_rows"]) if reports else BASE_BLOCK_HEIGHT
     total_width = history_days * BLOCK_WIDTH + max(history_days - 1, 0) * BLOCK_GAP
@@ -577,6 +599,7 @@ def build_product_monitoring_rows_display(
         )
         for stock_date in resolved_stock_dates
     ]
+    _normalize_keyword_rows_count(reports)
 
     block_height = _block_height(reports[0]["keyword_rows"]) if reports else BASE_BLOCK_HEIGHT
     total_width = resolved_history_days * BLOCK_WIDTH + max(resolved_history_days - 1, 0) * BLOCK_GAP

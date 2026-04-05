@@ -2283,6 +2283,37 @@ body.is-modal-open {
     opacity: 0.75;
 }
 
+.grid-keyword-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.grid-keyword-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.grid-keyword-action {
+    width: 22px;
+    height: 22px;
+    border: 1px solid rgba(20, 33, 42, 0.14);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.96);
+    color: var(--ink);
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.grid-keyword-actions.is-pending {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
 .grid-select {
     width: 100%;
     min-height: 24px;

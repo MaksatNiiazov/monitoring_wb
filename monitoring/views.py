@@ -517,6 +517,20 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                             }
                             if in_block_col < BLOCK_WIDTH:
                                 colspan = max(1, BLOCK_WIDTH - in_block_col)
+                elif (
+                    active_sheet["kind"] == "product"
+                    and keyword_header_row is not None
+                    and row_number == keyword_header_row
+                    and in_block_col == 0
+                ):
+                    note_date = block_dates[block_index] if block_index < len(block_dates) else None
+                    if note_date:
+                        control = {
+                            "type": "keyword_rows",
+                            "field": "keyword_rows_count_delta",
+                            "note_date": note_date.isoformat(),
+                            "product_id": product_id,
+                        }
                 elif display_span_spec and in_block_col < BLOCK_WIDTH:
                     if display_span_spec.get("span_to_block_end"):
                         colspan = max(1, BLOCK_WIDTH - in_block_col)
@@ -977,6 +991,7 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
     field = str(payload.get("field") or "").strip()
     raw_value = payload.get("value")
     keyword_prev = str(payload.get("keyword_prev") or "").strip()
+    keyword_query = str(payload.get("keyword_query") or "").strip()
 
     try:
         product_id = int(str(product_id_raw))
@@ -1007,6 +1022,12 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
     note_decimal_fields = {"spp_percent", "seller_price", "wb_price"}
     note_text_fields = {"comment"}
     economics_decimal_fields = {"buyout_percent", "unit_cost", "logistics_cost"}
+    keyword_int_fields = {"keyword_frequency"}
+    keyword_decimal_fields = {
+        "keyword_organic_position",
+        "keyword_boosted_position",
+        "keyword_boosted_ctr",
+    }
     percent_fields = {"spp_percent", "buyout_percent"}
 
     note_update_fields: list[str] = []
@@ -1038,9 +1059,105 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
             updated = True
 
         if updated:
-            note.keywords = keyword_list
+            note.keywords = _dedupe_preserve_order(keyword_list)
             note_update_fields = ["keywords", "updated_at"]
+        previous_stat = (
+            DailyProductKeywordStat.objects.filter(
+                product=product,
+                stats_date=note_date,
+                query_text=prev_text,
+            ).first()
+            if prev_text
+            else None
+        )
+        if previous_stat is not None:
+            if resolved_text:
+                existing_stat = DailyProductKeywordStat.objects.filter(
+                    product=product,
+                    stats_date=note_date,
+                    query_text=resolved_text,
+                ).exclude(pk=previous_stat.pk).first()
+                if existing_stat is not None:
+                    previous_stat.delete()
+                elif previous_stat.query_text != resolved_text:
+                    previous_stat.query_text = resolved_text[:255]
+                    previous_stat.save(update_fields=["query_text", "updated_at"])
+            else:
+                previous_stat.delete()
         display_value = resolved_text[:255]
+    elif field in keyword_int_fields or field in keyword_decimal_fields:
+        resolved_keyword = keyword_query or keyword_prev
+        if not resolved_keyword.strip():
+            return JsonResponse({"ok": False, "detail": "Сначала заполните ключ."}, status=400)
+        normalized_keywords = _dedupe_preserve_order([*(note.keywords or []), resolved_keyword])
+        if normalized_keywords != list(note.keywords or []):
+            note.keywords = normalized_keywords
+            note_update_fields = ["keywords", "updated_at"]
+
+        stat = _resolve_daily_keyword_stat(
+            product=product,
+            note_date=note_date,
+            keyword_text=resolved_keyword,
+            keyword_prev=keyword_prev,
+        )
+        if field in keyword_int_fields:
+            try:
+                resolved_decimal = _parse_decimal_input(raw_value)
+            except ValueError:
+                return JsonResponse({"ok": False, "detail": "Invalid numeric value."}, status=400)
+            resolved_int = int(resolved_decimal)
+            if resolved_int < 0:
+                return JsonResponse({"ok": False, "detail": "Value cannot be negative."}, status=400)
+            stat.frequency = resolved_int
+            stat.save(update_fields=["frequency", "updated_at"])
+            display_value = str(resolved_int) if resolved_int else ""
+        else:
+            try:
+                resolved_decimal = _parse_decimal_input(raw_value)
+            except ValueError:
+                return JsonResponse({"ok": False, "detail": "Invalid numeric value."}, status=400)
+            resolved_decimal = resolved_decimal.quantize(Decimal("0.01"))
+            if resolved_decimal < 0:
+                return JsonResponse({"ok": False, "detail": "Value cannot be negative."}, status=400)
+            stat_field_map = {
+                "keyword_organic_position": "organic_position",
+                "keyword_boosted_position": "boosted_position",
+                "keyword_boosted_ctr": "boosted_ctr",
+            }
+            setattr(stat, stat_field_map[field], resolved_decimal)
+            stat.save(update_fields=[stat_field_map[field], "updated_at"])
+            display_value = _format_decimal_input(resolved_decimal) if resolved_decimal else ""
+
+        if not _keyword_stat_has_values(stat):
+            stat.delete()
+    elif field == "keyword_rows_count_delta":
+        try:
+            delta = int(str(raw_value or "0"))
+        except (TypeError, ValueError):
+            return JsonResponse({"ok": False, "detail": "Некорректное изменение строк."}, status=400)
+        if delta not in {-1, 1}:
+            return JsonResponse({"ok": False, "detail": "Некорректное изменение строк."}, status=400)
+
+        keyword_list = _dedupe_preserve_order([str(item).strip() for item in (note.keywords or []) if str(item).strip()])
+        current_rows = max(int(note.keyword_rows_count or 0), len(keyword_list), 1)
+        next_rows = max(1, current_rows + delta)
+        removed_keywords: list[str] = []
+        if next_rows < len(keyword_list):
+            removed_keywords = keyword_list[next_rows:]
+            keyword_list = keyword_list[:next_rows]
+            note.keywords = keyword_list
+        note.keyword_rows_count = next_rows
+        note_update_fields = ["keyword_rows_count", "updated_at"]
+        if removed_keywords or note.keywords != keyword_list:
+            note.keywords = keyword_list
+            note_update_fields = ["keywords", "keyword_rows_count", "updated_at"]
+        if removed_keywords:
+            DailyProductKeywordStat.objects.filter(
+                product=product,
+                stats_date=note_date,
+                query_text__in=removed_keywords,
+            ).delete()
+        display_value = str(next_rows)
     elif field in product_text_fields:
         resolved_text = str(raw_value or "").strip()
         setattr(product, field, resolved_text[:255])

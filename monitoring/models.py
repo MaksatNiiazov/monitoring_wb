@@ -366,6 +366,7 @@ class DailyProductNote(TimeStampedModel):
     price_changed = models.BooleanField(default=False, verbose_name="Меняли цену")
     comment = models.TextField(blank=True, verbose_name="Комментарий")
     keywords = models.JSONField(default=list, blank=True, verbose_name="Ключи")
+    keyword_rows_count = models.PositiveSmallIntegerField(default=8, verbose_name="Строк ключей")
 
     class Meta:
         ordering = ["-note_date", "product_id"]
