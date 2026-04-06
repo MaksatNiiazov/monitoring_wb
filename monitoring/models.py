@@ -404,6 +404,8 @@ class MonitoringSettings(TimeStampedModel):
     sync_minute = models.PositiveSmallIntegerField(default=15, verbose_name="Минута ежедневной синхронизации")
     overwrite_within_day = models.BooleanField(default=True, verbose_name="Перезаписывать данные в рамках суток")
     monitoring_history_days = models.PositiveSmallIntegerField(default=14, verbose_name="Дней в мониторинге")
+    table_default_compact_mode = models.BooleanField(default=True, verbose_name="Компактный режим таблицы по умолчанию")
+    table_default_fullscreen_mode = models.BooleanField(default=False, verbose_name="Полноэкранный режим таблицы по умолчанию")
     visible_warehouses_note = models.TextField(blank=True, verbose_name="Комментарий по складам")
     campaign_grouping_note = models.TextField(blank=True, verbose_name="Комментарий по группировке РК")
 
@@ -426,6 +428,8 @@ class MonitoringSettings(TimeStampedModel):
                 "sync_minute": 15,
                 "overwrite_within_day": True,
                 "monitoring_history_days": 14,
+                "table_default_compact_mode": True,
+                "table_default_fullscreen_mode": False,
             },
         )[0]
 

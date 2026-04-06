@@ -10,10 +10,6 @@
         return decodeURIComponent(cookieValue.split("=").slice(1).join("="));
     }
 
-    function storageKey(suffix) {
-        return `wb-table-${window.location.pathname}-${suffix}`;
-    }
-
     async function saveCell(updateUrl, payload) {
         const response = await fetch(updateUrl, {
             method: "POST",
@@ -440,21 +436,15 @@
         if (!button) {
             return;
         }
-        const key = storageKey("density");
+        const defaultCompact = (tableWrap.dataset.defaultDensity || "compact") === "compact";
         const apply = (compact) => {
             tableWrap.classList.toggle("is-compact", compact);
             button.textContent = compact ? "Обычный режим" : "Компактный режим";
         };
-        const savedValue = window.localStorage.getItem(key);
-        const saved = savedValue ? savedValue === "compact" : true;
-        apply(saved);
-        if (!savedValue) {
-            window.localStorage.setItem(key, saved ? "compact" : "normal");
-        }
+        apply(defaultCompact);
         button.addEventListener("click", () => {
             const next = !tableWrap.classList.contains("is-compact");
             apply(next);
-            window.localStorage.setItem(key, next ? "compact" : "normal");
         });
     }
 
@@ -463,7 +453,7 @@
         if (!button) {
             return;
         }
-        const key = storageKey("fullscreen");
+        const defaultFullscreen = (tableWrap.dataset.defaultFullscreen || "normal") === "fullscreen";
         const apply = (enabled) => {
             document.body.classList.toggle("is-table-fullscreen", enabled);
             button.textContent = enabled ? "Выйти из полноэкранного" : "Режим на весь экран";
@@ -472,17 +462,14 @@
                 tableWrap.scrollIntoView({ block: "start", inline: "nearest" });
             }
         };
-        const saved = window.localStorage.getItem(key) === "fullscreen";
-        apply(saved);
+        apply(defaultFullscreen);
         button.addEventListener("click", () => {
             const next = !document.body.classList.contains("is-table-fullscreen");
             apply(next);
-            window.localStorage.setItem(key, next ? "fullscreen" : "normal");
         });
         window.addEventListener("keydown", (event) => {
             if (event.key === "Escape" && document.body.classList.contains("is-table-fullscreen")) {
                 apply(false);
-                window.localStorage.setItem(key, "normal");
             }
         });
     }

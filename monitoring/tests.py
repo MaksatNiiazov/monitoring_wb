@@ -1559,6 +1559,8 @@ class PageRenderTests(TestCase):
         self.assertContains(response, "data-sync-indicator")
         self.assertContains(response, "table-timeline-chart-data")
         self.assertContains(response, "Динамика SKU")
+        self.assertContains(response, 'data-default-density="compact"')
+        self.assertContains(response, 'data-default-fullscreen="normal"')
 
     def test_campaigns_page_renders_management_workspace(self) -> None:
         seed_demo_dataset()
@@ -1592,15 +1594,11 @@ class PageRenderTests(TestCase):
         self.assertContains(response, "data-stock-payload")
         self.assertNotContains(response, "\\u0022mode\\u0022")
         self.assertContains(response, 'id="table-modal-stocks"')
-        self.assertContains(response, 'data-table-action="fullscreen"')
         self.assertContains(response, 'data-inline-status')
         self.assertNotContains(response, "data-table-row-search")
         self.assertContains(response, 'data-day-step="-1"')
         self.assertContains(response, 'data-day-step="1"')
-        self.assertContains(response, 'data-day-meta')
         self.assertContains(response, 'data-default-day-index="12"')
-        self.assertContains(response, "Компактный режим")
-        self.assertNotContains(response, "Плотный режим")
 
     def test_core_pages_render_utf8_without_mojibake(self) -> None:
         seed_demo_dataset()

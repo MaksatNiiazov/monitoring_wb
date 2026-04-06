@@ -544,6 +544,8 @@ class MonitoringSettingsForm(StyledFormMixin, forms.ModelForm):
         "sync_minute": "Минуты автосинхронизации.",
         "overwrite_within_day": "Повторный запуск в тот же день обновит данные за эту дату.",
         "monitoring_history_days": "Глубина истории для книги и витрины.",
+        "table_default_compact_mode": "Как открывать рабочую таблицу по умолчанию: компактно или в обычной плотности.",
+        "table_default_fullscreen_mode": "Нужно ли сразу раскрывать рабочую таблицу на весь экран при открытии.",
         "visible_warehouses_note": "Какие склады должны отображаться в мониторинге.",
         "campaign_grouping_note": "Как кампании раскладываются по группам мониторинга.",
     }
@@ -557,6 +559,8 @@ class MonitoringSettingsForm(StyledFormMixin, forms.ModelForm):
             "sync_minute",
             "overwrite_within_day",
             "monitoring_history_days",
+            "table_default_compact_mode",
+            "table_default_fullscreen_mode",
             "visible_warehouses_note",
             "campaign_grouping_note",
         ]

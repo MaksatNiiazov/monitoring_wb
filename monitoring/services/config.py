@@ -34,6 +34,8 @@ def _fallback_monitoring_settings() -> SimpleNamespace:
         sync_minute=settings.WB_SYNC_MINUTE,
         overwrite_within_day=True,
         monitoring_history_days=14,
+        table_default_compact_mode=True,
+        table_default_fullscreen_mode=False,
         visible_warehouses_note="",
         campaign_grouping_note="",
     )

@@ -41,10 +41,6 @@
             <button class="table-preset-button {% if history_days == 30 %}is-active{% endif %}" type="button" data-filter-days="30">30 дней</button>
             <button class="table-preset-button {% if history_days == 60 %}is-active{% endif %}" type="button" data-filter-days="60">60 дней</button>
         </div>
-        <div class="table-workbench-tools">
-            <button class="secondary-button" type="button" data-table-action="toggle-density">Компактный режим</button>
-            <button class="secondary-button" type="button" data-table-action="fullscreen">Режим на весь экран</button>
-        </div>
         <p class="table-inline-status" data-inline-status aria-live="polite" hidden></p>
     </div>
 
@@ -73,7 +69,14 @@
     {% endif %}
 
     {% if active_sheet %}
-        <div class="table-wrap monitoring-grid-wrap table-primary-wrap is-compact" data-note-update-url="{{ table_note_update_url }}" data-table-workspace data-keyword-offset="{{ active_sheet.keyword_offset|default:0 }}">
+        <div
+            class="table-wrap monitoring-grid-wrap table-primary-wrap{% if workspace_settings.table_default_compact_mode %} is-compact{% endif %}"
+            data-note-update-url="{{ table_note_update_url }}"
+            data-table-workspace
+            data-keyword-offset="{{ active_sheet.keyword_offset|default:0 }}"
+            data-default-density="{% if workspace_settings.table_default_compact_mode %}compact{% else %}normal{% endif %}"
+            data-default-fullscreen="{% if workspace_settings.table_default_fullscreen_mode %}fullscreen{% else %}normal{% endif %}"
+        >
             <table class="monitoring-grid-table {% if active_sheet.kind == 'product' %}is-product{% else %}is-dashboard{% endif %}">
                 <tbody>
                     {% for row in active_sheet.rows %}
@@ -277,7 +280,6 @@
                 </div>
                 <button class="table-day-nav-button" type="button" data-day-step="1" aria-label="Следующая дата">›</button>
             </div>
-            <p class="muted" data-day-meta></p>
         {% endif %}
         {% if table_timeline %}
             <article class="panel panel-spacious chart-panel table-timeline-panel">

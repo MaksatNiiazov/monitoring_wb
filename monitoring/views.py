@@ -746,7 +746,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         "workspace_overview": build_workspace_overview(),
         "table_note_update_url": reverse("monitoring:update_table_note_cell"),
         "hide_workspace_header": True,
-        "body_class": "is-table-fullscreen",
+        "body_class": "is-table-fullscreen" if getattr(workspace_settings, "table_default_fullscreen_mode", False) else "",
     }
     return render(request, "monitoring/table_workspace.html", context)
 
@@ -1632,6 +1632,8 @@ def workspace_settings(request: HttpRequest) -> HttpResponse:
                 "sync_minute": settings_obj.sync_minute,
                 "overwrite_within_day": settings_obj.overwrite_within_day,
                 "monitoring_history_days": getattr(settings_obj, "monitoring_history_days", 14),
+                "table_default_compact_mode": getattr(settings_obj, "table_default_compact_mode", True),
+                "table_default_fullscreen_mode": getattr(settings_obj, "table_default_fullscreen_mode", False),
                 "visible_warehouses_note": settings_obj.visible_warehouses_note,
                 "campaign_grouping_note": settings_obj.campaign_grouping_note,
             }
