@@ -1558,6 +1558,14 @@ class PageRenderTests(TestCase):
         self.assertContains(response, "monitoring-grid-table")
         self.assertContains(response, "data-sync-indicator")
 
+    def test_campaigns_page_renders_management_workspace(self) -> None:
+        seed_demo_dataset()
+        response = self.client.get("/campaigns/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "campaigns-modal-add")
+        self.assertContains(response, "campaigns-modal-edit")
+        self.assertContains(response, 'href="/campaigns/"')
+
     def test_table_page_renders_inline_note_controls(self) -> None:
         seed_demo_dataset()
         response = self.client.get("/table/")
@@ -1626,9 +1634,15 @@ class PageRenderTests(TestCase):
         self.assertContains(response, 'id="products-modal-add"')
         self.assertContains(response, 'id="products-modal-edit"')
         self.assertContains(response, 'data-modal-open="products-modal-add"')
-        self.assertContains(response, 'data-modal-open="products-modal-edit"')
+        self.assertContains(response, f'href="/products/?edit={product.pk}&modal=edit"')
         self.assertContains(response, "table_grid_controls.js")
         self.assertNotContains(response, 'id="product-edit"')
+
+    def test_table_page_preserves_current_url_in_add_campaign_form(self) -> None:
+        seed_demo_dataset()
+        response = self.client.get("/table/?sheet=sheet-2")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="next" value="/table/?sheet=sheet-2"')
 
 
 class TemplateFilterTests(TestCase):
@@ -1661,6 +1675,67 @@ class SyncFormTests(TestCase):
         )
         self.assertFalse(form.is_valid())
         self.assertIn("date_to", form.errors)
+
+
+class CampaignViewTests(TestCase):
+    @patch("monitoring.views.refresh_campaign_metadata")
+    def test_add_campaign_redirects_back_to_next_url(self, refresh_mock) -> None:
+        seed_demo_dataset()
+        product = Product.objects.filter(is_active=True).first()
+
+        response = self.client.post(
+            "/campaigns/add/",
+            {
+                "external_id": 99123456,
+                "monitoring_group": CampaignMonitoringGroup.UNIFIED,
+                "products": [product.pk],
+                "next": "/table/?sheet=sheet-2",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/table/?sheet=sheet-2")
+        campaign = Campaign.objects.get(external_id=99123456)
+        self.assertTrue(campaign.products.filter(pk=product.pk).exists())
+        refresh_mock.assert_called_once_with(campaign)
+
+    def test_update_campaign_saves_group_and_active_flag(self) -> None:
+        seed_demo_dataset()
+        campaign = Campaign.objects.first()
+        product = Product.objects.filter(is_active=True).order_by("id").last()
+
+        response = self.client.post(
+            f"/campaigns/{campaign.pk}/settings/",
+            {
+                "external_id": campaign.external_id,
+                "name": "Manual name",
+                "monitoring_group": CampaignMonitoringGroup.MANUAL_SEARCH,
+                "products": [product.pk],
+                "next": f"/campaigns/?edit={campaign.pk}",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"/campaigns/?edit={campaign.pk}")
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.name, "Manual name")
+        self.assertEqual(campaign.monitoring_group, CampaignMonitoringGroup.MANUAL_SEARCH)
+        self.assertFalse(campaign.is_active)
+        self.assertEqual(list(campaign.products.values_list("pk", flat=True)), [product.pk])
+
+    def test_toggle_campaign_active_disables_campaign_in_monitoring(self) -> None:
+        seed_demo_dataset()
+        campaign = Campaign.objects.filter(is_active=True).first()
+
+        response = self.client.post(
+            f"/campaigns/{campaign.pk}/toggle/",
+            {"next": "/campaigns/"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/campaigns/")
+        campaign.refresh_from_db()
+        self.assertFalse(campaign.is_active)
 
 
 class ReportsFilterFormTests(TestCase):

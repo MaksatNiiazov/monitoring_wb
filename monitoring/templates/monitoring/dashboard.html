@@ -42,6 +42,7 @@
         <span class="badge">Остатки: {{ stock_date|date:"d.m.Y" }}</span>
         <span class="badge soft">Товаров: {{ totals.products }}</span>
         <span class="badge soft">Активных РК: {{ totals.campaigns }}</span>
+        <a class="secondary-button" href="{% url 'monitoring:campaigns' %}">Рекламные кампании</a>
         <a class="primary-button" href="{% url 'monitoring:reports' %}?reference_date={{ stock_date|date:'Y-m-d' }}&range_days={{ workspace_settings.monitoring_history_days|default:14 }}">Открыть отчёты</a>
         <a class="secondary-button" href="{% url 'monitoring:download_monitoring_workbook' %}?reference_date={{ stock_date|date:'Y-m-d' }}&history_days={{ workspace_settings.monitoring_history_days|default:14 }}">Скачать мониторинг</a>
         <a class="secondary-button" href="{% url 'monitoring:workspace_settings' %}">Настройки проекта</a>
@@ -150,6 +151,7 @@
 
             <section class="dashboard-tab-panel" data-dashboard-tab-panel="campaign" hidden>
                 <p class="panel-copy">Используйте для ручной привязки новых РК и корректной группировки в мониторинге.</p>
+                <a class="utility-pill" href="{% url 'monitoring:campaigns' %}">Открыть раздел РК</a>
                 <form method="post" action="{% url 'monitoring:add_campaign' %}" class="stack compact-form">
                     {% csrf_token %}
                     {% for field in campaign_form %}
@@ -254,6 +256,7 @@
                     <h2>Активные кампании</h2>
                     <p class="muted">Быстрый контроль групп, состава товаров и даты последней статистики по РК.</p>
                 </div>
+                <a class="ghost-link" href="{% url 'monitoring:campaigns' %}">Управление РК</a>
             </div>
             <div class="table-wrap">
                 <table class="data-table">

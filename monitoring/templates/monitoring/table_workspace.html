@@ -19,6 +19,7 @@
             </div>
             <div class="table-action-group table-action-group-links">
                 <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:products' %}">Товары</a>
+                <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:campaigns' %}">РК</a>
                 <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:reports' %}?reference_date={{ reference_date|date:'Y-m-d' }}&range_days={{ workspace_settings.monitoring_history_days|default:14 }}">Аналитика</a>
                 <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:download_monitoring_workbook' %}?reference_date={{ reference_date|date:'Y-m-d' }}&history_days={{ history_days }}">Скачать .xlsx</a>
                 <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:workspace_settings' %}">Настройки</a>
@@ -318,6 +319,7 @@
         <p class="muted table-modal-copy">Новый SKU появится в рабочей таблице после следующего обновления.</p>
         <form method="post" action="{% url 'monitoring:add_product' %}" class="stack compact-form table-modal-form">
             {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
             {% for field in product_form %}
                 {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
             {% endfor %}
@@ -339,6 +341,7 @@
         <p class="muted table-modal-copy">Привяжите РК к группе мониторинга и нужным товарам.</p>
         <form method="post" action="{% url 'monitoring:add_campaign' %}" class="stack compact-form table-modal-form">
             {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
             {% for field in campaign_form %}
                 {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
             {% endfor %}

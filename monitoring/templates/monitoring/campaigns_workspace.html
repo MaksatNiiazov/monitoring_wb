@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% load static monitoring_extras %}
+
+{% block title %}Рекламные кампании | Мониторинг WB{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="Навигация">
+    <ol>
+        <li><a href="{% url 'monitoring:table' %}">Workspace</a></li>
+        <li aria-current="page">Рекламные кампании</li>
+    </ol>
+</nav>
+
+<section class="panel panel-spacious">
+    <div class="panel-head">
+        <div>
+            <p class="eyebrow">Campaigns</p>
+            <h2>Рекламные кампании</h2>
+            <p class="muted">Отдельный раздел для просмотра, привязки, редактирования и отключения РК без поиска по таблице.</p>
+        </div>
+        <div class="products-head-actions">
+            <div class="hero-badges">
+                <span class="badge">Всего РК: {{ campaign_rows|length }}</span>
+                <span class="badge soft">Активных: {{ active_campaigns_count }}</span>
+                <span class="badge soft">История: {{ workspace_settings.monitoring_history_days|default:14 }} дней</span>
+            </div>
+            <div class="workspace-tools products-page-actions">
+                <button class="primary-button" type="button" data-modal-open="campaigns-modal-add">Добавить РК</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Название</th>
+                    <th>Группа</th>
+                    <th>Товары</th>
+                    <th>Последняя дата</th>
+                    <th>Статус WB</th>
+                    <th>Состояние</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in campaign_rows %}
+                    <tr>
+                        <td>{{ row.campaign.external_id }}</td>
+                        <td>
+                            <strong>{{ row.campaign.name|default:"Без названия" }}</strong>
+                            {% if row.products_preview %}
+                                <div class="muted">
+                                    {{ row.products_preview }}
+                                    {% if row.products_remainder %}
+                                        + ещё {{ row.products_remainder }}
+                                    {% endif %}
+                                </div>
+                            {% else %}
+                                <div class="muted">Товары пока не привязаны</div>
+                            {% endif %}
+                        </td>
+                        <td>{{ row.campaign.get_monitoring_group_display }}</td>
+                        <td>{{ row.campaign.products_count|default:0|intspace }}</td>
+                        <td>{{ row.campaign.latest_stats_date|date:"d.m.Y"|default:"—" }}</td>
+                        <td>{{ row.campaign.status|default:"—" }}</td>
+                        <td>
+                            {% if row.campaign.is_active %}
+                                <span class="status-chip success">В мониторинге</span>
+                            {% else %}
+                                <span class="status-chip neutral">Отключена</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="workspace-tools">
+                                <a class="secondary-button" href="{% url 'monitoring:campaigns' %}?edit={{ row.campaign.pk }}&modal=edit">
+                                    Изменить
+                                </a>
+                                <form method="post" action="{% url 'monitoring:toggle_campaign_active' row.campaign.pk %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                    <button class="secondary-button" type="submit">
+                                        {% if row.campaign.is_active %}Отключить{% else %}Вернуть{% endif %}
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="8">
+                            <div class="empty-state compact-empty">
+                                <strong>Кампании пока не заведены</strong>
+                                <p>Добавьте первую РК, чтобы увидеть её связи с товарами и рекламную историю в одном месте.</p>
+                            </div>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="table-modal" id="campaigns-modal-add" data-table-modal hidden>
+    <div class="table-modal-backdrop" data-modal-close></div>
+    <article class="table-modal-dialog panel panel-form" role="dialog" aria-modal="true" aria-labelledby="campaigns-modal-add-title">
+        <div class="table-modal-head">
+            <h2 id="campaigns-modal-add-title">Добавить кампанию</h2>
+            <button class="secondary-button table-modal-close" type="button" data-modal-close>Закрыть</button>
+        </div>
+        <p class="muted table-modal-copy">Создаёт новую РК в мониторинге и привязывает её к выбранным товарам.</p>
+        <form method="post" action="{% url 'monitoring:add_campaign' %}" class="stack compact-form table-modal-form">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'monitoring:campaigns' %}">
+            {% for field in campaign_form %}
+                {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+            {% endfor %}
+            <div class="table-modal-actions">
+                <button class="secondary-button" type="button" data-modal-close>Отмена</button>
+                <button class="primary-button" type="submit">Добавить РК</button>
+            </div>
+        </form>
+    </article>
+</section>
+
+<section class="table-modal" id="campaigns-modal-edit" data-table-modal hidden>
+    <div class="table-modal-backdrop" data-modal-close></div>
+    <article class="table-modal-dialog panel panel-form" role="dialog" aria-modal="true" aria-labelledby="campaigns-modal-edit-title">
+        <div class="table-modal-head">
+            <h2 id="campaigns-modal-edit-title">Редактировать кампанию</h2>
+            <button class="secondary-button table-modal-close" type="button" data-modal-close>Закрыть</button>
+        </div>
+        {% if selected_campaign_form and selected_campaign %}
+            <p class="muted table-modal-copy">Текущая РК: ID {{ selected_campaign.external_id }}.</p>
+            <form method="post" action="{% url 'monitoring:update_campaign' selected_campaign.pk %}" class="stack compact-form table-modal-form">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{% url 'monitoring:campaigns' %}?edit={{ selected_campaign.pk }}">
+                <div class="form-grid form-grid-2">
+                    {% for field in selected_campaign_form %}
+                        <div class="{% if field.name == 'products' or field.name == 'name' %}form-span-2{% endif %}">
+                            {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                        </div>
+                    {% endfor %}
+                </div>
+                <div class="table-modal-actions">
+                    <button class="secondary-button" type="button" data-modal-close>Отмена</button>
+                    <button class="primary-button" type="submit">Сохранить изменения</button>
+                </div>
+            </form>
+        {% else %}
+            <div class="empty-state compact-empty">
+                <strong>Нет кампании для редактирования</strong>
+                <p>Выберите РК в списке и нажмите «Изменить».</p>
+            </div>
+        {% endif %}
+    </article>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="{% static 'monitoring/table_grid_controls.js' %}" defer></script>
+    {% if open_campaign_edit_modal %}
+        <script>
+            document.addEventListener("DOMContentLoaded", function () {
+                var modal = document.getElementById("campaigns-modal-edit");
+                if (modal) {
+                    modal.hidden = false;
+                    document.body.classList.add("is-modal-open");
+                }
+            });
+        </script>
+    {% endif %}
+{% endblock %}

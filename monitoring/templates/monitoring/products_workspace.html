@@ -26,14 +26,6 @@
             </div>
             <div class="workspace-tools products-page-actions">
                 <button class="primary-button" type="button" data-modal-open="products-modal-add">Добавить товар</button>
-                <button
-                    class="secondary-button"
-                    type="button"
-                    data-modal-open="products-modal-edit"
-                    {% if not selected_product %}disabled{% endif %}
-                >
-                    Редактировать товар
-                </button>
             </div>
         </div>
     </div>
@@ -158,9 +150,10 @@
     {% if open_product_edit_modal %}
         <script>
             document.addEventListener("DOMContentLoaded", function () {
-                var trigger = document.querySelector('[data-modal-open="products-modal-edit"]');
-                if (trigger) {
-                    trigger.click();
+                var modal = document.getElementById("products-modal-edit");
+                if (modal) {
+                    modal.hidden = false;
+                    document.body.classList.add("is-modal-open");
                 }
             });
         </script>

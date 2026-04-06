@@ -16,6 +16,7 @@ from django.utils.dateparse import parse_date
 
 from .forms import (
     CampaignCreateForm,
+    CampaignSettingsForm,
     DailyNoteForm,
     MonitoringWorkbookForm,
     MonitoringSettingsForm,
@@ -25,6 +26,7 @@ from .forms import (
     SyncForm,
 )
 from .models import (
+    Campaign,
     DailyProductKeywordStat,
     DailyProductMetrics,
     DailyProductNote,
@@ -822,6 +824,55 @@ def products_workspace(request: HttpRequest) -> HttpResponse:
     return render(request, "monitoring/products_workspace.html", context)
 
 
+def campaigns_workspace(request: HttpRequest) -> HttpResponse:
+    settings_obj = get_monitoring_settings()
+    campaigns = list(
+        Campaign.objects.annotate(
+            products_count=Count("products", distinct=True),
+            latest_stats_date=Max("daily_stats__stats_date"),
+        )
+        .prefetch_related("products")
+        .order_by("-is_active", "monitoring_group", "name", "external_id")
+    )
+
+    campaign_rows: list[dict[str, object]] = []
+    for campaign in campaigns:
+        linked_products = list(campaign.products.all())
+        preview_items = [product.vendor_code or str(product.nm_id) for product in linked_products[:3]]
+        remainder = max(0, len(linked_products) - len(preview_items))
+        campaign_rows.append(
+            {
+                "campaign": campaign,
+                "linked_products": linked_products,
+                "products_preview": ", ".join(preview_items),
+                "products_remainder": remainder,
+            }
+        )
+
+    edit_raw = (request.GET.get("edit") or "").strip()
+    modal_raw = (request.GET.get("modal") or "").strip().lower()
+    selected_campaign = None
+    if edit_raw.isdigit():
+        selected_campaign = next(
+            (item["campaign"] for item in campaign_rows if item["campaign"].id == int(edit_raw)),
+            None,
+        )
+    if selected_campaign is None and campaigns:
+        selected_campaign = campaigns[0]
+
+    context = {
+        "workspace_settings": settings_obj,
+        "workspace_overview": build_workspace_overview(),
+        "campaign_rows": campaign_rows,
+        "active_campaigns_count": sum(1 for campaign in campaigns if campaign.is_active),
+        "campaign_form": CampaignCreateForm(),
+        "selected_campaign": selected_campaign,
+        "selected_campaign_form": CampaignSettingsForm(instance=selected_campaign) if selected_campaign else None,
+        "open_campaign_edit_modal": modal_raw == "edit" and selected_campaign is not None,
+    }
+    return render(request, "monitoring/campaigns_workspace.html", context)
+
+
 def add_product(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         return redirect("monitoring:dashboard")
@@ -847,14 +898,16 @@ def add_product(request: HttpRequest) -> HttpResponse:
 
 
 def add_campaign(request: HttpRequest) -> HttpResponse:
+    fallback_target = reverse("monitoring:dashboard")
+    redirect_target = _safe_next_url(request.POST.get("next"), fallback_target)
     if request.method != "POST":
-        return redirect("monitoring:dashboard")
+        return redirect(fallback_target)
 
     form = CampaignCreateForm(request.POST)
     if not form.is_valid():
         for error in form.errors.values():
             messages.error(request, error.as_text())
-        return redirect("monitoring:dashboard")
+        return redirect(redirect_target)
 
     campaign = form.save(commit=False)
     campaign.save()
@@ -864,7 +917,39 @@ def add_campaign(request: HttpRequest) -> HttpResponse:
         messages.success(request, f"Кампания {campaign.external_id} добавлена.")
     except Exception as exc:
         messages.warning(request, f"Кампания сохранена, но данные WB не подтянулись: {exc}")
-    return redirect("monitoring:dashboard")
+    return redirect(redirect_target)
+
+
+def update_campaign(request: HttpRequest, pk: int) -> HttpResponse:
+    campaign = get_object_or_404(Campaign, pk=pk)
+    detail_target = reverse("monitoring:campaigns")
+    redirect_target = _safe_next_url(request.POST.get("next"), f"{detail_target}?edit={campaign.pk}")
+    if request.method != "POST":
+        return redirect(detail_target)
+
+    form = CampaignSettingsForm(request.POST, instance=campaign)
+    if form.is_valid():
+        form.save()
+        messages.success(request, "Настройки кампании обновлены.")
+    else:
+        messages.error(request, "Не удалось сохранить изменения кампании.")
+    return redirect(redirect_target)
+
+
+def toggle_campaign_active(request: HttpRequest, pk: int) -> HttpResponse:
+    campaign = get_object_or_404(Campaign, pk=pk)
+    fallback_target = reverse("monitoring:campaigns")
+    redirect_target = _safe_next_url(request.POST.get("next"), fallback_target)
+    if request.method != "POST":
+        return redirect(redirect_target)
+
+    campaign.is_active = not campaign.is_active
+    campaign.save(update_fields=["is_active", "updated_at"])
+    if campaign.is_active:
+        messages.success(request, f"Кампания {campaign.external_id} снова участвует в мониторинге.")
+    else:
+        messages.success(request, f"Кампания {campaign.external_id} отключена от мониторинга.")
+    return redirect(redirect_target)
 
 
 def sync_all(request: HttpRequest) -> HttpResponse:

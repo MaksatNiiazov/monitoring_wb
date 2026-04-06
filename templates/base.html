@@ -20,6 +20,8 @@
                                 Настройки проекта
                             {% elif request.resolver_match.url_name == 'reports' %}
                                 Аналитика и отчёты
+                            {% elif request.resolver_match.url_name == 'campaigns' %}
+                                Рекламные кампании
                             {% elif request.resolver_match.url_name == 'products' %}
                                 Каталог товаров
                             {% elif request.resolver_match.url_name == 'product_detail' %}
@@ -32,6 +34,7 @@
                     <nav class="workspace-tools" aria-label="Разделы workspace">
                         <a class="utility-pill {% if request.resolver_match.url_name == 'table' or request.resolver_match.url_name == 'dashboard' %}is-active{% endif %}" href="{% url 'monitoring:table' %}">Таблица</a>
                         <a class="utility-pill {% if request.resolver_match.url_name == 'products' or request.resolver_match.url_name == 'product_detail' %}is-active{% endif %}" href="{% url 'monitoring:products' %}">Товары</a>
+                        <a class="utility-pill {% if request.resolver_match.url_name == 'campaigns' %}is-active{% endif %}" href="{% url 'monitoring:campaigns' %}">РК</a>
                         <a class="utility-pill {% if request.resolver_match.url_name == 'reports' %}is-active{% endif %}" href="{% url 'monitoring:reports' %}">Аналитика</a>
                         <a class="utility-pill {% if request.resolver_match.url_name == 'workspace_settings' %}is-active{% endif %}" href="{% url 'monitoring:workspace_settings' %}">Настройки</a>
                     </nav>
@@ -40,6 +43,8 @@
                             Периоды, графики и сравнение SKU
                         {% elif request.resolver_match.url_name == 'products' %}
                             Список SKU, переход к статистике и редактированию
+                        {% elif request.resolver_match.url_name == 'campaigns' %}
+                            Отдельный список РК, привязки к товарам и управление мониторингом
                         {% elif request.resolver_match.url_name == 'workspace_settings' %}
                             Интеграции, выгрузка и расписание
                         {% elif request.resolver_match.url_name == 'product_detail' %}
