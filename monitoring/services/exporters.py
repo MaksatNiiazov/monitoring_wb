@@ -283,7 +283,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
         ["", "Ср. кол-во заказов/день", "", "", format_decimal(report["avg_orders_per_day"]), "", "", ""],
         ["", "Ср. убыль остатков/день", "", "", format_optional_decimal(report["avg_stock_drop_per_day"]), "", "", ""],
         ["", "Дней до АУТА", "", "", format_optional_decimal(report["days_until_zero_from_stock_drop"]), "", "", ""],
-        ["", "ТУТ БЫЛ СКРИНШОТ С ОСТАТКАМИ", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", ""],
     ]
     rows.extend(
