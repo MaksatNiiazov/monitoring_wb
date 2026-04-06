@@ -258,11 +258,19 @@
             </table>
         </div>
         {% if active_sheet.kind == "product" and active_sheet.block_dates %}
-            <div class="table-day-nav" data-day-nav>
+            <div
+                class="table-day-nav"
+                data-day-nav
+                data-default-day-index="{% if active_sheet.block_dates|length > 1 %}{{ active_sheet.block_dates|length|add:'-2' }}{% else %}0{% endif %}"
+            >
                 <button class="table-day-nav-button" type="button" data-day-step="-1" aria-label="Предыдущая дата">‹</button>
                 <div class="table-day-nav-track" data-day-track>
                     {% for block_date in active_sheet.block_dates %}
-                        <button class="table-day-chip {% if forloop.last %}is-current{% endif %}" type="button" data-day-index="{{ forloop.counter0 }}">
+                        <button
+                            class="table-day-chip {% if active_sheet.block_dates|length == 1 and forloop.first %}is-current{% elif active_sheet.block_dates|length > 1 and forloop.revcounter == 2 %}is-current{% endif %}"
+                            type="button"
+                            data-day-index="{{ forloop.counter0 }}"
+                        >
                             {{ block_date|date:"d.m" }}
                         </button>
                     {% endfor %}

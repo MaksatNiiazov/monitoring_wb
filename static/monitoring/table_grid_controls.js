@@ -1056,6 +1056,7 @@
         const prevButton = nav.querySelector("[data-day-step='-1']");
         const nextButton = nav.querySelector("[data-day-step='1']");
         const meta = document.querySelector("[data-day-meta]");
+        const rawDefaultIndex = Number.parseInt(nav.dataset.defaultDayIndex || "", 10);
 
         const dateAnchors = Array.from(firstRow.querySelectorAll("td")).filter((cell) =>
             /^\d{2}\.\d{2}\.\d{4}$/.test((cell.textContent || "").trim())
@@ -1126,12 +1127,11 @@
             return nearestIndex;
         };
 
-        const defaultIndex = chips.length > 1 ? chips.length - 2 : 0;
-        if (tableWrap.scrollLeft <= 1) {
-            window.requestAnimationFrame(() => {
-                scrollToDayIndex(defaultIndex, "auto");
-            });
-        }
+        const defaultIndex = Number.isFinite(rawDefaultIndex)
+            ? Math.max(0, Math.min(chips.length - 1, rawDefaultIndex))
+            : chips.length > 1
+                ? chips.length - 2
+                : 0;
 
         chips.forEach((chip) => {
             chip.addEventListener("click", () => {
@@ -1202,7 +1202,9 @@
             });
         });
 
-        applyActive(resolveCurrentDayIndex());
+        window.requestAnimationFrame(() => {
+            scrollToDayIndex(defaultIndex, "auto");
+        });
     }
 
     function initDragScroll(tableWrap) {

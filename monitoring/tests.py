@@ -1598,6 +1598,7 @@ class PageRenderTests(TestCase):
         self.assertContains(response, 'data-day-step="-1"')
         self.assertContains(response, 'data-day-step="1"')
         self.assertContains(response, 'data-day-meta')
+        self.assertContains(response, 'data-default-day-index="12"')
         self.assertContains(response, "Компактный режим")
         self.assertNotContains(response, "Плотный режим")
 
