@@ -398,6 +398,8 @@ class SyncForm(StyledFormMixin, forms.Form):
     def __init__(self, *args, show_products: bool = True, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["reference_date"].widget = forms.HiddenInput()
+        self.fields["force"].widget = forms.HiddenInput()
+        self.fields["force"].initial = True
         if not show_products:
             self.fields["product_ids"].widget = forms.HiddenInput()
         self.order_fields(["product_ids", "date_from", "date_to", "force", "reference_date"])
@@ -423,6 +425,7 @@ class SyncForm(StyledFormMixin, forms.Form):
         cleaned_data["date_to"] = date_to
         # Для обратной совместимости со старым single-day режимом.
         cleaned_data["reference_date"] = date_to or reference_date
+        cleaned_data["force"] = True
         return cleaned_data
 
 

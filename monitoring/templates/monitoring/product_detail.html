@@ -192,7 +192,9 @@
                 <form method="post" action="{% url 'monitoring:sync_product' product.pk %}" class="inline-form">
                     {% csrf_token %}
                     {% for field in sync_form %}
-                        {% if field.field.widget.input_type == "checkbox" %}
+                        {% if field.is_hidden %}
+                            {{ field }}
+                        {% elif field.field.widget.input_type == "checkbox" %}
                             <label class="inline-toggle">
                                 {{ field }}
                                 <span>{{ field.label }}</span>

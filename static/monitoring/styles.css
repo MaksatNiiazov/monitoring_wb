@@ -1434,6 +1434,14 @@ textarea:focus-visible {
     white-space: nowrap;
 }
 
+.table-head-action-icon {
+    min-width: 62px;
+    width: 62px;
+    padding: 0;
+    font-size: 1.65rem;
+    line-height: 1;
+}
+
 .table-action-group-primary .table-head-action-primary {
     min-width: 176px;
 }
@@ -1719,7 +1727,7 @@ body.is-table-fullscreen .monitoring-grid-wrap {
 
 .table-sheets-nav-shell {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
     align-items: stretch;
     gap: 8px;
     margin-top: 8px;
@@ -1743,6 +1751,15 @@ body.is-table-fullscreen .monitoring-grid-wrap {
     width: 34px;
     min-height: 34px;
     padding: 0;
+}
+
+.table-sheets-add-button {
+    width: 52px;
+    min-width: 52px;
+    min-height: 34px;
+    padding: 0;
+    font-size: 1.5rem;
+    line-height: 1;
 }
 
 .table-sheets-nav .segmented-button {
@@ -1824,6 +1841,16 @@ body.is-modal-open {
     width: auto;
     min-width: 0;
     flex: 0 0 auto;
+}
+
+.table-modal-close-icon {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 999px;
+    font-size: 1.35rem;
+    line-height: 1;
 }
 
 .table-modal-copy {

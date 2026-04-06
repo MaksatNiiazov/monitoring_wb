@@ -14,7 +14,6 @@
         <div class="table-primary-actions">
             <div class="table-action-group table-action-group-primary">
                 <button class="primary-button table-head-action table-head-action-primary" type="button" data-modal-open="table-modal-sync">Синхронизация</button>
-                <button class="secondary-button table-head-action" type="button" data-modal-open="table-modal-product">Добавить товар</button>
                 <button class="secondary-button table-head-action" type="button" data-modal-open="table-modal-campaign">Добавить РК</button>
             </div>
             <div class="table-action-group table-action-group-links">
@@ -52,6 +51,13 @@
     {% if sheet_tabs %}
         <div class="table-sheets-nav-shell" data-sheets-nav>
             <button class="table-day-nav-button table-sheets-nav-button" type="button" data-sheets-step="-1" aria-label="Предыдущий лист">‹</button>
+            <button
+                class="secondary-button table-sheets-add-button"
+                type="button"
+                data-modal-open="table-modal-product"
+                aria-label="Добавить товар"
+                title="Добавить товар"
+            >+</button>
             <nav class="segmented-control table-sheets-nav" data-sheets-track aria-label="Листы таблицы">
                 {% for tab in sheet_tabs %}
                     <a
@@ -278,7 +284,7 @@
     <article class="table-modal-dialog panel panel-form" role="dialog" aria-modal="true" aria-labelledby="table-modal-sync-title">
         <div class="table-modal-head">
             <h2 id="table-modal-sync-title">Синхронизация</h2>
-            <button class="secondary-button table-modal-close" type="button" data-modal-close>Закрыть</button>
+            <button class="secondary-button table-modal-close table-modal-close-icon" type="button" data-modal-close aria-label="Закрыть">×</button>
         </div>
         <p class="muted table-modal-copy">Обновляет базу и таблицу мониторинга за выбранный период.</p>
         <div class="sync-quick-panel">
@@ -314,7 +320,7 @@
     <article class="table-modal-dialog panel panel-form" role="dialog" aria-modal="true" aria-labelledby="table-modal-product-title">
         <div class="table-modal-head">
             <h2 id="table-modal-product-title">Добавить товар</h2>
-            <button class="secondary-button table-modal-close" type="button" data-modal-close>Закрыть</button>
+            <button class="secondary-button table-modal-close table-modal-close-icon" type="button" data-modal-close aria-label="Закрыть">×</button>
         </div>
         <p class="muted table-modal-copy">Новый SKU появится в рабочей таблице после следующего обновления.</p>
         <form method="post" action="{% url 'monitoring:add_product' %}" class="stack compact-form table-modal-form">
@@ -336,7 +342,7 @@
     <article class="table-modal-dialog panel panel-form" role="dialog" aria-modal="true" aria-labelledby="table-modal-campaign-title">
         <div class="table-modal-head">
             <h2 id="table-modal-campaign-title">Добавить кампанию</h2>
-            <button class="secondary-button table-modal-close" type="button" data-modal-close>Закрыть</button>
+            <button class="secondary-button table-modal-close table-modal-close-icon" type="button" data-modal-close aria-label="Закрыть">×</button>
         </div>
         <p class="muted table-modal-copy">Привяжите РК к группе мониторинга и нужным товарам.</p>
         <form method="post" action="{% url 'monitoring:add_campaign' %}" class="stack compact-form table-modal-form">
@@ -358,7 +364,7 @@
     <article class="table-modal-dialog panel panel-form" role="dialog" aria-modal="true" aria-labelledby="table-modal-stocks-title">
         <div class="table-modal-head">
             <h2 id="table-modal-stocks-title">Остатки по складам</h2>
-            <button class="secondary-button table-modal-close" type="button" data-modal-close>Закрыть</button>
+            <button class="secondary-button table-modal-close table-modal-close-icon" type="button" data-modal-close aria-label="Закрыть">×</button>
         </div>
         <p class="muted table-modal-copy" data-stocks-modal-meta></p>
         <div class="table-stocks-modal-scroll">

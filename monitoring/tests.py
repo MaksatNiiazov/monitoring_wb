@@ -1668,7 +1668,6 @@ class SyncFormTests(TestCase):
         form = SyncForm(
             data={
                 "date_from": "2026-03-18",
-                "force": "on",
             }
         )
         self.assertTrue(form.is_valid(), form.errors)
@@ -1680,7 +1679,6 @@ class SyncFormTests(TestCase):
             data={
                 "date_from": "2026-03-19",
                 "date_to": "2026-03-18",
-                "force": "on",
             }
         )
         self.assertFalse(form.is_valid())
@@ -1855,7 +1853,6 @@ class SyncViewsTests(TestCase):
                 "/sync/",
                 {
                     "reference_date": "2026-03-18",
-                    "force": "on",
                 },
             )
         self.assertEqual(response.status_code, 302)
@@ -1871,7 +1868,6 @@ class SyncViewsTests(TestCase):
                 {
                     "date_from": "2026-03-17",
                     "date_to": "2026-03-18",
-                    "force": "on",
                 },
             )
         self.assertEqual(response.status_code, 302)
@@ -1893,7 +1889,6 @@ class SyncViewsTests(TestCase):
                 f"/products/{product.pk}/sync/",
                 {
                     "reference_date": "2026-03-18",
-                    "force": "on",
                 },
             )
         self.assertEqual(response.status_code, 302)
