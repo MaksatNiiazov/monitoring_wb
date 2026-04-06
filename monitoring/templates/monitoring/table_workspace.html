@@ -372,20 +372,55 @@
             <button class="secondary-button table-modal-close table-modal-close-icon" type="button" data-modal-close aria-label="Закрыть">×</button>
         </div>
         <p class="muted table-modal-copy">Обновляет базу и таблицу мониторинга за выбранный период.</p>
-        <div class="sync-quick-panel">
-            <span class="sync-quick-label">Быстрый период</span>
-            <div class="sync-quick-actions">
-                <button class="secondary-button" type="button" data-sync-range="yesterday">Вчера</button>
-                <button class="secondary-button" type="button" data-sync-range="today">Сегодня</button>
-            </div>
-        </div>
         <form method="post" action="{% url 'monitoring:sync_all' %}" class="stack compact-form table-modal-form">
             {% csrf_token %}
             {% if sync_form.product_ids %}
                 {% include "monitoring/includes/form_field.html" with field=sync_form.product_ids compact_help=True %}
             {% endif %}
+            <div class="sync-period-shell">
+                <div class="sync-period-head">
+                    <span class="sync-period-title">Срезы даты</span>
+                    <div class="sync-quick-actions">
+                        <button class="sync-quick-button" type="button" data-sync-range="yesterday">Вчера</button>
+                        <button class="sync-quick-button" type="button" data-sync-range="today">Сегодня</button>
+                    </div>
+                </div>
+                <div class="sync-period-grid">
+                    <label class="field sync-date-field">
+                        <span class="field-heading">
+                            <span>{{ sync_form.date_from.label }}</span>
+                            {% if sync_form.date_from.help_text %}
+                                <span class="help-popover">
+                                    <button class="help-trigger" type="button" aria-label="Пояснение к полю {{ sync_form.date_from.label }}" title="{{ sync_form.date_from.help_text }}">i</button>
+                                    <span class="help-tooltip" role="tooltip">{{ sync_form.date_from.help_text }}</span>
+                                </span>
+                            {% endif %}
+                        </span>
+                        {{ sync_form.date_from }}
+                    </label>
+                    <label class="field sync-date-field">
+                        <span class="field-heading">
+                            <span>{{ sync_form.date_to.label }}</span>
+                            {% if sync_form.date_to.help_text %}
+                                <span class="help-popover">
+                                    <button class="help-trigger" type="button" aria-label="Пояснение к полю {{ sync_form.date_to.label }}" title="{{ sync_form.date_to.help_text }}">i</button>
+                                    <span class="help-tooltip" role="tooltip">{{ sync_form.date_to.help_text }}</span>
+                                </span>
+                            {% endif %}
+                        </span>
+                        {{ sync_form.date_to }}
+                    </label>
+                </div>
+            </div>
+            {{ sync_form.reference_date }}
+            {% if sync_form.date_from.errors %}
+                <div class="field-errors">{{ sync_form.date_from.errors }}</div>
+            {% endif %}
+            {% if sync_form.date_to.errors %}
+                <div class="field-errors">{{ sync_form.date_to.errors }}</div>
+            {% endif %}
             {% for field in sync_form %}
-                {% if field.name != "product_ids" %}
+                {% if field.name != "product_ids" and field.name != "date_from" and field.name != "date_to" and field.name != "reference_date" %}
                     {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
                 {% endif %}
             {% endfor %}
