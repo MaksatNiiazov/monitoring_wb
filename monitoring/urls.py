@@ -21,6 +21,7 @@ urlpatterns = [
     path("sync/", views.sync_all, name="sync_all"),
     path("sync/cancel/", views.sync_cancel, name="sync_cancel"),
     path("sync/status/", views.sync_status, name="sync_status"),
+    path("table/stocks-popup/", views.table_stock_popup_payload, name="table_stock_popup_payload"),
     path("table/note-cell/", views.update_table_note_cell, name="update_table_note_cell"),
     path("products/<int:pk>/", views.product_detail, name="product_detail"),
     path("products/<int:pk>/sync/", views.sync_product, name="sync_product"),

@@ -1,6 +1,5 @@
 (function () {
     const RUNNING_POLL_MS = 2500;
-    const IDLE_POLL_MS = 12000;
     const HIDDEN_POLL_MULTIPLIER = 2;
     const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("ru-RU", {
         day: "2-digit",
@@ -65,6 +64,7 @@
             this.syncButtons = Array.from(document.querySelectorAll("[data-sync-submit]"));
             this.timer = null;
             this.cancelPending = false;
+            this.isRunning = false;
 
             this.syncButtons.forEach((button) => {
                 if (!button.dataset.defaultLabel) {
@@ -77,7 +77,7 @@
             });
 
             document.addEventListener("visibilitychange", () => {
-                if (!document.hidden) {
+                if (!document.hidden && this.isRunning) {
                     this.poll();
                 }
             });
@@ -89,9 +89,8 @@
             this.timer = window.setTimeout(() => this.poll(), nextMs);
         }
 
-        nextInterval(isRunning) {
-            const baseInterval = isRunning ? RUNNING_POLL_MS : IDLE_POLL_MS;
-            return document.hidden ? baseInterval * HIDDEN_POLL_MULTIPLIER : baseInterval;
+        nextInterval() {
+            return document.hidden ? RUNNING_POLL_MS * HIDDEN_POLL_MULTIPLIER : RUNNING_POLL_MS;
         }
 
         setIndicatorState(status) {
@@ -175,6 +174,7 @@
 
         render(data) {
             if (!data || !data.has_sync) {
+                this.isRunning = false;
                 if (this.titleNode) {
                     this.titleNode.textContent = "Синхронизация ещё не запускалась";
                 }
@@ -196,6 +196,7 @@
             const stage = progress.stage || (data.is_running ? "Выполняется" : "Завершено");
             const detail = progress.detail || "";
             const message = data.message || detail || "";
+            this.isRunning = Boolean(data.is_running);
 
             if (this.titleNode) {
                 this.titleNode.textContent = `${data.kind_display}: ${data.status_display}`;
@@ -279,15 +280,20 @@
                 }
                 const data = await response.json();
                 this.render(data);
-                this.schedule(this.nextInterval(data && data.is_running));
+                if (data && data.is_running) {
+                    this.schedule(this.nextInterval());
+                } else {
+                    window.clearTimeout(this.timer);
+                }
             } catch (_error) {
+                this.isRunning = false;
                 if (this.messageNode) {
-                    this.messageNode.textContent = "Не удалось получить статус синхронизации. Повторим автоматически.";
+                    this.messageNode.textContent = "Не удалось получить статус синхронизации. Обновите страницу или запустите синхронизацию повторно.";
                 }
                 this.setIndicatorState("idle");
                 this.setSyncButtonsDisabled(false);
                 this.setCancelButtonsState({ isRunning: false, canCancel: false, cancelRequested: false });
-                this.schedule(this.nextInterval(false));
+                window.clearTimeout(this.timer);
             }
         }
     }

@@ -1,307 +1,134 @@
 {% extends "base.html" %}
-{% load static monitoring_extras %}
 
-{% block title %}Дашборд | Мониторинг WB{% endblock %}
+{% block title %}Главная | Мониторинг WB{% endblock %}
 
 {% block content %}
-<nav class="breadcrumb" aria-label="Навигация">
-    <ol>
-        <li><a href="{% url 'monitoring:dashboard' %}">Workspace</a></li>
-        <li aria-current="page">Дашборд</li>
-    </ol>
-</nav>
-
-<section class="hero">
-    <div class="hero-main">
-        <p class="eyebrow">Дашборд</p>
-        <h1>Мониторинг по товарам, рекламе и остаткам</h1>
-        <p class="hero-copy">
-            Веб-интерфейс управляет синхронизацией WB, хранит историю, показывает аналитику и формирует итоговую книгу мониторинга в Excel.
-        </p>
-        <div class="hero-stats">
-            <article class="hero-stat">
-                <span>Заказы за день</span>
-                <strong>{{ totals.orders|intspace }}</strong>
-            </article>
-            <article class="hero-stat">
-                <span>Оборот по заказам</span>
-                <strong>{{ totals.order_sum|money }}</strong>
-            </article>
-            <article class="hero-stat">
-                <span>Расход рекламы</span>
-                <strong>{{ totals.spend|money }}</strong>
-            </article>
-            <article class="hero-stat">
-                <span>Текущий остаток WB</span>
-                <strong>{{ totals.stock|intspace }}</strong>
-            </article>
+<section class="panel panel-spacious">
+    <div class="table-primary-head">
+        <div class="table-primary-title">
+            <p class="eyebrow">Старт</p>
+            <h1>{{ workspace_settings.project_name|default:"Мониторинг WB" }}</h1>
+            <p class="muted">Лёгкая стартовая страница: отсюда можно быстро перейти в нужный раздел и понять текущее состояние проекта.</p>
         </div>
     </div>
-    <div class="hero-badges hero-actions">
-        <span class="badge">Статистика РК: {{ stats_date|date:"d.m.Y" }}</span>
-        <span class="badge">Остатки: {{ stock_date|date:"d.m.Y" }}</span>
-        <span class="badge soft">Товаров: {{ totals.products }}</span>
-        <span class="badge soft">Активных РК: {{ totals.campaigns }}</span>
-        <a class="secondary-button" href="{% url 'monitoring:campaigns' %}">Рекламные кампании</a>
-        <a class="primary-button" href="{% url 'monitoring:reports' %}?reference_date={{ stock_date|date:'Y-m-d' }}&range_days={{ workspace_settings.monitoring_history_days|default:14 }}">Открыть отчёты</a>
-        <a class="secondary-button" href="{% url 'monitoring:download_monitoring_workbook' %}?reference_date={{ stock_date|date:'Y-m-d' }}&history_days={{ workspace_settings.monitoring_history_days|default:14 }}">Скачать мониторинг</a>
-        <a class="secondary-button" href="{% url 'monitoring:workspace_settings' %}">Настройки проекта</a>
-    </div>
-</section>
-
-<section class="ops-strip">
-    <article class="ops-card">
-        <span>Режим работы</span>
-        <strong>База данных + книга мониторинга</strong>
-        <p>Основной контур в веб-системе, XLSX как итоговый слой.</p>
-    </article>
-    <article class="ops-card">
-        <span>История книги</span>
-        <strong>{{ workspace_settings.monitoring_history_days|default:14 }} дней</strong>
-        <p>На такую глубину собираются блоки по датам для выгрузки и синка.</p>
-    </article>
-    <article class="ops-card">
-        <span>Контур запуска</span>
-        <strong>{{ workspace_settings.sync_hour|stringformat:"02d" }}:{{ workspace_settings.sync_minute|stringformat:"02d" }}</strong>
-        <p>Автосинхронизация плюс ручной перезапуск с перезаписью данных за дату.</p>
-    </article>
 </section>
 
 <section class="panel panel-spacious">
     <div class="panel-head">
         <div>
-            <h2>Рабочий статус проекта</h2>
-            <p class="muted">Свежесть данных, следующий автозапуск и состояние внешнего контура без перехода в админку.</p>
-        </div>
-        <div class="workspace-tools">
-            <a class="utility-pill" href="{% url 'monitoring:workspace_settings' %}">Настройки проекта</a>
+            <h2>Разделы</h2>
+            <p class="muted">Основные рабочие экраны проекта.</p>
         </div>
     </div>
-    {% if workspace_overview.warnings %}
-        <div class="alert-stack">
-            {% for warning in workspace_overview.warnings %}
-                <article class="alert-card warning">
-                    <strong>Требует внимания</strong>
-                    <p>{{ warning }}</p>
-                </article>
-            {% endfor %}
+    <div class="card-grid">
+        <a class="product-card" href="{% url 'monitoring:table' %}">
+            <div class="product-card-head">
+                <div>
+                    <p class="card-id">Работа</p>
+                    <h3>Таблица</h3>
+                </div>
+            </div>
+            <p class="muted">Основной рабочий экран с мониторингом по дням.</p>
+        </a>
+        <a class="product-card" href="{% url 'monitoring:products' %}">
+            <div class="product-card-head">
+                <div>
+                    <p class="card-id">Справочник</p>
+                    <h3>Товары</h3>
+                </div>
+            </div>
+            <p class="muted">Карточки товаров, настройки и быстрый доступ к деталям.</p>
+        </a>
+        <a class="product-card" href="{% url 'monitoring:campaigns' %}">
+            <div class="product-card-head">
+                <div>
+                    <p class="card-id">Реклама</p>
+                    <h3>РК</h3>
+                </div>
+            </div>
+            <p class="muted">Список кампаний, связи с товарами и статистика по РК.</p>
+        </a>
+        <a class="product-card" href="{% url 'monitoring:reports' %}">
+            <div class="product-card-head">
+                <div>
+                    <p class="card-id">Аналитика</p>
+                    <h3>Отчёты</h3>
+                </div>
+            </div>
+            <p class="muted">Сводная аналитика по периоду и экспортные представления.</p>
+        </a>
+        <a class="product-card" href="{% url 'monitoring:workspace_settings' %}">
+            <div class="product-card-head">
+                <div>
+                    <p class="card-id">Конфиг</p>
+                    <h3>Настройки</h3>
+                </div>
+            </div>
+            <p class="muted">Параметры проекта, периоды, режимы таблицы и синхронизация.</p>
+        </a>
+    </div>
+</section>
+
+<section class="panel panel-spacious">
+    <div class="panel-head">
+        <div>
+            <h2>Короткий статус</h2>
+            <p class="muted">Только самое полезное без перегруза.</p>
         </div>
-    {% endif %}
+    </div>
     <div class="status-grid">
-        {% for signal in workspace_overview.signals %}
-            <article class="status-card {{ signal.tone }}">
-                <span>{{ signal.label }}</span>
-                <strong>{{ signal.value }}</strong>
-                <p>{{ signal.detail }}</p>
-            </article>
-        {% endfor %}
-    </div>
-</section>
-
-<section class="layout-grid dashboard-layout-grid">
-    <aside class="stack">
-        <article class="panel panel-emphasis">
-            <h2>Готовность</h2>
-            <div class="readiness-list">
-                {% for item in readiness %}
-                    <div class="readiness-item {% if item.ready %}ready{% else %}pending{% endif %}">
-                        <div>
-                            <strong>{{ item.title }}</strong>
-                            <p>{{ item.detail }}</p>
-                        </div>
-                        <span class="status-dot"></span>
-                    </div>
-                {% endfor %}
-            </div>
+        <article class="status-card neutral">
+            <span>Активных товаров</span>
+            <strong>{{ active_products_count }}</strong>
+            <p>Товаров, которые участвуют в мониторинге сейчас.</p>
         </article>
-
-        <article class="panel panel-form dashboard-controls" data-dashboard-controls data-active-tab="sync">
-            <div class="dashboard-controls-head">
-                <h2>Центр управления</h2>
-                <p class="panel-copy">Все ключевые действия в одном блоке: запуск синхронизации, добавление товара и привязка кампании.</p>
-            </div>
-            <nav class="segmented-control dashboard-tabs-nav" role="tablist" aria-label="Действия дашборда">
-                <button type="button" class="segmented-button is-active" role="tab" aria-selected="true" data-dashboard-tab-trigger="sync">Синхронизация</button>
-                <button type="button" class="segmented-button" role="tab" aria-selected="false" data-dashboard-tab-trigger="product">Товар</button>
-                <button type="button" class="segmented-button" role="tab" aria-selected="false" data-dashboard-tab-trigger="campaign">Кампания</button>
-            </nav>
-
-            <section class="dashboard-tab-panel" data-dashboard-tab-panel="sync">
-                <p class="panel-copy">Обновляет базу, книгу мониторинга и связанные витрины за выбранную дату.</p>
-                {% include "monitoring/includes/sync_indicator.html" %}
-                <form method="post" action="{% url 'monitoring:sync_all' %}" class="stack compact-form">
-                    {% csrf_token %}
-                    {% for field in sync_form %}
-                        {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
-                    {% endfor %}
-                    <button class="primary-button wide" type="submit" data-sync-submit>Запустить</button>
-                </form>
-            </section>
-
-            <section class="dashboard-tab-panel" data-dashboard-tab-panel="product" hidden>
-                <p class="panel-copy">Карточка появится на дашборде и попадёт в книгу мониторинга после следующего обновления.</p>
-                <form method="post" action="{% url 'monitoring:add_product' %}" class="stack compact-form">
-                    {% csrf_token %}
-                    {% for field in product_form %}
-                        {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
-                    {% endfor %}
-                    <button class="secondary-button wide" type="submit">Добавить товар</button>
-                </form>
-            </section>
-
-            <section class="dashboard-tab-panel" data-dashboard-tab-panel="campaign" hidden>
-                <p class="panel-copy">Используйте для ручной привязки новых РК и корректной группировки в мониторинге.</p>
-                <a class="utility-pill" href="{% url 'monitoring:campaigns' %}">Открыть раздел РК</a>
-                <form method="post" action="{% url 'monitoring:add_campaign' %}" class="stack compact-form">
-                    {% csrf_token %}
-                    {% for field in campaign_form %}
-                        {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
-                    {% endfor %}
-                    <button class="secondary-button wide" type="submit">Добавить РК</button>
-                </form>
-            </section>
+        <article class="status-card neutral">
+            <span>Активных РК</span>
+            <strong>{{ active_campaigns_count }}</strong>
+            <p>Кампаний, включённых в мониторинг.</p>
         </article>
-
-        <article class="panel panel-spacious">
-            <div class="panel-head">
-                <div>
-                    <h2>Последние синхронизации</h2>
-                    <p class="muted">Журнал последних запусков и ошибок.</p>
-                </div>
-                <a class="ghost-link" href="{% url 'monitoring:workspace_settings' %}">Интеграции и выгрузка</a>
-            </div>
-            <div class="stack mini-list">
-                {% for log in sync_logs %}
-                    <div class="mini-item">
-                        <strong>{{ log.get_kind_display }}</strong>
-                        <span>{{ log.created_at|date:"d.m.Y H:i" }}</span>
-                        <span class="status-chip {{ log.status }}">{{ log.get_status_display }}</span>
-                        <span>{{ log.message|default:"-" }}</span>
-                    </div>
-                {% empty %}
-                    <p class="muted">Синхронизаций ещё не было.</p>
-                {% endfor %}
-            </div>
+        <article class="status-card neutral">
+            <span>Последняя дата метрик</span>
+            <strong>{{ latest_metrics_date|date:"d.m.Y"|default:"—" }}</strong>
+            <p>Последний день, по которому есть товарные метрики.</p>
         </article>
-    </aside>
-
-    <div class="stack">
-        <article class="panel">
-            <div class="panel-head">
-                <div>
-                    <h2>Срез по товарам</h2>
-                    <p class="muted">Карточки показывают ключевые значения по выбранным датам.</p>
-                </div>
-                <form method="get" class="inline-form filters">
-                    <label class="field inline-field">
-                        <span>Дата РК</span>
-                        <input type="date" name="stats_date" value="{{ stats_date|date:'Y-m-d' }}">
-                    </label>
-                    <label class="field inline-field">
-                        <span>Дата остатков</span>
-                        <input type="date" name="stock_date" value="{{ stock_date|date:'Y-m-d' }}">
-                    </label>
-                    <button class="secondary-button" type="submit">Обновить</button>
-                </form>
-            </div>
-            <div class="card-grid">
-                {% for card in cards %}
-                    <a class="product-card" href="{% url 'monitoring:product_detail' card.product.pk %}?stats_date={{ stats_date|date:'Y-m-d' }}&stock_date={{ stock_date|date:'Y-m-d' }}">
-                        <div class="product-card-head">
-                            <div>
-                                <p class="card-id">WB {{ card.product.nm_id }}</p>
-                                <h3>{{ card.product.title|default:"Без названия" }}</h3>
-                            </div>
-                            <span class="badge soft">{{ card.campaigns_count }} РК</span>
-                        </div>
-                        <dl class="metric-pairs">
-                            <div>
-                                <dt>Артикул продавца</dt>
-                                <dd>{{ card.product.vendor_code|default:"-" }}</dd>
-                            </div>
-                            <div>
-                                <dt>Заказы</dt>
-                                <dd>{{ card.metrics.order_count|default:0|intspace }}</dd>
-                            </div>
-                            <div>
-                                <dt>Сумма заказов</dt>
-                                <dd>{{ card.metrics.order_sum|default:0|money }}</dd>
-                            </div>
-                            <div>
-                                <dt>Расход РК</dt>
-                                <dd>{{ card.total_spend|money }}</dd>
-                            </div>
-                            <div>
-                                <dt>Остатки WB</dt>
-                                <dd>{{ card.stock.total_stock|default:0|intspace }}</dd>
-                            </div>
-                            <div>
-                                <dt>К клиенту</dt>
-                                <dd>{{ card.stock.in_way_to_client|default:0|intspace }}</dd>
-                            </div>
-                        </dl>
-                    </a>
-                {% empty %}
-                    <div class="empty-state">
-                        <strong>Пока нет карточек товаров</strong>
-                        <p>Добавьте первый товар и кампанию слева, затем запустите полную синхронизацию. После этого появятся карточки, история и экспорт книги.</p>
-                    </div>
-                {% endfor %}
-            </div>
+        <article class="status-card neutral">
+            <span>Последняя дата остатков</span>
+            <strong>{{ latest_stock_date|date:"d.m.Y"|default:"—" }}</strong>
+            <p>Последний день, по которому есть складские остатки.</p>
         </article>
-
-        <article class="panel">
-            <div class="panel-head">
-                <div>
-                    <h2>Активные кампании</h2>
-                    <p class="muted">Быстрый контроль групп, состава товаров и даты последней статистики по РК.</p>
-                </div>
-                <a class="ghost-link" href="{% url 'monitoring:campaigns' %}">Управление РК</a>
-            </div>
-            <div class="table-wrap">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Кампания</th>
-                            <th>Группа</th>
-                            <th>Товаров</th>
-                            <th>Последняя дата</th>
-                            <th>Статус</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for campaign in campaign_overview %}
-                            <tr>
-                                <td>
-                                    <a class="table-link" href="{% url 'monitoring:campaign_detail' campaign.pk %}?date_to={{ stats_date|date:'Y-m-d' }}">
-                                        <strong>{{ campaign.name|default:"Без названия" }}</strong>
-                                    </a><br>
-                                    <span class="muted">ID {{ campaign.external_id }}</span>
-                                </td>
-                                <td>{{ campaign.get_monitoring_group_display }}</td>
-                                <td>{{ campaign.products_count|default:0|intspace }}</td>
-                                <td>{{ campaign.latest_stats_date|date:"d.m.Y"|default:"—" }}</td>
-                                <td>{{ campaign.status|default:"—" }}</td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="5">
-                                    <div class="empty-state">
-                                        <strong>Кампании ещё не заведены</strong>
-                                        <p>Добавьте хотя бы одну РК, чтобы видеть её в синхронизации, книге мониторинга и в карточках товаров.</p>
-                                    </div>
-                                </td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+        <article class="status-card {% if running_sync %}warning{% else %}success{% endif %}">
+            <span>Синхронизация</span>
+            <strong>{% if running_sync %}В работе{% else %}Свободно{% endif %}</strong>
+            <p>
+                {% if running_sync %}
+                    {{ running_sync.get_kind_display }}{% if running_sync.target_date %} за {{ running_sync.target_date|date:"d.m.Y" }}{% endif %}
+                {% else %}
+                    Можно запускать новую синхронизацию из таблицы или карточки товара.
+                {% endif %}
+            </p>
+        </article>
+        <article class="status-card neutral">
+            <span>Последний завершённый запуск</span>
+            <strong>{% if latest_sync %}{{ latest_sync.created_at|date:"d.m.Y H:i" }}{% else %}—{% endif %}</strong>
+            <p>
+                {% if latest_sync %}
+                    {{ latest_sync.get_status_display }}{% if latest_sync.message %}: {{ latest_sync.message }}{% endif %}
+                {% else %}
+                    Завершённых запусков пока нет.
+                {% endif %}
+            </p>
+        </article>
+        <article class="status-card neutral">
+            <span>Ежедневный запуск</span>
+            <strong>{{ workspace_settings.sync_hour|stringformat:"02d" }}:{{ workspace_settings.sync_minute|stringformat:"02d" }}</strong>
+            <p>Время регулярной синхронизации по настройкам проекта.</p>
+        </article>
+        <article class="status-card neutral">
+            <span>Период мониторинга</span>
+            <strong>{{ workspace_settings.monitoring_history_days|default:14 }} дн.</strong>
+            <p>Глубина истории, которая по умолчанию используется в таблице.</p>
         </article>
     </div>
 </section>
-{% endblock %}
-
-{% block extra_scripts %}
-    <script src="{% static 'monitoring/sync_status.js' %}" defer></script>
-    <script src="{% static 'monitoring/dashboard_controls.js' %}" defer></script>
 {% endblock %}

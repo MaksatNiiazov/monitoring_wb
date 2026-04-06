@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
 import csv
 import json
 from datetime import date, timedelta
@@ -56,7 +55,13 @@ from .services.monitoring_table import (
 from .services.campaigns import build_campaign_detail_context
 from .services.reporting_hub import build_reports_context
 from .services.table_charts import build_table_timeline_context
-from .services.reports import build_product_report, decimalize, get_default_dates, normalize_warehouse_name, resolve_product_economics
+from .services.reports import (
+    build_product_report,
+    decimalize,
+    get_default_dates,
+    normalize_warehouse_name,
+    resolve_product_economics,
+)
 from .services.sync import (
     get_running_sync,
     mark_stale_running_syncs,
@@ -334,6 +339,51 @@ def _build_stock_popup_payload(
     }
 
 
+def _build_product_stock_popup_payload_for_date(*, product: Product, stock_date: date) -> dict[str, object]:
+    visible_warehouse_names = product.visible_warehouse_names()
+    preferred_warehouse_names = {
+        normalize_warehouse_name(warehouse_name)
+        for warehouse_name in visible_warehouse_names
+    }
+    stock_row = DailyProductStock.objects.filter(
+        product=product,
+        stats_date=stock_date,
+    ).first()
+    warehouse_rows: list[dict[str, object]] = []
+    warehouse_queryset = (
+        DailyWarehouseStock.objects.filter(
+            product=product,
+            stats_date=stock_date,
+        )
+        .select_related("warehouse")
+        .order_by("warehouse__name")
+    )
+    for warehouse_row in warehouse_queryset:
+        warehouse_name = warehouse_row.warehouse.name
+        if preferred_warehouse_names:
+            if normalize_warehouse_name(warehouse_name) not in preferred_warehouse_names:
+                continue
+        elif not warehouse_row.warehouse.is_visible_in_monitoring:
+            continue
+        warehouse_rows.append(
+            {
+                "warehouse": warehouse_name,
+                "stock": int(warehouse_row.stock_count or 0),
+                "to_client": int(warehouse_row.in_way_to_client or 0),
+                "from_client": int(warehouse_row.in_way_from_client or 0),
+                "size_names": list((warehouse_row.raw_payload or {}).get("sizeNames") or []),
+            }
+        )
+
+    return _build_stock_popup_payload(
+        product=product,
+        stock_row=stock_row,
+        warehouse_rows=warehouse_rows,
+        visible_warehouse_names=visible_warehouse_names,
+        preferred_warehouse_names=preferred_warehouse_names,
+    )
+
+
 def _resolve_daily_keyword_stat(
     *,
     product: Product,
@@ -397,7 +447,21 @@ def _safe_next_url(raw: str | None, fallback: str) -> str:
 
 
 def dashboard(request: HttpRequest) -> HttpResponse:
-    return table_workspace(request)
+    settings_obj = get_monitoring_settings()
+    latest_metrics_date = DailyProductMetrics.objects.aggregate(latest=Max("stats_date"))["latest"]
+    latest_stock_date = DailyProductStock.objects.aggregate(latest=Max("stats_date"))["latest"]
+    running_sync = get_running_sync()
+    latest_sync = SyncLog.objects.exclude(status=SyncStatus.RUNNING).first()
+    context = {
+        "workspace_settings": settings_obj,
+        "active_products_count": Product.objects.filter(is_active=True).count(),
+        "active_campaigns_count": Campaign.objects.filter(is_active=True).count(),
+        "latest_metrics_date": latest_metrics_date,
+        "latest_stock_date": latest_stock_date,
+        "running_sync": running_sync,
+        "latest_sync": latest_sync,
+    }
+    return render(request, "monitoring/dashboard.html", context)
 
 
 def table_workspace(request: HttpRequest) -> HttpResponse:
@@ -530,57 +594,6 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         product_id = active_sheet.get("product_id")
         block_span = BLOCK_WIDTH + BLOCK_GAP
         label_anchor_block_index = 0 if block_dates else -1
-        stock_popup_payloads: dict[str, dict[str, object]] = {}
-
-        if active_sheet["kind"] == "product" and product_id and block_dates:
-            product = Product.objects.filter(pk=product_id).first()
-            if product is not None:
-                visible_warehouse_names = product.visible_warehouse_names()
-                preferred_warehouse_names = {
-                    normalize_warehouse_name(warehouse_name)
-                    for warehouse_name in visible_warehouse_names
-                }
-                warehouse_rows_by_date: dict[date, list[dict[str, object]]] = defaultdict(list)
-                product_stock_rows_by_date = {
-                    row.stats_date: row
-                    for row in DailyProductStock.objects.filter(
-                        product_id=product_id,
-                        stats_date__in=block_dates,
-                    )
-                }
-                warehouse_rows = (
-                    DailyWarehouseStock.objects.filter(
-                        product_id=product_id,
-                        stats_date__in=block_dates,
-                    )
-                    .select_related("warehouse")
-                    .order_by("stats_date", "warehouse__name")
-                )
-                for warehouse_row in warehouse_rows:
-                    warehouse_name = warehouse_row.warehouse.name
-                    if preferred_warehouse_names:
-                        if normalize_warehouse_name(warehouse_name) not in preferred_warehouse_names:
-                            continue
-                    elif not warehouse_row.warehouse.is_visible_in_monitoring:
-                        continue
-                    warehouse_rows_by_date[warehouse_row.stats_date].append(
-                        {
-                            "warehouse": warehouse_name,
-                            "stock": int(warehouse_row.stock_count or 0),
-                            "to_client": int(warehouse_row.in_way_to_client or 0),
-                            "from_client": int(warehouse_row.in_way_from_client or 0),
-                            "size_names": list((warehouse_row.raw_payload or {}).get("sizeNames") or []),
-                        }
-                    )
-                for stock_date in block_dates:
-                    stock_popup_payloads[stock_date.isoformat()] = _build_stock_popup_payload(
-                        product=product,
-                        stock_row=product_stock_rows_by_date.get(stock_date),
-                        warehouse_rows=warehouse_rows_by_date.get(stock_date, []),
-                        visible_warehouse_names=visible_warehouse_names,
-                        preferred_warehouse_names=preferred_warehouse_names,
-                    )
-
         prepared_rows: list[dict] = []
         for row_index, row in enumerate(active_sheet["rows"]):
             prepared_cells: list[dict] = []
@@ -668,27 +681,16 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                             if in_block_col < BLOCK_WIDTH:
                                 colspan = max(1, BLOCK_WIDTH - in_block_col)
                         elif control_type == "stock_popup":
-                            popup_payload = stock_popup_payloads.get(
-                                note_date.isoformat(),
-                                {
-                                    "mode": "flat",
-                                    "title": "Остатки по складам",
-                                    "summary_text": "Нет данных по складам на эту дату",
-                                    "payload_json": "{\"mode\":\"flat\",\"columns\":[],\"rows\":[]}",
-                                    "total": 0,
-                                    "has_rows": False,
-                                },
-                            )
                             control = {
                                 "type": "stock_popup",
                                 "stock_date": note_date.isoformat(),
                                 "stock_date_label": note_date.strftime("%d.%m.%Y"),
-                                "mode": str(popup_payload.get("mode") or "flat"),
-                                "title": str(popup_payload.get("title") or "Остатки по складам"),
-                                "summary_text": str(popup_payload.get("summary_text") or ""),
-                                "payload_json": str(popup_payload.get("payload_json") or "{\"mode\":\"flat\",\"columns\":[],\"rows\":[]}"),
-                                "total": int(popup_payload.get("total") or 0),
-                                "has_rows": bool(popup_payload.get("has_rows")),
+                                "title": "Остатки по складам",
+                                "summary_text": str(value or "Нет данных по складам на эту дату"),
+                                "payload_url": (
+                                    f"{reverse('monitoring:table_stock_popup_payload')}"
+                                    f"?product_id={product_id}&stats_date={note_date.isoformat()}"
+                                ),
                             }
                             if in_block_col < BLOCK_WIDTH:
                                 colspan = max(1, BLOCK_WIDTH - in_block_col)
@@ -701,7 +703,6 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                     {
                         "value": value,
                         "row_index": row_number,
-                        "col_index": column_index,
                         "block_index": block_index,
                         "in_block_col": in_block_col,
                         "is_gap_col": is_gap_col,
@@ -754,6 +755,27 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         "body_class": "is-table-fullscreen" if getattr(workspace_settings, "table_default_fullscreen_mode", False) else "",
     }
     return render(request, "monitoring/table_workspace.html", context)
+
+
+def table_stock_popup_payload(request: HttpRequest) -> JsonResponse:
+    product_raw = (request.GET.get("product_id") or "").strip()
+    stats_date = parse_date((request.GET.get("stats_date") or "").strip())
+    if not product_raw.isdigit() or stats_date is None:
+        return JsonResponse({"ok": False, "detail": "Некорректные параметры."}, status=400)
+
+    product = get_object_or_404(Product, pk=int(product_raw))
+    payload = _build_product_stock_popup_payload_for_date(product=product, stock_date=stats_date)
+    return JsonResponse(
+        {
+            "ok": True,
+            "title": str(payload.get("title") or "Остатки по складам"),
+            "date_label": stats_date.strftime("%d.%m.%Y"),
+            "total": int(payload.get("total") or 0),
+            "payload": json.loads(
+                str(payload.get("payload_json") or "{\"mode\":\"flat\",\"columns\":[],\"rows\":[]}")
+            ),
+        }
+    )
 
 
 def reports(request: HttpRequest) -> HttpResponse:

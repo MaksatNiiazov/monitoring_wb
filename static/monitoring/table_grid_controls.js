@@ -72,6 +72,11 @@
         }
 
         const ROW = {
+            SPEND: 5,
+            IMPRESSIONS: 6,
+            CTR: 7,
+            CPM: 8,
+            CPC: 9,
             CLICKS: 10,
             CARTS: 11,
             CONVERSION_CART: 12,
@@ -90,7 +95,7 @@
             SELLER_PRICE: 36,
         };
         const COL = {
-            OVERALL: 6,
+            OVERALL: 4,
             INPUT_MAIN: 1,
             SELLER_PRICE: 5,
             STOCK: 4,
@@ -137,43 +142,51 @@
         };
 
         const recalcBlock = (blockIndex) => {
+            const impressions = readNumber(ROW.IMPRESSIONS, blockIndex, COL.OVERALL);
             const clicks = readNumber(ROW.CLICKS, blockIndex, COL.OVERALL);
             const carts = readNumber(ROW.CARTS, blockIndex, COL.OVERALL);
             const orders = readNumber(ROW.ORDERS, blockIndex, COL.OVERALL);
             const orderSum = readNumber(ROW.ORDER_SUM, blockIndex, COL.OVERALL);
-            const spend = readNumber(5, blockIndex, COL.OVERALL);
+            const spend = readNumber(ROW.SPEND, blockIndex, COL.OVERALL);
 
-            const conversionCart = clicks ? (carts || 0) * 100 / clicks : 0;
-            setCellText(ROW.CONVERSION_CART, blockIndex, COL.OVERALL, formatPercentValue(conversionCart));
+            setCellText(ROW.CTR, blockIndex, COL.OVERALL, "-");
+            setCellText(ROW.CPM, blockIndex, COL.OVERALL, "-");
 
-            const conversionOrder = carts ? (orders || 0) * 100 / carts : 0;
-            setCellText(ROW.CONVERSION_ORDER, blockIndex, COL.OVERALL, formatPercentValue(conversionOrder));
+            const cpc = clicks ? (spend || 0) / clicks : null;
+            setCellText(ROW.CPC, blockIndex, COL.OVERALL, Number.isFinite(cpc) ? formatDecimalValue(cpc) : "-");
+
+            const conversionCart = clicks ? (carts || 0) * 100 / clicks : null;
+            setCellText(ROW.CONVERSION_CART, blockIndex, COL.OVERALL, Number.isFinite(conversionCart) ? formatPercentValue(conversionCart) : "-");
+
+            const conversionOrder = carts ? (orders || 0) * 100 / carts : null;
+            setCellText(ROW.CONVERSION_ORDER, blockIndex, COL.OVERALL, Number.isFinite(conversionOrder) ? formatPercentValue(conversionOrder) : "-");
 
             const buyoutPercent = readNumber(ROW.BUYOUT_PERCENT, blockIndex, COL.INPUT_MAIN) || 0;
             const buyoutFraction = Math.abs(buyoutPercent) > 1 ? buyoutPercent / 100 : buyoutPercent;
-            const buyouts = orderSum && buyoutFraction ? orderSum * buyoutFraction : 0;
-            setCellText(ROW.BUYOUTS, blockIndex, COL.OVERALL, formatDecimalValue(buyouts));
+            const buyouts = orderSum && buyoutFraction ? orderSum * buyoutFraction : null;
+            setCellText(ROW.BUYOUTS, blockIndex, COL.OVERALL, Number.isFinite(buyouts) ? formatDecimalValue(buyouts) : "-");
 
-            const drrSalesRatio = buyouts ? (spend || 0) / buyouts : 0;
-            setCellText(ROW.DRR_SALES, blockIndex, COL.OVERALL, formatPercentValue(drrSalesRatio * 100));
+            const drrSalesRatio = buyouts ? (spend || 0) / buyouts : null;
+            setCellText(ROW.DRR_SALES, blockIndex, COL.OVERALL, Number.isFinite(drrSalesRatio) ? formatPercentValue(drrSalesRatio * 100) : "-");
 
             const sellerPrice = readNumber(ROW.SELLER_PRICE, blockIndex, COL.SELLER_PRICE) || 0;
             const unitCost = readNumber(ROW.UNIT_COST, blockIndex, COL.INPUT_MAIN) || 0;
             const logistics = readNumber(ROW.LOGISTICS, blockIndex, COL.INPUT_MAIN) || 0;
             const totalOrders = orders || 0;
 
-            let profit = 0;
+            let profit = null;
             if (sellerPrice && buyoutFraction > 0) {
+                const drrRatioForProfit = Number.isFinite(drrSalesRatio) ? drrSalesRatio : 0;
                 const logisticsAdjustment = logistics / buyoutFraction - 50;
                 const margin =
                     sellerPrice -
                     unitCost -
-                    (sellerPrice * drrSalesRatio) / 100 -
+                    (sellerPrice * drrRatioForProfit) -
                     sellerPrice * 0.25 -
                     logisticsAdjustment;
                 profit = margin * totalOrders * buyoutFraction;
             }
-            setCellText(ROW.PROFIT, blockIndex, COL.INPUT_MAIN, formatDecimalValue(profit));
+            setCellText(ROW.PROFIT, blockIndex, COL.INPUT_MAIN, Number.isFinite(profit) ? formatDecimalValue(profit) : "-");
         };
 
         const recalcAll = () => {
@@ -553,52 +566,115 @@
             headNode.appendChild(row);
         };
 
-        const hydrateStocksModal = (trigger) => {
+        let stocksRequestToken = 0;
+
+        const renderStocksModalMessage = (message) => {
+            const stocksModalHead = stocksModal ? stocksModal.querySelector("[data-stocks-modal-head]") : null;
+            if (!stocksModalHead || !stocksModalBody) {
+                return;
+            }
+            stocksModalHead.innerHTML = "";
+            stocksModalBody.innerHTML = "";
+            const row = document.createElement("tr");
+            const cell = document.createElement("td");
+            cell.className = "table-stocks-modal-empty";
+            cell.textContent = message;
+            row.appendChild(cell);
+            stocksModalBody.appendChild(row);
+        };
+
+        const loadStocksModalPayload = async (trigger) => {
+            const stockUrl = String(trigger.getAttribute("data-stock-url") || "").trim();
+            if (!stockUrl) {
+                return {
+                    date_label: String(trigger.getAttribute("data-stock-date") || "").trim(),
+                    total: 0,
+                    payload: parseStockPayload(""),
+                };
+            }
+            const response = await fetch(stockUrl, {
+                headers: { Accept: "application/json" },
+                cache: "no-store",
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.ok || !data.payload) {
+                const detail = data && data.detail ? data.detail : `HTTP ${response.status}`;
+                throw new Error(detail);
+            }
+            return {
+                date_label: String(data.date_label || trigger.getAttribute("data-stock-date") || "").trim(),
+                total: Number.parseInt(String(data.total || "0"), 10),
+                payload: parseStockPayload(JSON.stringify(data.payload)),
+            };
+        };
+
+        const hydrateStocksModal = async (trigger) => {
             const stocksModalHead = stocksModal ? stocksModal.querySelector("[data-stocks-modal-head]") : null;
             if (!stocksModal || !stocksModalMeta || !stocksModalBody || !stocksModalHead || !trigger) {
                 return;
             }
-            const payload = parseStockPayload(trigger.getAttribute("data-stock-payload") || "");
             const dateLabel = String(trigger.getAttribute("data-stock-date") || "").trim();
-            const totalValue = Number.parseInt(String(trigger.getAttribute("data-stock-total") || "0"), 10);
-            const totalLabel = Number.isFinite(totalValue) ? totalValue.toLocaleString("ru-RU") : "0";
-            stocksModalMeta.textContent = dateLabel
-                ? `Срез на ${dateLabel}. Итого по складам: ${totalLabel} шт.`
-                : `Итого по складам: ${totalLabel} шт.`;
-            stocksModalBody.innerHTML = "";
-            renderStocksModalHead(stocksModalHead, payload.columns);
+            stocksModalMeta.textContent = dateLabel ? `Срез на ${dateLabel}. Загружаем данные...` : "Загружаем данные...";
+            renderStocksModalMessage("Загружаем данные по складам...");
 
-            if (!payload.rows.length) {
-                const emptyRow = document.createElement("tr");
-                const emptyCell = document.createElement("td");
-                emptyCell.colSpan = payload.columns.length;
-                emptyCell.className = "table-stocks-modal-empty";
-                emptyCell.textContent = payload.empty_message;
-                emptyRow.appendChild(emptyCell);
-                stocksModalBody.appendChild(emptyRow);
-                return;
-            }
+            const requestToken = stocksRequestToken + 1;
+            stocksRequestToken = requestToken;
 
-            payload.rows.forEach((row) => {
-                const tableRow = document.createElement("tr");
-                payload.columns.forEach((column) => {
-                    const cell = document.createElement("td");
-                    const rawValue = row[column.id];
-                    if (column.numeric) {
-                        const numericValue = Number.parseInt(String(rawValue ?? ""), 10);
-                        cell.className = "is-numeric";
-                        if (Number.isFinite(numericValue) && (!column.blank_zero || numericValue !== 0)) {
-                            cell.textContent = numericValue.toLocaleString("ru-RU");
+            try {
+                const payloadResult = await loadStocksModalPayload(trigger);
+                if (requestToken !== stocksRequestToken) {
+                    return;
+                }
+                const payload = payloadResult.payload;
+                const totalLabel = Number.isFinite(payloadResult.total)
+                    ? payloadResult.total.toLocaleString("ru-RU")
+                    : "0";
+                stocksModalMeta.textContent = payloadResult.date_label
+                    ? `Срез на ${payloadResult.date_label}. Итого по складам: ${totalLabel} шт.`
+                    : `Итого по складам: ${totalLabel} шт.`;
+                stocksModalBody.innerHTML = "";
+                renderStocksModalHead(stocksModalHead, payload.columns);
+
+                if (!payload.rows.length) {
+                    const emptyRow = document.createElement("tr");
+                    const emptyCell = document.createElement("td");
+                    emptyCell.colSpan = payload.columns.length;
+                    emptyCell.className = "table-stocks-modal-empty";
+                    emptyCell.textContent = payload.empty_message;
+                    emptyRow.appendChild(emptyCell);
+                    stocksModalBody.appendChild(emptyRow);
+                    return;
+                }
+
+                payload.rows.forEach((row) => {
+                    const tableRow = document.createElement("tr");
+                    payload.columns.forEach((column) => {
+                        const cell = document.createElement("td");
+                        const rawValue = row[column.id];
+                        if (column.numeric) {
+                            const numericValue = Number.parseInt(String(rawValue ?? ""), 10);
+                            cell.className = "is-numeric";
+                            if (Number.isFinite(numericValue) && (!column.blank_zero || numericValue !== 0)) {
+                                cell.textContent = numericValue.toLocaleString("ru-RU");
+                            } else {
+                                cell.textContent = "";
+                            }
                         } else {
-                            cell.textContent = "";
+                            cell.textContent = String(rawValue ?? "").trim();
                         }
-                    } else {
-                        cell.textContent = String(rawValue ?? "").trim();
-                    }
-                    tableRow.appendChild(cell);
+                        tableRow.appendChild(cell);
+                    });
+                    stocksModalBody.appendChild(tableRow);
                 });
-                stocksModalBody.appendChild(tableRow);
-            });
+            } catch (error) {
+                if (requestToken !== stocksRequestToken) {
+                    return;
+                }
+                stocksModalMeta.textContent = dateLabel
+                    ? `Срез на ${dateLabel}. Не удалось загрузить данные.`
+                    : "Не удалось загрузить данные по складам.";
+                renderStocksModalMessage("Не удалось загрузить данные по складам.");
+            }
         };
 
         const openModal = (modal, trigger) => {
@@ -631,9 +707,6 @@
         document.addEventListener("click", (event) => {
             const openTrigger = event.target.closest("[data-modal-open]");
             if (openTrigger) {
-                if (openTrigger.matches("[data-stock-popup-button]")) {
-                    hydrateStocksModal(openTrigger);
-                }
                 const targetId = openTrigger.dataset.modalOpen;
                 const modal = targetId ? document.getElementById(targetId) : null;
                 if (!modal || !modal.matches("[data-table-modal]")) {
@@ -641,6 +714,9 @@
                 }
                 event.preventDefault();
                 openModal(modal, openTrigger);
+                if (openTrigger.matches("[data-stock-popup-button]")) {
+                    void hydrateStocksModal(openTrigger);
+                }
                 return;
             }
 

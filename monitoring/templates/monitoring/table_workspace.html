@@ -127,7 +127,6 @@
                                 <td
                                     {% if cell.colspan and cell.colspan > 1 %}colspan="{{ cell.colspan }}"{% endif %}
                                     data-row="{{ cell.row_index }}"
-                                    data-col="{{ cell.col_index }}"
                                     data-block="{{ cell.block_index }}"
                                     data-in-block-col="{{ cell.in_block_col }}"
                                     class="{% if cell.is_gap_col %}is-gap-col{% endif %}{% if cell.is_block_start %} is-block-start{% endif %}{% if cell.is_spacer_col %} is-spacer-col{% endif %}{% if cell.is_label_col %} is-label-col{% endif %}{% if cell.is_repeat_label_col %} is-repeat-label-col{% endif %}{% if cell.is_keyword_label_col %} is-keyword-label-col{% endif %}{% if cell.control %} is-control-cell{% endif %}{% if cell.is_comment_span %} is-comment-span{% endif %}{% if cell.is_stock_span %} is-stock-span{% endif %}{% if cell.is_input_span %} is-input-span{% endif %}{% if cell.is_centered_value_span %} is-centered-value-span{% endif %}"
@@ -139,8 +138,7 @@
                                             data-stock-popup-button
                                             data-modal-open="table-modal-stocks"
                                             data-stock-date="{{ cell.control.stock_date_label }}"
-                                            data-stock-total="{{ cell.control.total }}"
-                                            data-stock-payload="{{ cell.control.payload_json|escape }}"
+                                            data-stock-url="{{ cell.control.payload_url }}"
                                         >
                                             <span class="grid-stock-trigger-title">{{ cell.control.title }}</span>
                                             <span class="grid-stock-trigger-meta">

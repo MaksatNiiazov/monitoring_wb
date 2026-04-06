@@ -157,6 +157,19 @@ def add_metric_cells(*cells: MetricCell) -> MetricCell:
     return combined
 
 
+def has_metric_cell_data(cell: MetricCell) -> bool:
+    return any(
+        [
+            cell.impressions,
+            cell.clicks,
+            cell.carts,
+            cell.orders,
+            decimalize(cell.order_sum),
+            decimalize(cell.spend),
+        ]
+    )
+
+
 def metric_cell_from_search_clusters(cluster_rows: list[DailyCampaignSearchClusterStat]) -> MetricCell:
     cell = MetricCell()
     for row in cluster_rows:
@@ -582,6 +595,16 @@ def build_product_report(
         "manual_catalog": cells.get((CampaignMonitoringGroup.MANUAL_CATALOG, CampaignZone.CATALOG), MetricCell()),
     }
 
+    table_search = clone_metric_cell(blocks["unified_search"])
+    unified_total_for_table = clone_metric_cell(group_totals.get(CampaignMonitoringGroup.UNIFIED, MetricCell()))
+    table_shelves = subtract_metric_cells(unified_total_for_table, table_search)
+    table_manual = add_metric_cells(
+        blocks["manual_search"],
+        blocks["manual_shelves"],
+        blocks["manual_catalog"],
+    )
+    table_ad_total = clone_metric_cell(total_ad)
+
     overall_open = metrics.open_count if metrics else 0
     overall_carts = metrics.add_to_cart_count if metrics else 0
     overall_orders = metrics.order_count if metrics else 0
@@ -592,6 +615,12 @@ def build_product_report(
         "cart_count": max(overall_carts - total_ad.carts, 0),
         "order_count": max(overall_orders - total_ad.orders, 0),
         "order_sum": quantize_money(max(overall_sum - total_ad.order_sum, ZERO)),
+    }
+    table_organic = {
+        "open_count": max(overall_open - table_search.clicks - table_shelves.clicks, 0),
+        "cart_count": max(overall_carts - table_search.carts - table_shelves.carts - table_manual.carts, 0),
+        "order_count": max(overall_orders - table_search.orders - table_shelves.orders, 0),
+        "order_sum": quantize_money(max(overall_sum - table_search.order_sum - table_shelves.order_sum, ZERO)),
     }
     traffic_cards = [
         {
@@ -757,6 +786,13 @@ def build_product_report(
         "blocks": blocks,
         "total_ad": total_ad,
         "organic": organic,
+        "table_blocks": {
+            "search": table_search,
+            "shelves": table_shelves,
+            "manual": table_manual,
+            "ad_total": table_ad_total,
+        },
+        "table_organic": table_organic,
         "traffic_cards": traffic_cards,
         "insights": insights,
         "avg_orders_per_day": avg_orders_per_day.quantize(Decimal("0.01")) if avg_orders_per_day else ZERO,

@@ -173,9 +173,9 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         rows = exporter_rows(report)
-        self.assertEqual(rows[10][6], "50")
-        self.assertEqual(rows[12][6], "10")
-        self.assertEqual(rows[14][6], "10000")
+        self.assertEqual(rows[10][4], "50")
+        self.assertEqual(rows[12][4], "10")
+        self.assertEqual(rows[14][4], "10000")
 
     def test_exporter_normalizes_buyout_percent_when_saved_as_fraction(self) -> None:
         ProductEconomicsVersion.objects.filter(
@@ -189,7 +189,57 @@ class ReportingTests(TestCase):
         )
         rows = exporter_rows(report)
         self.assertEqual(rows[21][1], "24%")
-        self.assertEqual(rows[15][6], "2400")
+        self.assertEqual(rows[15][4], "2400")
+
+    def test_exporter_populates_overall_ctr_cpm_and_cpc(self) -> None:
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        rows = exporter_rows(report)
+        self.assertEqual(rows[6][4], "-")
+        self.assertEqual(rows[7][4], "-")
+        self.assertEqual(rows[8][4], "20")
+
+    def test_exporter_profit_uses_drr_sales_fraction(self) -> None:
+        DailyProductNote.objects.create(
+            product=self.product,
+            note_date=date(2026, 3, 16),
+            seller_price=Decimal("5000.00"),
+        )
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        rows = exporter_rows(report)
+        self.assertEqual(rows[20][1], "-7840")
+
+    def test_exporter_uses_dash_for_unavailable_derived_metrics(self) -> None:
+        DailyProductMetrics.objects.filter(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+        ).update(open_count=0, add_to_cart_count=0, order_count=0, order_sum=Decimal("0.00"))
+        DailyCampaignProductStat.objects.filter(
+            campaign=self.campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.SEARCH,
+        ).update(clicks=0, add_to_cart_count=0, order_count=0, order_sum=Decimal("0.00"))
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        rows = exporter_rows(report)
+        self.assertEqual(rows[8][1], "-")
+        self.assertEqual(rows[11][4], "-")
+        self.assertEqual(rows[13][4], "-")
+        self.assertEqual(rows[16][4], "-")
+        self.assertEqual(rows[17][4], "-")
+        self.assertEqual(rows[18][4], "-")
+        self.assertEqual(rows[19][4], "-")
 
     def test_dashboard_context_builds_aggregated_totals(self) -> None:
         context = build_dashboard_context(stats_date=date(2026, 3, 16), stock_date=date(2026, 3, 17))
@@ -329,11 +379,46 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         block = build_day_block(report, start_row=1, start_col=1)
-        self.assertEqual(block[12][6], 10)
-        self.assertEqual(block[12][7], "=G13-SUM(B13:F13)")
+        self.assertEqual(block[12][4], 10)
+        self.assertEqual(block[12][5], "=E13-SUM(B13:C13)")
         self.assertTrue(block[20][1].startswith("=IFERROR(IF("))
         self.assertIn("*25/100", block[20][1])
-        self.assertEqual(block[20][2:], ["", "", "", "", "", ""])
+        self.assertEqual(block[20][2:], ["", "", "", ""])
+
+    def test_monitoring_day_block_populates_overall_ctr_cpm_and_cpc_formulas(self) -> None:
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        block = build_day_block(report, start_row=1, start_col=1)
+        self.assertEqual(block[6][4], "-")
+        self.assertEqual(block[7][4], "-")
+        self.assertEqual(block[8][4], '=IFERROR(IF(OR(SUM(B10:D10)="",SUM(B10:D10)=0),"-",E5/SUM(B10:D10)),"-")')
+
+    def test_monitoring_day_block_profit_formula_uses_drr_sales_fraction(self) -> None:
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        block = build_day_block(report, start_row=1, start_col=1)
+        self.assertNotIn("/100))", block[20][1])
+        self.assertIn("*E20)", block[20][1])
+
+    def test_monitoring_day_block_uses_safe_divide_formulas_for_derived_metrics(self) -> None:
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        block = build_day_block(report, start_row=1, start_col=1)
+        self.assertTrue(block[11][4].startswith("=IFERROR(IF("))
+        self.assertTrue(block[13][4].startswith("=IFERROR(IF("))
+        self.assertTrue(block[16][1].startswith("=IFERROR(IF("))
+        self.assertTrue(block[17][1].startswith("=IFERROR(IF("))
+        self.assertTrue(block[18][1].startswith("=IFERROR(IF("))
+        self.assertTrue(block[19][1].startswith("=IFERROR(IF("))
 
     def test_monitoring_day_block_traffic_share_matches_template_logic(self) -> None:
         manual_search_campaign = Campaign.objects.create(
@@ -406,11 +491,11 @@ class ReportingTests(TestCase):
         block = build_day_block(report, start_row=1, start_col=1)
         traffic_row = block[3]
 
-        self.assertAlmostEqual(traffic_row[1], 0.6667, places=4)
-        self.assertAlmostEqual(traffic_row[2], 0.3333, places=4)
+        self.assertAlmostEqual(traffic_row[1], 0.2222, places=4)
+        self.assertAlmostEqual(traffic_row[2], 0.7778, places=4)
         self.assertEqual(traffic_row[3], "")
-        self.assertEqual(traffic_row[4], "")
-        self.assertEqual(traffic_row[5], "")
+        self.assertEqual(traffic_row[4], 1.0)
+        self.assertEqual(traffic_row[5], "-")
 
     def test_exporter_traffic_share_matches_template_logic(self) -> None:
         manual_search_campaign = Campaign.objects.create(
@@ -483,11 +568,11 @@ class ReportingTests(TestCase):
         rows = exporter_rows(report)
         traffic_row = rows[3]
 
-        self.assertEqual(traffic_row[1], "66,67%")
-        self.assertEqual(traffic_row[2], "33,33%")
+        self.assertEqual(traffic_row[1], "22,22%")
+        self.assertEqual(traffic_row[2], "77,78%")
         self.assertEqual(traffic_row[3], "")
-        self.assertEqual(traffic_row[4], "")
-        self.assertEqual(traffic_row[5], "")
+        self.assertEqual(traffic_row[4], "100%")
+        self.assertEqual(traffic_row[5], "-")
 
     def test_monitoring_day_block_offsets_organic_formula_for_later_blocks(self) -> None:
         report = build_product_report(
@@ -496,8 +581,8 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         block = build_day_block(report, start_row=1, start_col=11)
-        self.assertEqual(block[9][7], "=Q10-SUM(L10:P10)")
-        self.assertEqual(block[12][7], "=Q13-SUM(L13:P13)")
+        self.assertEqual(block[9][5], "=O10-SUM(L10:M10)")
+        self.assertEqual(block[12][5], "=O13-SUM(L13:M13)")
 
     def test_product_report_ignores_stats_from_unlinked_campaigns(self) -> None:
         other_campaign = Campaign.objects.create(
@@ -1545,6 +1630,10 @@ class PageRenderTests(TestCase):
         self.assertEqual(products_page.status_code, 200)
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(reports.status_code, 200)
+        self.assertContains(dashboard, "Разделы")
+        self.assertContains(dashboard, 'href="/table/"')
+        self.assertContains(dashboard, 'href="/products/"')
+        self.assertNotContains(dashboard, "monitoring-grid-table")
         self.assertContains(products_page, "Список товаров")
         self.assertContains(detail, 'data-detail-tab-trigger="overview"')
         self.assertContains(reports, 'data-reports-tab-trigger="overview"')
@@ -1590,17 +1679,30 @@ class PageRenderTests(TestCase):
         self.assertContains(response, 'data-note-control="input"')
         self.assertContains(response, 'data-note-control="text"')
         self.assertContains(response, "is-comment-span")
-        self.assertContains(response, 'colspan="7"')
+        self.assertContains(response, 'colspan="5"')
         self.assertContains(response, "is-stock-span")
         self.assertContains(response, "data-stock-popup-button")
-        self.assertContains(response, "data-stock-payload")
-        self.assertNotContains(response, "\\u0022mode\\u0022")
+        self.assertContains(response, "data-stock-url")
+        self.assertNotContains(response, "data-stock-payload")
         self.assertContains(response, 'id="table-modal-stocks"')
         self.assertContains(response, 'data-inline-status')
         self.assertNotContains(response, "data-table-row-search")
         self.assertContains(response, 'data-day-step="-1"')
         self.assertContains(response, 'data-day-step="1"')
         self.assertContains(response, 'data-default-day-index="12"')
+
+    def test_table_stock_popup_payload_endpoint_returns_json(self) -> None:
+        seed_demo_dataset()
+        product = Product.objects.filter(is_active=True).first()
+        response = self.client.get(
+            f"/table/stocks-popup/?product_id={product.pk}&stats_date=2026-03-18"
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["date_label"], "18.03.2026")
+        self.assertIn("payload", payload)
+        self.assertIn("columns", payload["payload"])
 
     def test_core_pages_render_utf8_without_mojibake(self) -> None:
         seed_demo_dataset()
