@@ -1,0 +1,485 @@
+{% extends "base.html" %}
+{% load static monitoring_extras %}
+
+{% block title %}{{ campaign.name|default:"РК без названия" }} | Мониторинг WB{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="Навигация">
+    <ol>
+        <li><a href="{% url 'monitoring:table' %}">Workspace</a></li>
+        <li><a href="{% url 'monitoring:campaigns' %}">Рекламные кампании</a></li>
+        <li aria-current="page">{{ campaign.external_id }}</li>
+    </ol>
+</nav>
+
+<section class="hero reports-hero">
+    <div class="hero-main">
+        <p class="eyebrow">Рекламная кампания WB {{ campaign.external_id }}</p>
+        <h1>{{ campaign.name|default:"Без названия" }}</h1>
+        <p class="hero-copy">
+            Группа: {{ campaign.get_monitoring_group_display }} · Статус WB: {{ campaign.status|default:"—" }} ·
+            Тип ставки: {{ campaign.bid_type|default:"—" }}
+        </p>
+        <div class="hero-stats">
+            <article class="hero-stat">
+                <span>Расход</span>
+                <strong>{{ total.spend|money }}</strong>
+            </article>
+            <article class="hero-stat">
+                <span>Заказы</span>
+                <strong>{{ total.orders|intspace }}</strong>
+            </article>
+            <article class="hero-stat">
+                <span>Сумма заказов</span>
+                <strong>{{ total.order_sum|money }}</strong>
+            </article>
+            <article class="hero-stat">
+                <span>Товаров в РК</span>
+                <strong>{{ linked_products|length }}</strong>
+            </article>
+        </div>
+    </div>
+    <div class="hero-badges hero-actions">
+        <span class="badge">Период: {{ date_from|date:"d.m.Y" }} — {{ date_to|date:"d.m.Y" }}</span>
+        <span class="badge soft">Последняя статистика: {{ latest_stats_date|date:"d.m.Y"|default:"—" }}</span>
+        {% if campaign.is_active %}
+            <span class="status-chip success">В мониторинге</span>
+        {% else %}
+            <span class="status-chip neutral">Отключена</span>
+        {% endif %}
+        <a class="secondary-button" href="{% url 'monitoring:campaigns' %}">К списку РК</a>
+    </div>
+</section>
+
+<section class="ops-strip">
+    <article class="ops-card">
+        <span>ДРР</span>
+        <strong>{{ total_drr|percent }}</strong>
+        <p>Отношение расхода к сумме заказов по выбранному периоду.</p>
+    </article>
+    <article class="ops-card">
+        <span>Средний расход в день</span>
+        <strong>{{ avg_daily_spend|money }}</strong>
+        <p>Помогает быстро понять текущий темп открутки кампании.</p>
+    </article>
+    <article class="ops-card">
+        <span>Search-кластеры</span>
+        <strong>{{ search_cluster_share|percent }}</strong>
+        <p>Доля поисковых кластеров внутри общего поискового трафика кампании.</p>
+    </article>
+</section>
+
+{% if alerts %}
+    <section class="alert-stack">
+        {% for alert in alerts %}
+            <article class="alert-card {{ alert.tone }}">
+                <strong>{{ alert.title }}</strong>
+                <p>{{ alert.detail }}</p>
+            </article>
+        {% endfor %}
+    </section>
+{% endif %}
+
+<section
+    class="layout-grid detail-grid detail-tabs-shell"
+    data-detail-tabs-shell
+    data-active-tab="overview"
+    data-tabs-storage-key="wb-campaign-detail-active-tab"
+>
+    <nav class="segmented-control detail-tabs-nav" role="tablist" aria-label="Разделы карточки кампании">
+        <button type="button" class="segmented-button is-active" role="tab" aria-selected="true" data-detail-tab-trigger="overview">Обзор</button>
+        <button type="button" class="segmented-button" role="tab" aria-selected="false" data-detail-tab-trigger="products">Товары</button>
+        <button type="button" class="segmented-button" role="tab" aria-selected="false" data-detail-tab-trigger="zones">Зоны</button>
+        <button type="button" class="segmented-button" role="tab" aria-selected="false" data-detail-tab-trigger="settings">Настройки</button>
+    </nav>
+
+    <div class="stack detail-stack-main" data-detail-stack="main">
+        <article class="panel panel-spacious detail-tab-panel" data-detail-tab-panel="overview">
+            <div class="panel-head">
+                <div>
+                    <h2>Период и сводка</h2>
+                    <p class="muted">Выберите окно анализа и сразу проверьте основные метрики кампании.</p>
+                </div>
+                <form method="get" class="inline-form filters">
+                    <label class="field inline-field">
+                        <span>Дата с</span>
+                        <input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}">
+                    </label>
+                    <label class="field inline-field">
+                        <span>Дата по</span>
+                        <input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}">
+                    </label>
+                    <button class="secondary-button" type="submit">Показать</button>
+                </form>
+            </div>
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <span>Показы</span>
+                    <strong>{{ total.impressions|intspace }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Клики</span>
+                    <strong>{{ total.clicks|intspace }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>CTR</span>
+                    <strong>{{ total.ctr|percent }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>CPC</span>
+                    <strong>{{ total.cpc|money }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>CPO</span>
+                    <strong>{{ total.order_cost|money }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Дней без статистики</span>
+                    <strong>{{ days_without_stats|intspace }}</strong>
+                </div>
+            </div>
+        </article>
+
+        <article class="panel panel-spacious chart-panel detail-tab-panel" data-detail-tab-panel="overview">
+            <div class="panel-head">
+                <div>
+                    <h2>Динамика кампании</h2>
+                    <p class="muted">Расход, заказы, выручка и эффективность по дням за выбранный период.</p>
+                </div>
+            </div>
+            <div class="chart-widget" data-chart-script="campaign-timeline-chart">
+                <div class="chart-toolbar">
+                    <div class="segmented-control" data-chart-group="metric">
+                        <button type="button" class="segmented-button is-active" data-chart-metric="spend">Расход</button>
+                        <button type="button" class="segmented-button" data-chart-metric="orders">Заказы</button>
+                        <button type="button" class="segmented-button" data-chart-metric="revenue">Сумма заказов</button>
+                        <button type="button" class="segmented-button" data-chart-metric="impressions">Показы</button>
+                        <button type="button" class="segmented-button" data-chart-metric="clicks">Клики</button>
+                        <button type="button" class="segmented-button" data-chart-metric="ctr">CTR</button>
+                        <button type="button" class="segmented-button" data-chart-metric="drr">ДРР</button>
+                    </div>
+                    <div class="segmented-control" data-chart-group="type">
+                        <button type="button" class="segmented-button is-active" data-chart-type="line">Линия</button>
+                        <button type="button" class="segmented-button" data-chart-type="bar">Столбцы</button>
+                    </div>
+                </div>
+                <div class="chart-stage" aria-live="polite"></div>
+                <div class="chart-caption"></div>
+                <div class="chart-legend"></div>
+            </div>
+        </article>
+
+        <article class="panel panel-spacious detail-tab-panel" data-detail-tab-panel="overview">
+            <div class="panel-head">
+                <div>
+                    <h2>История по дням</h2>
+                    <p class="muted">Если день пустой, значит по нему ещё не было рекламного среза или данные не загрузились.</p>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Показы</th>
+                            <th>Клики</th>
+                            <th>Заказы</th>
+                            <th>Расход</th>
+                            <th>Сумма заказов</th>
+                            <th>CTR</th>
+                            <th>ДРР</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in daily_rows %}
+                            <tr>
+                                <td>{{ row.date|date:"d.m.Y" }}</td>
+                                <td>{{ row.cell.impressions|intspace }}</td>
+                                <td>{{ row.cell.clicks|intspace }}</td>
+                                <td>{{ row.cell.orders|intspace }}</td>
+                                <td>{{ row.cell.spend|money }}</td>
+                                <td>{{ row.cell.order_sum|money }}</td>
+                                <td>{{ row.ctr|percent }}</td>
+                                <td>{{ row.drr|percent }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="8">
+                                    <div class="empty-state">
+                                        <strong>История по кампании пока пуста</strong>
+                                        <p>После sync здесь появится дневная разбивка по расходу, трафику и заказам.</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </article>
+
+        <article class="panel panel-spacious detail-tab-panel" data-detail-tab-panel="products">
+            <div class="panel-head">
+                <div>
+                    <h2>Товары внутри кампании</h2>
+                    <p class="muted">Какие карточки реально получают трафик, заказы и расход внутри этой РК.</p>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Товар</th>
+                            <th>Показы</th>
+                            <th>Клики</th>
+                            <th>Заказы</th>
+                            <th>Расход</th>
+                            <th>Сумма заказов</th>
+                            <th>Доля расхода</th>
+                            <th>ДРР</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in product_rows %}
+                            <tr>
+                                <td>
+                                    <a class="table-link" href="{% url 'monitoring:product_detail' row.product.pk %}?stats_date={{ date_to|date:'Y-m-d' }}&stock_date={{ date_to|date:'Y-m-d' }}">
+                                        <strong>{{ row.product.title|default:"Без названия" }}</strong>
+                                    </a><br>
+                                    <span class="muted">WB {{ row.product.nm_id }}{% if not row.is_linked %} · найдено через статистику{% endif %}</span>
+                                </td>
+                                <td>{{ row.cell.impressions|intspace }}</td>
+                                <td>{{ row.cell.clicks|intspace }}</td>
+                                <td>{{ row.cell.orders|intspace }}</td>
+                                <td>{{ row.cell.spend|money }}</td>
+                                <td>{{ row.cell.order_sum|money }}</td>
+                                <td>{{ row.spend_share|percent }}</td>
+                                <td>{{ row.drr|percent }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="8">
+                                    <div class="empty-state">
+                                        <strong>По товарам пока нет детализации</strong>
+                                        <p>Появится после рекламного sync по этой кампании и её карточкам.</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </article>
+
+        <article class="panel detail-tab-panel" data-detail-tab-panel="products">
+            <div class="panel-head">
+                <div>
+                    <h2>Search-кластеры</h2>
+                    <p class="muted">Отдельный слой для поискового трафика, который WB отдаёт в кластерной статистике.</p>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Товар</th>
+                            <th>Показы</th>
+                            <th>Клики</th>
+                            <th>Заказы</th>
+                            <th>Расход</th>
+                            <th>Доля внутри поиска</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in search_cluster_rows %}
+                            <tr>
+                                <td>{{ row.product.title|default:row.product.nm_id }}</td>
+                                <td>{{ row.search_cluster_cell.impressions|intspace }}</td>
+                                <td>{{ row.search_cluster_cell.clicks|intspace }}</td>
+                                <td>{{ row.search_cluster_cell.orders|intspace }}</td>
+                                <td>{{ row.search_cluster_cell.spend|money }}</td>
+                                <td>{{ row.search_cluster_share|percent }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="6">
+                                    <div class="empty-state">
+                                        <strong>Search-кластеры не накоплены</strong>
+                                        <p>Это нормально, если WB ещё не вернул отдельную поисковую детализацию по кампании.</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </article>
+
+        <article class="panel panel-spacious detail-tab-panel" data-detail-tab-panel="zones">
+            <div class="panel-head">
+                <div>
+                    <h2>Разбивка по зонам</h2>
+                    <p class="muted">Поиск, полки, каталог и прочие зоны внутри выбранного периода.</p>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Зона</th>
+                            <th>Показы</th>
+                            <th>Клики</th>
+                            <th>Заказы</th>
+                            <th>Расход</th>
+                            <th>Сумма заказов</th>
+                            <th>Доля трафика</th>
+                            <th>ДРР</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in zone_rows %}
+                            <tr>
+                                <td>{{ row.label }}</td>
+                                <td>{{ row.cell.impressions|intspace }}</td>
+                                <td>{{ row.cell.clicks|intspace }}</td>
+                                <td>{{ row.cell.orders|intspace }}</td>
+                                <td>{{ row.cell.spend|money }}</td>
+                                <td>{{ row.cell.order_sum|money }}</td>
+                                <td>{{ row.traffic_share|percent }}</td>
+                                <td>{{ row.drr|percent }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="8">
+                                    <div class="empty-state">
+                                        <strong>Разбивка по зонам пока недоступна</strong>
+                                        <p>Когда появится рекламная статистика, здесь будет видно, из какой зоны идёт трафик.</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </article>
+    </div>
+
+    <aside class="stack detail-stack-side" data-detail-stack="side">
+        <article class="panel panel-emphasis detail-tab-panel" data-detail-tab-panel="overview">
+            <h2>Ключевые сигналы</h2>
+            <div class="status-grid compact-status-grid">
+                <article class="status-card neutral">
+                    <span>Товаров со статистикой</span>
+                    <strong>{{ products_with_stats }}</strong>
+                    <p>Из {{ linked_products|length }} привязанных товаров в кампании.</p>
+                </article>
+                <article class="status-card neutral">
+                    <span>Дней со статистикой</span>
+                    <strong>{{ days_with_stats }}</strong>
+                    <p>Из окна {{ daily_rows|length }} дн. по текущему фильтру.</p>
+                </article>
+                <article class="status-card neutral">
+                    <span>Средние заказы в день</span>
+                    <strong>{{ avg_daily_orders|decimal2 }}</strong>
+                    <p>Удобно для быстрой оценки темпа без открытия таблиц.</p>
+                </article>
+            </div>
+        </article>
+
+        <article class="panel detail-tab-panel" data-detail-tab-panel="overview">
+            <div class="panel-head">
+                <div>
+                    <h2>Контекст кампании</h2>
+                    <p class="muted">Короткий operational summary, чтобы не искать глазами по таблицам.</p>
+                </div>
+            </div>
+            <div class="stack mini-list">
+                <div class="mini-item">
+                    <strong>Лучшая карточка по расходу</strong>
+                    <span>
+                        {% if top_product %}
+                            {{ top_product.product.title|default:top_product.product.nm_id }} · {{ top_product.cell.spend|money }}
+                        {% else %}
+                            Пока нет данных
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="mini-item">
+                    <strong>Главная зона</strong>
+                    <span>
+                        {% if top_zone %}
+                            {{ top_zone.label }} · {{ top_zone.cell.impressions|intspace }} показов
+                        {% else %}
+                            Пока нет данных
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="mini-item">
+                    <strong>Тип оплаты</strong>
+                    <span>{{ campaign.payment_type|default:"—" }}</span>
+                </div>
+            </div>
+        </article>
+
+        <article class="panel detail-tab-panel" data-detail-tab-panel="zones">
+            <div class="panel-head">
+                <div>
+                    <h2>Плейсменты WB</h2>
+                    <p class="muted">Что именно WB вернул в метаданных кампании.</p>
+                </div>
+            </div>
+            <div class="stack mini-list">
+                {% for item in placements_items %}
+                    <div class="mini-item">
+                        <strong>{{ item }}</strong>
+                    </div>
+                {% empty %}
+                    <div class="empty-state compact-empty">
+                        <strong>WB не вернул плейсменты</strong>
+                        <p>Это не мешает статистике, но снижает прозрачность метаданных кампании.</p>
+                    </div>
+                {% endfor %}
+            </div>
+        </article>
+
+        <article class="panel panel-form detail-tab-panel" data-detail-tab-panel="settings">
+            <h2>Настройки кампании</h2>
+            <p class="panel-copy">Группа мониторинга, активность кампании и привязка к товарам редактируются прямо здесь.</p>
+            <form method="post" action="{% url 'monitoring:update_campaign' campaign.pk %}" class="stack compact-form">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <div class="form-grid form-grid-2">
+                    {% for field in settings_form %}
+                        <div class="{% if field.name == 'products' or field.name == 'name' %}form-span-2{% endif %}">
+                            {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
+                        </div>
+                    {% endfor %}
+                </div>
+                <button class="primary-button wide" type="submit">Сохранить настройки</button>
+            </form>
+        </article>
+
+        <article class="panel detail-tab-panel" data-detail-tab-panel="settings">
+            <div class="panel-head">
+                <div>
+                    <h2>Состояние в мониторинге</h2>
+                    <p class="muted">Отключённые кампании остаются в истории, но больше не участвуют в ежедневном контуре.</p>
+                </div>
+            </div>
+            <form method="post" action="{% url 'monitoring:toggle_campaign_active' campaign.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="secondary-button wide" type="submit">
+                    {% if campaign.is_active %}Отключить кампанию{% else %}Вернуть в мониторинг{% endif %}
+                </button>
+            </form>
+        </article>
+    </aside>
+</section>
+
+{{ timeline_chart|json_script:"campaign-timeline-chart" }}
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="{% static 'monitoring/reports.js' %}" defer></script>
+    <script src="{% static 'monitoring/product_tabs.js' %}" defer></script>
+{% endblock %}

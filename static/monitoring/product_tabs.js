@@ -1,5 +1,5 @@
 (function () {
-    const STORAGE_KEY = "wb-product-detail-active-tab";
+    const DEFAULT_STORAGE_KEY = "wb-product-detail-active-tab";
 
     function getVisiblePanelCount(stack) {
         return Array.from(stack.querySelectorAll("[data-detail-tab-panel]")).filter((panel) => !panel.hidden).length;
@@ -27,7 +27,7 @@
         return shell.querySelector("[data-detail-tab-trigger]")?.dataset.detailTabTrigger || "overview";
     }
 
-    function setActiveTab(shell, nextTab) {
+    function setActiveTab(shell, nextTab, storageKey = DEFAULT_STORAGE_KEY) {
         const activeTab = resolveSafeTab(shell, nextTab);
         shell.dataset.activeTab = activeTab;
 
@@ -45,7 +45,7 @@
         syncLayout(shell);
 
         try {
-            sessionStorage.setItem(STORAGE_KEY, activeTab);
+            sessionStorage.setItem(storageKey, activeTab);
         } catch (error) {
             // Session storage can be blocked by browser policy.
         }
@@ -56,10 +56,11 @@
         if (!triggers.length) {
             return;
         }
+        const storageKey = shell.dataset.tabsStorageKey || DEFAULT_STORAGE_KEY;
 
         triggers.forEach((trigger, index) => {
             trigger.addEventListener("click", () => {
-                setActiveTab(shell, trigger.dataset.detailTabTrigger);
+                setActiveTab(shell, trigger.dataset.detailTabTrigger, storageKey);
                 trigger.focus();
             });
 
@@ -76,11 +77,11 @@
 
         let preferredTab = shell.dataset.activeTab;
         try {
-            preferredTab = sessionStorage.getItem(STORAGE_KEY) || preferredTab;
+            preferredTab = sessionStorage.getItem(storageKey) || preferredTab;
         } catch (error) {
             // Ignore unavailable session storage.
         }
-        setActiveTab(shell, preferredTab);
+        setActiveTab(shell, preferredTab, storageKey);
     }
 
     function bootstrap() {

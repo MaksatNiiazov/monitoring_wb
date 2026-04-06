@@ -273,6 +273,60 @@ class CampaignSettingsForm(StyledFormMixin, forms.ModelForm):
         self.fields["products"].queryset = queryset.order_by("title", "nm_id").distinct()
 
 
+class CampaignWorkspaceCreateForm(StyledFormMixin, forms.ModelForm):
+    products = forms.ModelMultipleChoiceField(
+        queryset=Product.objects.filter(is_active=True).order_by("title", "nm_id"),
+        required=False,
+        widget=forms.SelectMultiple(attrs={"size": 6}),
+        label="Товары в мониторинге",
+        help_text="Можно оставить пустым и привязать кампанию позже.",
+    )
+    help_texts = {
+        "external_id": "ID рекламной кампании из кабинета WB.",
+        "monitoring_group": "Определяет блок книги мониторинга.",
+    }
+
+    class Meta:
+        model = Campaign
+        fields = ["external_id", "monitoring_group", "products"]
+        widgets = {
+            "external_id": forms.NumberInput(attrs={"placeholder": "Например, 28150154"}),
+        }
+
+
+class CampaignWorkspaceSettingsForm(StyledFormMixin, forms.ModelForm):
+    products = forms.ModelMultipleChoiceField(
+        queryset=Product.objects.none(),
+        required=False,
+        widget=forms.SelectMultiple(attrs={"size": 8}),
+        label="Товары в мониторинге",
+        help_text="Управляет товарами, к которым привязана эта РК.",
+    )
+    help_texts = {
+        "external_id": "ID кампании в WB. Если номер неверный, статистика не подтянется.",
+        "name": "Можно оставить временное название, если WB ещё не вернул метаданные.",
+        "monitoring_group": "Определяет, в какой блок таблицы попадёт статистика.",
+        "is_active": "Отключённые кампании не участвуют в sync и отчётах.",
+    }
+
+    class Meta:
+        model = Campaign
+        fields = ["external_id", "name", "monitoring_group", "is_active", "products"]
+        widgets = {
+            "external_id": forms.NumberInput(attrs={"placeholder": "Например, 28150154"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        selected_ids = []
+        if self.instance and self.instance.pk:
+            selected_ids = list(self.instance.products.values_list("id", flat=True))
+        queryset = Product.objects.filter(is_active=True)
+        if selected_ids:
+            queryset = Product.objects.filter(pk__in=selected_ids) | queryset
+        self.fields["products"].queryset = queryset.order_by("title", "nm_id").distinct()
+
+
 class DailyNoteForm(StyledFormMixin, forms.ModelForm):
     note_date = forms.DateField(widget=forms.HiddenInput())
     help_texts = {

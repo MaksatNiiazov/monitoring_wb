@@ -9,6 +9,7 @@ urlpatterns = [
     path("table/", views.table_workspace, name="table"),
     path("products/", views.products_workspace, name="products"),
     path("campaigns/", views.campaigns_workspace, name="campaigns"),
+    path("campaigns/<int:pk>/", views.campaign_detail, name="campaign_detail"),
     path("reports/", views.reports, name="reports"),
     path("settings/", views.workspace_settings, name="workspace_settings"),
     path("settings/save/", views.update_workspace_settings, name="update_workspace_settings"),

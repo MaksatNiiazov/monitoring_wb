@@ -431,7 +431,9 @@
             <div class="stack mini-list">
                 {% for campaign in linked_campaigns %}
                     <div class="mini-item">
-                        <strong>{{ campaign.name|default:"Без названия" }}</strong>
+                        <a class="table-link" href="{% url 'monitoring:campaign_detail' campaign.pk %}?date_to={{ report.stats_date|date:'Y-m-d' }}">
+                            <strong>{{ campaign.name|default:"Без названия" }}</strong>
+                        </a>
                         <span>ID {{ campaign.external_id }} · {{ campaign.get_monitoring_group_display }}</span>
                         <span>Последняя статистика: {{ campaign.latest_stats_date|date:"d.m.Y"|default:"—" }}</span>
                     </div>

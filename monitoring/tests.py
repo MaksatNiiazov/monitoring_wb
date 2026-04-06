@@ -1566,6 +1566,15 @@ class PageRenderTests(TestCase):
         self.assertContains(response, "campaigns-modal-edit")
         self.assertContains(response, 'href="/campaigns/"')
 
+    def test_campaign_detail_page_renders_stats_workspace(self) -> None:
+        seed_demo_dataset()
+        campaign = Campaign.objects.order_by("id").first()
+        response = self.client.get(f"/campaigns/{campaign.pk}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "campaign-timeline-chart")
+        self.assertContains(response, 'data-detail-tab-trigger="overview"')
+        self.assertContains(response, "Товары внутри кампании")
+
     def test_table_page_renders_inline_note_controls(self) -> None:
         seed_demo_dataset()
         response = self.client.get("/table/")
@@ -1592,7 +1601,8 @@ class PageRenderTests(TestCase):
 
     def test_core_pages_render_utf8_without_mojibake(self) -> None:
         seed_demo_dataset()
-        for url in ("/table/", "/products/", "/reports/", "/settings/"):
+        campaign = Campaign.objects.order_by("id").first()
+        for url in ("/table/", "/products/", "/campaigns/", f"/campaigns/{campaign.pk}/", "/reports/", "/settings/"):
             response = self.client.get(url)
             self.assertEqual(response.status_code, 200)
             self.assertIn("charset=utf-8", response["Content-Type"].lower())

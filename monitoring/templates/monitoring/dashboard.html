@@ -273,7 +273,9 @@
                         {% for campaign in campaign_overview %}
                             <tr>
                                 <td>
-                                    <strong>{{ campaign.name|default:"Без названия" }}</strong><br>
+                                    <a class="table-link" href="{% url 'monitoring:campaign_detail' campaign.pk %}?date_to={{ stats_date|date:'Y-m-d' }}">
+                                        <strong>{{ campaign.name|default:"Без названия" }}</strong>
+                                    </a><br>
                                     <span class="muted">ID {{ campaign.external_id }}</span>
                                 </td>
                                 <td>{{ campaign.get_monitoring_group_display }}</td>

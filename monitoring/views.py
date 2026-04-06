@@ -15,8 +15,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 
 from .forms import (
-    CampaignCreateForm,
-    CampaignSettingsForm,
+    CampaignWorkspaceCreateForm,
+    CampaignWorkspaceSettingsForm,
     DailyNoteForm,
     MonitoringWorkbookForm,
     MonitoringSettingsForm,
@@ -52,6 +52,7 @@ from .services.monitoring_table import (
     build_table_view_payloads,
     export_monitoring_workbook_bytes,
 )
+from .services.campaigns import build_campaign_detail_context
 from .services.reporting_hub import build_reports_context
 from .services.reports import build_product_report, decimalize, get_default_dates, normalize_warehouse_name, resolve_product_economics
 from .services.sync import (
@@ -75,6 +76,23 @@ def _selected_history_days(raw: str | None, fallback: int) -> int:
     except (TypeError, ValueError):
         parsed = fallback
     return max(1, min(parsed, 90))
+
+
+def _selected_campaign_period(
+    request: HttpRequest,
+    *,
+    fallback_end: date,
+    fallback_days: int,
+) -> tuple[date, date]:
+    date_to = _selected_date(request.GET.get("date_to"), fallback_end)
+    date_from_raw = request.GET.get("date_from")
+    if date_from_raw:
+        date_from = _selected_date(date_from_raw, date_to - timedelta(days=max(fallback_days - 1, 0)))
+    else:
+        date_from = date_to - timedelta(days=max(fallback_days - 1, 0))
+    if date_from > date_to:
+        date_from = date_to
+    return date_from, date_to
 
 
 def _parse_decimal_input(raw_value: str | int | bool | None) -> Decimal:
@@ -706,7 +724,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         "sheet_tabs": sheet_tabs,
         "active_sheet": active_sheet,
         "product_form": ProductCreateForm(),
-        "campaign_form": CampaignCreateForm(),
+        "campaign_form": CampaignWorkspaceCreateForm(),
         "sync_form": SyncForm(
             initial={
                 "reference_date": reference_date,
@@ -865,12 +883,32 @@ def campaigns_workspace(request: HttpRequest) -> HttpResponse:
         "workspace_overview": build_workspace_overview(),
         "campaign_rows": campaign_rows,
         "active_campaigns_count": sum(1 for campaign in campaigns if campaign.is_active),
-        "campaign_form": CampaignCreateForm(),
+        "campaign_form": CampaignWorkspaceCreateForm(),
         "selected_campaign": selected_campaign,
-        "selected_campaign_form": CampaignSettingsForm(instance=selected_campaign) if selected_campaign else None,
+        "selected_campaign_form": CampaignWorkspaceSettingsForm(instance=selected_campaign) if selected_campaign else None,
         "open_campaign_edit_modal": modal_raw == "edit" and selected_campaign is not None,
     }
     return render(request, "monitoring/campaigns_workspace.html", context)
+
+
+def campaign_detail(request: HttpRequest, pk: int) -> HttpResponse:
+    campaign = get_object_or_404(Campaign.objects.prefetch_related("products"), pk=pk)
+    settings_obj = get_monitoring_settings()
+    latest_stats_date = campaign.daily_stats.aggregate(latest=Max("stats_date"))["latest"] or timezone.localdate()
+    date_from, date_to = _selected_campaign_period(
+        request,
+        fallback_end=latest_stats_date,
+        fallback_days=getattr(settings_obj, "monitoring_history_days", 14) or 14,
+    )
+    context = build_campaign_detail_context(campaign=campaign, date_from=date_from, date_to=date_to)
+    context.update(
+        {
+            "workspace_settings": settings_obj,
+            "workspace_overview": build_workspace_overview(),
+            "settings_form": CampaignWorkspaceSettingsForm(instance=campaign),
+        }
+    )
+    return render(request, "monitoring/campaign_detail.html", context)
 
 
 def add_product(request: HttpRequest) -> HttpResponse:
@@ -903,7 +941,7 @@ def add_campaign(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         return redirect(fallback_target)
 
-    form = CampaignCreateForm(request.POST)
+    form = CampaignWorkspaceCreateForm(request.POST)
     if not form.is_valid():
         for error in form.errors.values():
             messages.error(request, error.as_text())
@@ -922,12 +960,12 @@ def add_campaign(request: HttpRequest) -> HttpResponse:
 
 def update_campaign(request: HttpRequest, pk: int) -> HttpResponse:
     campaign = get_object_or_404(Campaign, pk=pk)
-    detail_target = reverse("monitoring:campaigns")
-    redirect_target = _safe_next_url(request.POST.get("next"), f"{detail_target}?edit={campaign.pk}")
+    detail_target = reverse("monitoring:campaign_detail", kwargs={"pk": campaign.pk})
+    redirect_target = _safe_next_url(request.POST.get("next"), detail_target)
     if request.method != "POST":
         return redirect(detail_target)
 
-    form = CampaignSettingsForm(request.POST, instance=campaign)
+    form = CampaignWorkspaceSettingsForm(request.POST, instance=campaign)
     if form.is_valid():
         form.save()
         messages.success(request, "Настройки кампании обновлены.")
