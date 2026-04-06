@@ -1728,9 +1728,13 @@ body.is-table-fullscreen .monitoring-grid-wrap {
 .table-sheets-nav-shell {
     display: grid;
     grid-template-columns: auto auto minmax(0, 1fr) auto;
-    align-items: stretch;
+    align-items: center;
     gap: 8px;
     margin-top: 8px;
+}
+
+.table-sheets-nav-shell > * {
+    min-width: 0;
 }
 
 .segmented-control.table-sheets-nav {
@@ -1753,13 +1757,31 @@ body.is-table-fullscreen .monitoring-grid-wrap {
     padding: 0;
 }
 
-.table-sheets-add-button {
-    width: 52px;
-    min-width: 52px;
-    min-height: 34px;
+.table-sheets-nav-shell .table-sheets-add-button {
+    width: 40px;
+    max-width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
     padding: 0;
-    font-size: 1.5rem;
+    justify-self: start;
+    align-self: center;
+    flex: 0 0 auto;
+    border-radius: 14px;
+    font-size: 1.2rem;
+    font-weight: 800;
     line-height: 1;
+    position: relative;
+    z-index: 2;
+    background: var(--accent);
+    color: #ffffff;
+    border-color: rgba(15, 106, 92, 0.28);
+    box-shadow: 0 12px 24px rgba(15, 106, 92, 0.22);
+}
+
+.table-sheets-nav-shell .table-sheets-add-button:hover {
+    background: var(--accent-strong);
+    color: #ffffff;
 }
 
 .table-sheets-nav .segmented-button {
