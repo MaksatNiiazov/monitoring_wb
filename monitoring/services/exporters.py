@@ -25,7 +25,10 @@ def format_decimal(value: Decimal | int | float | str | None) -> str:
 def format_percent(value: Decimal | int | float | None) -> str:
     if value is None:
         return "-"
-    text = f"{decimalize(value).quantize(Decimal('0.01'))}".replace(".", ",")
+    number = decimalize(value)
+    if number != 0 and abs(number) < Decimal("0.01"):
+        return "<0,01%" if number > 0 else ">-0,01%"
+    text = f"{number.quantize(Decimal('0.01'))}".replace(".", ",")
     if "," in text:
         text = text.rstrip("0").rstrip(",")
     return text + "%"
@@ -160,27 +163,66 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             return ""
         return format_percent(value)
 
-    def format_ratio(numerator: Decimal | int | float, denominator: Decimal | int | float, *, scale: Decimal | int = 1) -> str:
+    def format_ratio(
+        numerator: Decimal | int | float,
+        denominator: Decimal | int | float,
+        *,
+        scale: Decimal | int = 1,
+        treat_zero_numerator_as_empty: bool = False,
+    ) -> str:
+        numerator_value = decimalize(numerator)
         denominator_value = decimalize(denominator)
         if denominator_value == 0:
             return "-"
-        return format_decimal(safe_divide(numerator, denominator_value) * decimalize(scale))
+        if treat_zero_numerator_as_empty and numerator_value == 0:
+            return "-"
+        return format_decimal(safe_divide(numerator_value, denominator_value) * decimalize(scale))
 
-    def format_percent_ratio(numerator: Decimal | int | float, denominator: Decimal | int | float) -> str:
+    def format_percent_ratio(
+        numerator: Decimal | int | float,
+        denominator: Decimal | int | float,
+        *,
+        treat_zero_numerator_as_empty: bool = False,
+    ) -> str:
+        numerator_value = decimalize(numerator)
         denominator_value = decimalize(denominator)
         if denominator_value == 0:
             return "-"
-        return format_percent(safe_divide(numerator, denominator_value) * 100)
+        if treat_zero_numerator_as_empty and numerator_value == 0:
+            return "-"
+        return format_percent(safe_divide(numerator_value, denominator_value) * 100)
 
-    def derived_ratio_decimal(cell, numerator: Decimal | int | float, denominator: Decimal | int | float, *, scale: Decimal | int = 1) -> str:
+    def derived_ratio_decimal(
+        cell,
+        numerator: Decimal | int | float,
+        denominator: Decimal | int | float,
+        *,
+        scale: Decimal | int = 1,
+        treat_zero_numerator_as_empty: bool = False,
+    ) -> str:
         if not has_metric_cell_data(cell):
             return ""
-        return format_ratio(numerator, denominator, scale=scale)
+        return format_ratio(
+            numerator,
+            denominator,
+            scale=scale,
+            treat_zero_numerator_as_empty=treat_zero_numerator_as_empty,
+        )
 
-    def derived_ratio_percent(cell, numerator: Decimal | int | float, denominator: Decimal | int | float) -> str:
+    def derived_ratio_percent(
+        cell,
+        numerator: Decimal | int | float,
+        denominator: Decimal | int | float,
+        *,
+        treat_zero_numerator_as_empty: bool = False,
+    ) -> str:
         if not has_metric_cell_data(cell):
             return ""
-        return format_percent_ratio(numerator, denominator)
+        return format_percent_ratio(
+            numerator,
+            denominator,
+            treat_zero_numerator_as_empty=treat_zero_numerator_as_empty,
+        )
 
     overall_clicks = metrics.open_count if metrics else 0
     overall_carts = metrics.add_to_cart_count if metrics else 0
@@ -228,34 +270,44 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
         ],
         [
             "Стоимость заказа",
-            derived_ratio_decimal(search, search.spend, search.orders),
-            derived_ratio_decimal(shelves, shelves.spend, shelves.orders),
+            derived_ratio_decimal(search, search.spend, search.orders, treat_zero_numerator_as_empty=True),
+            derived_ratio_decimal(shelves, shelves.spend, shelves.orders, treat_zero_numerator_as_empty=True),
             "",
-            format_ratio(total_ad.spend, overall_orders),
+            format_ratio(total_ad.spend, overall_orders, treat_zero_numerator_as_empty=True),
             "-",
         ],
         [
             "Стоимость корзины",
-            derived_ratio_decimal(search, search.spend, search.carts),
-            derived_ratio_decimal(shelves, shelves.spend, shelves.carts),
+            derived_ratio_decimal(search, search.spend, search.carts, treat_zero_numerator_as_empty=True),
+            derived_ratio_decimal(shelves, shelves.spend, shelves.carts, treat_zero_numerator_as_empty=True),
             "",
-            format_ratio(total_ad.spend, overall_carts),
+            format_ratio(total_ad.spend, overall_carts, treat_zero_numerator_as_empty=True),
             "-",
         ],
         [
             "ДРР от заказов (%)",
-            derived_ratio_percent(search, search.spend, search.order_sum),
-            derived_ratio_percent(shelves, shelves.spend, shelves.order_sum),
+            derived_ratio_percent(search, search.spend, search.order_sum, treat_zero_numerator_as_empty=True),
+            derived_ratio_percent(shelves, shelves.spend, shelves.order_sum, treat_zero_numerator_as_empty=True),
             "",
-            format_percent_ratio(total_ad.spend, overall_order_sum),
+            format_percent_ratio(total_ad.spend, overall_order_sum, treat_zero_numerator_as_empty=True),
             "-",
         ],
         [
             "ДРР от продаж ≈ (%)",
-            derived_ratio_percent(search, search.spend, estimate_buyout_sum(economics, search.order_sum)),
-            derived_ratio_percent(shelves, shelves.spend, estimate_buyout_sum(economics, shelves.order_sum)),
+            derived_ratio_percent(
+                search,
+                search.spend,
+                estimate_buyout_sum(economics, search.order_sum),
+                treat_zero_numerator_as_empty=True,
+            ),
+            derived_ratio_percent(
+                shelves,
+                shelves.spend,
+                estimate_buyout_sum(economics, shelves.order_sum),
+                treat_zero_numerator_as_empty=True,
+            ),
             "",
-            format_percent_ratio(total_ad.spend, estimated_buyout_overall),
+            format_percent_ratio(total_ad.spend, estimated_buyout_overall, treat_zero_numerator_as_empty=True),
             "-",
         ],
         ["Прибыль", format_decimal(profit_overall), "", "", "", ""],

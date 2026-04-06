@@ -278,16 +278,25 @@ def build_day_block(
         return f"={row_value_ref(15, relative_col)}*{buyout_percent_ref}"
 
     def cost_per_order_formula(relative_col: int) -> str:
-        return safe_divide_formula(row_value_ref(5, relative_col), row_value_ref(13, relative_col))
+        return safe_divide_formula(
+            row_value_ref(5, relative_col),
+            row_value_ref(13, relative_col),
+            treat_zero_numerator_as_empty=True,
+        )
 
     def cost_per_cart_formula(relative_col: int) -> str:
-        return safe_divide_formula(row_value_ref(5, relative_col), row_value_ref(11, relative_col))
+        return safe_divide_formula(
+            row_value_ref(5, relative_col),
+            row_value_ref(11, relative_col),
+            treat_zero_numerator_as_empty=True,
+        )
 
     def ratio_formula(relative_col: int, denominator_row: int) -> str:
         return safe_divide_formula(
             row_value_ref(5, relative_col),
             row_value_ref(denominator_row, relative_col),
             scale=100,
+            treat_zero_numerator_as_empty=True,
         )
 
     def safe_divide_formula(
@@ -296,11 +305,17 @@ def build_day_block(
         *,
         scale: int | None = None,
         fallback: str = '"-"',
+        treat_zero_numerator_as_empty: bool = False,
     ) -> str:
         expression = f"{numerator_ref}/{denominator_ref}"
         if scale is not None:
             expression = f"({expression})*{scale}"
-        return f'=IFERROR(IF(OR({denominator_ref}="",{denominator_ref}=0),{fallback},{expression}),{fallback})'
+        conditions = [f"{denominator_ref}=\"\"", f"{denominator_ref}=0"]
+        if treat_zero_numerator_as_empty:
+            conditions.append(f"{numerator_ref}=\"\"")
+            conditions.append(f"{numerator_ref}=0")
+        joined_conditions = ",".join(conditions)
+        return f'=IFERROR(IF(OR({joined_conditions}),{fallback},{expression}),{fallback})'
 
     def overall_profit_formula() -> str:
         buyout_fraction = f"IF({buyout_percent_ref}>1,{buyout_percent_ref}/100,{buyout_percent_ref})"

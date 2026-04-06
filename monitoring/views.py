@@ -447,21 +447,11 @@ def _safe_next_url(raw: str | None, fallback: str) -> str:
 
 
 def dashboard(request: HttpRequest) -> HttpResponse:
-    settings_obj = get_monitoring_settings()
-    latest_metrics_date = DailyProductMetrics.objects.aggregate(latest=Max("stats_date"))["latest"]
-    latest_stock_date = DailyProductStock.objects.aggregate(latest=Max("stats_date"))["latest"]
-    running_sync = get_running_sync()
-    latest_sync = SyncLog.objects.exclude(status=SyncStatus.RUNNING).first()
-    context = {
-        "workspace_settings": settings_obj,
-        "active_products_count": Product.objects.filter(is_active=True).count(),
-        "active_campaigns_count": Campaign.objects.filter(is_active=True).count(),
-        "latest_metrics_date": latest_metrics_date,
-        "latest_stock_date": latest_stock_date,
-        "running_sync": running_sync,
-        "latest_sync": latest_sync,
-    }
-    return render(request, "monitoring/dashboard.html", context)
+    target = reverse("monitoring:table")
+    query_string = request.META.get("QUERY_STRING", "").strip()
+    if query_string:
+        target = f"{target}?{query_string}"
+    return redirect(target)
 
 
 def table_workspace(request: HttpRequest) -> HttpResponse:

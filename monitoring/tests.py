@@ -1,4 +1,4 @@
-from io import BytesIO
+﻿from io import BytesIO
 import json
 import re
 from datetime import date, datetime
@@ -58,17 +58,17 @@ class ReportingTests(TestCase):
     def setUp(self) -> None:
         self.product = Product.objects.create(
             nm_id=123456,
-            title="Женский спортивный костюм",
+            title="Р–РµРЅСЃРєРёР№ СЃРїРѕСЂС‚РёРІРЅС‹Р№ РєРѕСЃС‚СЋРј",
             vendor_code="SKU-001",
             buyout_percent=Decimal("24.00"),
             unit_cost=Decimal("1500.00"),
             logistics_cost=Decimal("336.00"),
-            primary_keyword="костюмы спортивные женский",
-            secondary_keyword="весенний женский костюм",
+            primary_keyword="РєРѕСЃС‚СЋРјС‹ СЃРїРѕСЂС‚РёРІРЅС‹Рµ Р¶РµРЅСЃРєРёР№",
+            secondary_keyword="РІРµСЃРµРЅРЅРёР№ Р¶РµРЅСЃРєРёР№ РєРѕСЃС‚СЋРј",
         )
         self.campaign = Campaign.objects.create(
             external_id=28150154,
-            name="Единая ставка",
+            name="Р•РґРёРЅР°СЏ СЃС‚Р°РІРєР°",
             monitoring_group=CampaignMonitoringGroup.UNIFIED,
         )
         self.campaign.products.add(self.product)
@@ -164,7 +164,7 @@ class ReportingTests(TestCase):
         )
         rows = exporter_rows(report)
         self.assertEqual(rows[0][1], "17.03.2026")
-        self.assertEqual(rows[4][0], "Затраты (руб)")
+        self.assertEqual(rows[4][4], "2000")
 
     def test_exporter_uses_overall_funnel_in_summary_column(self) -> None:
         report = build_product_report(
@@ -240,6 +240,54 @@ class ReportingTests(TestCase):
         self.assertEqual(rows[17][4], "-")
         self.assertEqual(rows[18][4], "-")
         self.assertEqual(rows[19][4], "-")
+
+    def test_exporter_keeps_revenue_and_buyouts_but_hides_efficiency_metrics_when_spend_is_zero(self) -> None:
+        DailyCampaignProductStat.objects.filter(
+            campaign=self.campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.SEARCH,
+        ).update(spend=Decimal("0.00"))
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+
+        rows = exporter_rows(report)
+
+        self.assertEqual(rows[14][1], "6000")
+        self.assertEqual(rows[15][1], "1440")
+        self.assertEqual(rows[16][1], "-")
+        self.assertEqual(rows[17][1], "-")
+        self.assertEqual(rows[18][1], "-")
+        self.assertEqual(rows[19][1], "-")
+        self.assertEqual(rows[14][4], "10000")
+        self.assertEqual(rows[15][4], "2400")
+        self.assertEqual(rows[16][4], "-")
+        self.assertEqual(rows[17][4], "-")
+        self.assertEqual(rows[18][4], "-")
+        self.assertEqual(rows[19][4], "-")
+
+    def test_exporter_shows_tiny_nonzero_percentages_without_rounding_to_zero(self) -> None:
+        DailyCampaignProductStat.objects.filter(
+            campaign=self.campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.SEARCH,
+        ).update(spend=Decimal("0.10"))
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+
+        rows = exporter_rows(report)
+
+        self.assertEqual(rows[18][1], "<0,01%")
+        self.assertEqual(rows[19][1], "<0,01%")
+        self.assertEqual(rows[18][4], "<0,01%")
+        self.assertEqual(rows[19][4], "<0,01%")
 
     def test_dashboard_context_builds_aggregated_totals(self) -> None:
         context = build_dashboard_context(stats_date=date(2026, 3, 16), stock_date=date(2026, 3, 17))
@@ -420,16 +468,33 @@ class ReportingTests(TestCase):
         self.assertTrue(block[18][1].startswith("=IFERROR(IF("))
         self.assertTrue(block[19][1].startswith("=IFERROR(IF("))
 
+    def test_monitoring_day_block_hides_efficiency_metrics_when_spend_is_zero(self) -> None:
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+        block = build_day_block(report, start_row=1, start_col=1)
+
+        self.assertIn('B5=0', block[16][1])
+        self.assertIn('B5=0', block[17][1])
+        self.assertIn('B5=0', block[18][1])
+        self.assertIn('B5=0', block[19][1])
+        self.assertIn('E5=0', block[16][4])
+        self.assertIn('E5=0', block[17][4])
+        self.assertIn('E5=0', block[18][4])
+        self.assertIn('E5=0', block[19][4])
+
     def test_monitoring_day_block_traffic_share_matches_template_logic(self) -> None:
         manual_search_campaign = Campaign.objects.create(
             external_id=28150155,
-            name="Руч. Поиск",
+            name="Р СѓС‡. РџРѕРёСЃРє",
             monitoring_group=CampaignMonitoringGroup.MANUAL_SEARCH,
         )
         manual_search_campaign.products.add(self.product)
         manual_shelves_campaign = Campaign.objects.create(
             external_id=28150156,
-            name="Руч. Полки",
+            name="Р СѓС‡. РџРѕР»РєРё",
             monitoring_group=CampaignMonitoringGroup.MANUAL_SHELVES,
         )
         manual_shelves_campaign.products.add(self.product)
@@ -500,13 +565,13 @@ class ReportingTests(TestCase):
     def test_exporter_traffic_share_matches_template_logic(self) -> None:
         manual_search_campaign = Campaign.objects.create(
             external_id=28150157,
-            name="Руч. Поиск 2",
+            name="Р СѓС‡. РџРѕРёСЃРє 2",
             monitoring_group=CampaignMonitoringGroup.MANUAL_SEARCH,
         )
         manual_search_campaign.products.add(self.product)
         manual_shelves_campaign = Campaign.objects.create(
             external_id=28150158,
-            name="Руч. Полки 2",
+            name="Р СѓС‡. РџРѕР»РєРё 2",
             monitoring_group=CampaignMonitoringGroup.MANUAL_SHELVES,
         )
         manual_shelves_campaign.products.add(self.product)
@@ -637,9 +702,9 @@ class ReportingTests(TestCase):
         self.assertEqual(report_new["economics"].unit_cost, Decimal("1800.00"))
 
     def test_product_report_filters_warehouses_per_product(self) -> None:
-        preferred = Warehouse.objects.create(office_id=1, name="Коледино")
-        hidden = Warehouse.objects.create(office_id=2, name="Рязань")
-        ProductVisibleWarehouse.objects.create(product=self.product, warehouse_name="Коледино")
+        preferred = Warehouse.objects.create(office_id=1, name="РљРѕР»РµРґРёРЅРѕ")
+        hidden = Warehouse.objects.create(office_id=2, name="Р СЏР·Р°РЅСЊ")
+        ProductVisibleWarehouse.objects.create(product=self.product, warehouse_name="РљРѕР»РµРґРёРЅРѕ")
         DailyProductStock.objects.update_or_create(
             product=self.product,
             stats_date=date(2026, 3, 18),
@@ -664,7 +729,7 @@ class ReportingTests(TestCase):
             create_note=False,
         )
         self.assertEqual(len(report["warehouse_rows"]), 1)
-        self.assertEqual(report["warehouse_rows"][0].warehouse.name, "Коледино")
+        self.assertEqual(report["warehouse_rows"][0].warehouse.name, "РљРѕР»РµРґРёРЅРѕ")
 
 
 class SyncTests(TestCase):
@@ -699,7 +764,7 @@ class SyncTests(TestCase):
             payload={},
         )
 
-        with self.assertRaisesMessage(SyncServiceError, "Синхронизация уже выполняется"):
+        with self.assertRaisesMessage(SyncServiceError, "РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ СѓР¶Рµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ"):
             run_sync(reference_date=date(2026, 3, 17), overwrite=True)
 
     def test_build_product_stock_payload_from_sizes_sums_nested_metrics(self) -> None:
@@ -729,8 +794,8 @@ class SyncTests(TestCase):
                             "offices": [
                                 {
                                     "officeID": 1,
-                                    "officeName": "Коледино",
-                                    "regionName": "Москва",
+                                    "officeName": "РљРѕР»РµРґРёРЅРѕ",
+                                    "regionName": "РњРѕСЃРєРІР°",
                                     "metrics": {"stockCount": 2, "toClientCount": 1, "fromClientCount": 0, "avgOrders": "1.5"},
                                 }
                             ],
@@ -740,14 +805,14 @@ class SyncTests(TestCase):
                             "offices": [
                                 {
                                     "officeID": 1,
-                                    "officeName": "Коледино",
-                                    "regionName": "Москва",
+                                    "officeName": "РљРѕР»РµРґРёРЅРѕ",
+                                    "regionName": "РњРѕСЃРєРІР°",
                                     "metrics": {"stockCount": 3, "toClientCount": 2, "fromClientCount": 1, "avgOrders": "2.5"},
                                 },
                                 {
                                     "officeID": 2,
-                                    "officeName": "Казань",
-                                    "regionName": "Казань",
+                                    "officeName": "РљР°Р·Р°РЅСЊ",
+                                    "regionName": "РљР°Р·Р°РЅСЊ",
                                     "metrics": {"stockCount": 4, "toClientCount": 0, "fromClientCount": 1, "avgOrders": "0.5"},
                                 },
                             ],
@@ -765,7 +830,7 @@ class SyncTests(TestCase):
         self.assertEqual(aggregated[2]["metrics"]["stockCount"], 4)
 
     def test_resolve_office_id_builds_stable_synthetic_id_when_wb_omits_it(self) -> None:
-        office_payload = {"officeID": "0", "officeName": "Коледино", "regionName": "Москва"}
+        office_payload = {"officeID": "0", "officeName": "РљРѕР»РµРґРёРЅРѕ", "regionName": "РњРѕСЃРєРІР°"}
         resolved = resolve_office_id(office_payload)
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved, resolve_office_id(office_payload))
@@ -775,8 +840,8 @@ class SyncTests(TestCase):
         reference_date = date(2026, 3, 17)
         product = self.product
         campaign = self.campaign
-        product.primary_keyword = "брюки мужские черные"
-        product.secondary_keyword = "мужские классические брюки"
+        product.primary_keyword = "Р±СЂСЋРєРё РјСѓР¶СЃРєРёРµ С‡РµСЂРЅС‹Рµ"
+        product.secondary_keyword = "РјСѓР¶СЃРєРёРµ РєР»Р°СЃСЃРёС‡РµСЃРєРёРµ Р±СЂСЋРєРё"
         product.save(update_fields=["primary_keyword", "secondary_keyword"])
 
         class FakeAnalyticsClient:
@@ -814,8 +879,8 @@ class SyncTests(TestCase):
                                 "offices": [
                                     {
                                         "officeID": 10,
-                                        "officeName": "Коледино",
-                                        "regionName": "Москва",
+                                        "officeName": "РљРѕР»РµРґРёРЅРѕ",
+                                        "regionName": "РњРѕСЃРєРІР°",
                                         "metrics": {"stockCount": 3, "toClientCount": 1, "fromClientCount": 0, "avgOrders": "1.2"},
                                     }
                                 ],
@@ -826,14 +891,14 @@ class SyncTests(TestCase):
                                 "offices": [
                                     {
                                         "officeID": 10,
-                                        "officeName": "Коледино",
-                                        "regionName": "Москва",
+                                        "officeName": "РљРѕР»РµРґРёРЅРѕ",
+                                        "regionName": "РњРѕСЃРєРІР°",
                                         "metrics": {"stockCount": 4, "toClientCount": 1, "fromClientCount": 1, "avgOrders": "1.8"},
                                     },
                                     {
                                         "officeID": 11,
-                                        "officeName": "Казань",
-                                        "regionName": "Казань",
+                                        "officeName": "РљР°Р·Р°РЅСЊ",
+                                        "regionName": "РљР°Р·Р°РЅСЊ",
                                         "metrics": {"stockCount": 2, "toClientCount": 1, "fromClientCount": 0, "avgOrders": "0.7"},
                                     },
                                 ],
@@ -1173,7 +1238,7 @@ class SyncTests(TestCase):
                 payload={
                     "stats_date": reference_date.isoformat(),
                     "stock_date": reference_date.isoformat(),
-                    "progress": {"percent": 100, "stage": "Завершено", "detail": "ok"},
+                    "progress": {"percent": 100, "stage": "Р—Р°РІРµСЂС€РµРЅРѕ", "detail": "ok"},
                 },
             )
 
@@ -1186,7 +1251,7 @@ class SyncTests(TestCase):
 
         self.assertEqual(log.status, SyncStatus.SUCCESS)
         self.assertEqual(log.payload.get("skipped_dates_due_api_limit"), ["2026-03-09"])
-        self.assertIn("Пропущено дат из-за ограничения WB Analytics", log.message)
+        self.assertIn("РџСЂРѕРїСѓС‰РµРЅРѕ РґР°С‚ РёР·-Р·Р° РѕРіСЂР°РЅРёС‡РµРЅРёСЏ WB Analytics", log.message)
 
     def test_run_sync_range_raises_if_all_days_outside_wb_api_window(self) -> None:
         with patch(
@@ -1195,7 +1260,7 @@ class SyncTests(TestCase):
                 "WB API 400: code=400, message={Invalid request body validate: invalid start day: excess limit on days}"
             ),
         ):
-            with self.assertRaisesMessage(SyncServiceError, "целиком вне допустимого окна API"):
+            with self.assertRaisesMessage(SyncServiceError, "С†РµР»РёРєРѕРј РІРЅРµ РґРѕРїСѓСЃС‚РёРјРѕРіРѕ РѕРєРЅР° API"):
                 run_sync(
                     date_from=date(2026, 3, 9),
                     date_to=date(2026, 3, 10),
@@ -1257,7 +1322,7 @@ class WBClientTests(TestCase):
                 client = AnalyticsWBClient(token="test-token")
                 client.min_interval_seconds = 0
                 client.max_retries = 2
-                with self.assertRaisesMessage(WBApiError, "Wildberries временно ограничил запросы по кабинету"):
+                with self.assertRaisesMessage(WBApiError, "Wildberries РІСЂРµРјРµРЅРЅРѕ РѕРіСЂР°РЅРёС‡РёР» Р·Р°РїСЂРѕСЃС‹ РїРѕ РєР°Р±РёРЅРµС‚Сѓ"):
                     client.get_sales_funnel_history(
                         nm_ids=[123],
                         start_date=date(2026, 3, 16),
@@ -1354,7 +1419,7 @@ class ProductOperationsTests(TestCase):
             unit_cost=Decimal("1000.00"),
             logistics_cost=Decimal("250.00"),
         )
-        warehouse = Warehouse.objects.create(office_id=100, name="Коледино")
+        warehouse = Warehouse.objects.create(office_id=100, name="РљРѕР»РµРґРёРЅРѕ")
         DailyWarehouseStock.objects.create(
             product=product,
             warehouse=warehouse,
@@ -1373,15 +1438,15 @@ class ProductOperationsTests(TestCase):
                 "economics_effective_from": "2026-03-18",
                 "primary_keyword": "",
                 "secondary_keyword": "",
-                "visible_warehouses": ["Коледино"],
-                "visible_warehouse_names_extra": "Казань",
+                "visible_warehouses": ["РљРѕР»РµРґРёРЅРѕ"],
+                "visible_warehouse_names_extra": "РљР°Р·Р°РЅСЊ",
                 "is_active": "on",
             },
             instance=product,
         )
         self.assertTrue(form.is_valid(), form.errors)
         saved = form.save()
-        self.assertEqual(saved.visible_warehouse_names(), ["Казань", "Коледино"])
+        self.assertEqual(saved.visible_warehouse_names(), ["РљР°Р·Р°РЅСЊ", "РљРѕР»РµРґРёРЅРѕ"])
 
     def test_product_report_surfaces_manual_catalog_block(self) -> None:
         product = Product.objects.create(
@@ -1439,7 +1504,7 @@ class ProductOperationsTests(TestCase):
         )
 
         self.assertEqual(report["blocks"]["manual_catalog"].impressions, 350)
-        self.assertTrue(any(card["label"] == "Руч. каталог" for card in report["traffic_cards"]))
+        self.assertTrue(any(card["label"] == "Р СѓС‡. РєР°С‚Р°Р»РѕРі" for card in report["traffic_cards"]))
         self.assertTrue(any(alert["tone"] == "info" for alert in report["alerts"]))
 
     def test_add_product_redirects_to_next_when_provided(self) -> None:
@@ -1555,9 +1620,9 @@ class StockPopupPayloadTests(TestCase):
         )
         ProductVisibleWarehouse.objects.bulk_create(
             [
-                ProductVisibleWarehouse(product=product, warehouse_name="Коледино"),
-                ProductVisibleWarehouse(product=product, warehouse_name="Казань"),
-                ProductVisibleWarehouse(product=product, warehouse_name="Электросталь"),
+                ProductVisibleWarehouse(product=product, warehouse_name="РљРѕР»РµРґРёРЅРѕ"),
+                ProductVisibleWarehouse(product=product, warehouse_name="РљР°Р·Р°РЅСЊ"),
+                ProductVisibleWarehouse(product=product, warehouse_name="Р­Р»РµРєС‚СЂРѕСЃС‚Р°Р»СЊ"),
             ]
         )
         stock_row = DailyProductStock.objects.create(
@@ -1571,16 +1636,16 @@ class StockPopupPayloadTests(TestCase):
                             {
                                 "name": "42",
                                 "offices": [
-                                    {"officeName": "Коледино", "metrics": {"stockCount": 1}},
-                                    {"officeName": "Казань", "metrics": {"stockCount": 12}},
-                                    {"officeName": "Электросталь", "metrics": {"stockCount": 1}},
+                                    {"officeName": "РљРѕР»РµРґРёРЅРѕ", "metrics": {"stockCount": 1}},
+                                    {"officeName": "РљР°Р·Р°РЅСЊ", "metrics": {"stockCount": 12}},
+                                    {"officeName": "Р­Р»РµРєС‚СЂРѕСЃС‚Р°Р»СЊ", "metrics": {"stockCount": 1}},
                                 ],
                             },
                             {
                                 "name": "44",
                                 "offices": [
-                                    {"officeName": "Коледино", "metrics": {"stockCount": 1}},
-                                    {"officeName": "Казань", "metrics": {"stockCount": 5}},
+                                    {"officeName": "РљРѕР»РµРґРёРЅРѕ", "metrics": {"stockCount": 1}},
+                                    {"officeName": "РљР°Р·Р°РЅСЊ", "metrics": {"stockCount": 5}},
                                 ],
                             },
                         ]
@@ -1593,29 +1658,29 @@ class StockPopupPayloadTests(TestCase):
             product=product,
             stock_row=stock_row,
             warehouse_rows=[
-                {"warehouse": "Коледино", "stock": 2, "to_client": 0, "from_client": 0, "size_names": ["42", "44"]},
-                {"warehouse": "Казань", "stock": 17, "to_client": 0, "from_client": 0, "size_names": ["42", "44"]},
-                {"warehouse": "Электросталь", "stock": 1, "to_client": 0, "from_client": 0, "size_names": ["42"]},
+                {"warehouse": "РљРѕР»РµРґРёРЅРѕ", "stock": 2, "to_client": 0, "from_client": 0, "size_names": ["42", "44"]},
+                {"warehouse": "РљР°Р·Р°РЅСЊ", "stock": 17, "to_client": 0, "from_client": 0, "size_names": ["42", "44"]},
+                {"warehouse": "Р­Р»РµРєС‚СЂРѕСЃС‚Р°Р»СЊ", "stock": 1, "to_client": 0, "from_client": 0, "size_names": ["42"]},
             ],
-            visible_warehouse_names=["Коледино", "Казань", "Электросталь"],
-            preferred_warehouse_names={"коледино", "казань", "электросталь"},
+            visible_warehouse_names=["РљРѕР»РµРґРёРЅРѕ", "РљР°Р·Р°РЅСЊ", "Р­Р»РµРєС‚СЂРѕСЃС‚Р°Р»СЊ"],
+            preferred_warehouse_names={"РєРѕР»РµРґРёРЅРѕ", "РєР°Р·Р°РЅСЊ", "СЌР»РµРєС‚СЂРѕСЃС‚Р°Р»СЊ"},
         )
 
         self.assertEqual(payload["mode"], "matrix")
-        self.assertEqual(payload["title"], "Остатки")
+        self.assertEqual(payload["title"], "РћСЃС‚Р°С‚РєРё")
         parsed = json.loads(payload["payload_json"])
-        self.assertEqual(parsed["columns"][0]["label"], "Артикул продавца")
-        self.assertEqual(parsed["columns"][1]["label"], "Размер вещи")
-        self.assertEqual([column["label"] for column in parsed["columns"][2:]], ["Коледино", "Казань", "Электросталь"])
+        self.assertEqual(parsed["columns"][0]["label"], "РђСЂС‚РёРєСѓР» РїСЂРѕРґР°РІС†Р°")
+        self.assertEqual(parsed["columns"][1]["label"], "Р Р°Р·РјРµСЂ РІРµС‰Рё")
+        self.assertEqual([column["label"] for column in parsed["columns"][2:]], ["РљРѕР»РµРґРёРЅРѕ", "РљР°Р·Р°РЅСЊ", "Р­Р»РµРєС‚СЂРѕСЃС‚Р°Р»СЊ"])
         self.assertEqual(parsed["rows"][0]["vendor_code"], "W-RSS01-GRY")
         self.assertEqual(parsed["rows"][0]["size"], "42")
-        self.assertEqual(parsed["rows"][0]["коледино"], 1)
-        self.assertEqual(parsed["rows"][0]["казань"], 12)
-        self.assertEqual(parsed["rows"][0]["электросталь"], 1)
+        self.assertEqual(parsed["rows"][0]["РєРѕР»РµРґРёРЅРѕ"], 1)
+        self.assertEqual(parsed["rows"][0]["РєР°Р·Р°РЅСЊ"], 12)
+        self.assertEqual(parsed["rows"][0]["СЌР»РµРєС‚СЂРѕСЃС‚Р°Р»СЊ"], 1)
         self.assertEqual(parsed["rows"][1]["size"], "44")
-        self.assertEqual(parsed["rows"][1]["коледино"], 1)
-        self.assertEqual(parsed["rows"][1]["казань"], 5)
-        self.assertNotIn("электросталь", parsed["rows"][1])
+        self.assertEqual(parsed["rows"][1]["РєРѕР»РµРґРёРЅРѕ"], 1)
+        self.assertEqual(parsed["rows"][1]["РєР°Р·Р°РЅСЊ"], 5)
+        self.assertNotIn("СЌР»РµРєС‚СЂРѕСЃС‚Р°Р»СЊ", parsed["rows"][1])
 
 
 class PageRenderTests(TestCase):
@@ -1626,15 +1691,12 @@ class PageRenderTests(TestCase):
         products_page = self.client.get("/products/")
         detail = self.client.get(f"/products/{product.pk}/")
         reports = self.client.get("/reports/")
-        self.assertEqual(dashboard.status_code, 200)
+        self.assertEqual(dashboard.status_code, 302)
+        self.assertEqual(dashboard["Location"], "/table/")
         self.assertEqual(products_page.status_code, 200)
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(reports.status_code, 200)
-        self.assertContains(dashboard, "Разделы")
-        self.assertContains(dashboard, 'href="/table/"')
-        self.assertContains(dashboard, 'href="/products/"')
-        self.assertNotContains(dashboard, "monitoring-grid-table")
-        self.assertContains(products_page, "Список товаров")
+        self.assertContains(products_page, "РЎРїРёСЃРѕРє С‚РѕРІР°СЂРѕРІ")
         self.assertContains(detail, 'data-detail-tab-trigger="overview"')
         self.assertContains(reports, 'data-reports-tab-trigger="overview"')
         self.assertNotContains(reports, 'data-reports-tab-trigger="analytics"')
@@ -1647,9 +1709,9 @@ class PageRenderTests(TestCase):
         self.assertContains(response, "monitoring-grid-table")
         self.assertContains(response, "data-sync-indicator")
         self.assertContains(response, "data-table-period-picker")
-        self.assertContains(response, "Выбранный период")
+        self.assertContains(response, "Р’С‹Р±СЂР°РЅРЅС‹Р№ РїРµСЂРёРѕРґ")
         self.assertContains(response, "table-timeline-chart-data")
-        self.assertContains(response, "Динамика SKU")
+        self.assertContains(response, "Р”РёРЅР°РјРёРєР° SKU")
         self.assertContains(response, 'data-default-density="compact"')
         self.assertContains(response, 'data-default-fullscreen="normal"')
 
@@ -1668,7 +1730,7 @@ class PageRenderTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "campaign-timeline-chart")
         self.assertContains(response, 'data-detail-tab-trigger="overview"')
-        self.assertContains(response, "Товары внутри кампании")
+        self.assertContains(response, "РўРѕРІР°СЂС‹ РІРЅСѓС‚СЂРё РєР°РјРїР°РЅРёРё")
 
     def test_table_page_renders_inline_note_controls(self) -> None:
         seed_demo_dataset()
@@ -1712,7 +1774,7 @@ class PageRenderTests(TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn("charset=utf-8", response["Content-Type"].lower())
             html = response.content.decode("utf-8")
-            self.assertNotIn("РќР", html)
+            self.assertNotIn("Р СњР ", html)
 
     def test_reports_bar_width_styles_use_dot_separator(self) -> None:
         seed_demo_dataset()
@@ -1728,7 +1790,7 @@ class PageRenderTests(TestCase):
         self.assertEqual(response.context["date_from"], date(2026, 3, 12))
         self.assertEqual(response.context["date_to"], date(2026, 3, 18))
         self.assertEqual(response.context["range_days"], 7)
-        self.assertContains(response, "12.03.2026 — 18.03.2026")
+        self.assertContains(response, "12.03.2026 вЂ” 18.03.2026")
 
     def test_reports_page_prefills_range_fields_from_reference_and_window_query(self) -> None:
         seed_demo_dataset()
@@ -1896,8 +1958,8 @@ class SyncViewsTests(TestCase):
             payload={
                 "progress": {
                     "percent": 37,
-                    "stage": "Остатки",
-                    "detail": "Сбор остатков",
+                    "stage": "РћСЃС‚Р°С‚РєРё",
+                    "detail": "РЎР±РѕСЂ РѕСЃС‚Р°С‚РєРѕРІ",
                 }
             },
         )
@@ -1908,7 +1970,7 @@ class SyncViewsTests(TestCase):
         self.assertTrue(payload["is_running"])
         self.assertEqual(payload["id"], log.id)
         self.assertEqual(payload["progress"]["percent"], 37)
-        self.assertEqual(payload["progress"]["stage"], "Остатки")
+        self.assertEqual(payload["progress"]["stage"], "РћСЃС‚Р°С‚РєРё")
         self.assertTrue(payload["can_cancel"])
         self.assertFalse(payload["cancel_requested"])
 
@@ -1920,8 +1982,8 @@ class SyncViewsTests(TestCase):
             payload={
                 "progress": {
                     "percent": 96,
-                    "stage": "Финализация",
-                    "detail": "Формирование итогов.",
+                    "stage": "Р¤РёРЅР°Р»РёР·Р°С†РёСЏ",
+                    "detail": "Р¤РѕСЂРјРёСЂРѕРІР°РЅРёРµ РёС‚РѕРіРѕРІ.",
                 }
             },
         )
@@ -1939,7 +2001,7 @@ class SyncViewsTests(TestCase):
         self.assertEqual(log.status, SyncStatus.CANCELED)
         self.assertIsNotNone(log.finished_at)
         self.assertTrue(log.payload.get("cancel_requested"))
-        self.assertEqual((log.payload.get("progress") or {}).get("stage"), "Отменено")
+        self.assertEqual((log.payload.get("progress") or {}).get("stage"), "РћС‚РјРµРЅРµРЅРѕ")
 
     def test_sync_cancel_returns_info_when_no_running_sync(self) -> None:
         response = self.client.post(
@@ -2015,8 +2077,8 @@ class TableInlineNoteUpdateTests(TestCase):
         self.note = DailyProductNote.objects.create(
             product=self.product,
             note_date=date(2026, 3, 18),
-            promo_status="Не участвуем",
-            negative_feedback="Без изменений",
+            promo_status="РќРµ СѓС‡Р°СЃС‚РІСѓРµРј",
+            negative_feedback="Р‘РµР· РёР·РјРµРЅРµРЅРёР№",
             unified_enabled=False,
         )
 
@@ -2036,7 +2098,7 @@ class TableInlineNoteUpdateTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["value"], "Да")
+        self.assertEqual(payload["value"], "Р”Р°")
 
         self.note.refresh_from_db()
         self.assertTrue(self.note.unified_enabled)
@@ -2049,7 +2111,7 @@ class TableInlineNoteUpdateTests(TestCase):
                     "product_id": self.product.id,
                     "note_date": "2026-03-18",
                     "field": "promo_status",
-                    "value": "Тест",
+                    "value": "РўРµСЃС‚",
                 }
             ),
             content_type="application/json",
@@ -2057,10 +2119,10 @@ class TableInlineNoteUpdateTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["value"], "Тест")
+        self.assertEqual(payload["value"], "РўРµСЃС‚")
 
         self.note.refresh_from_db()
-        self.assertEqual(self.note.promo_status, "Тест")
+        self.assertEqual(self.note.promo_status, "РўРµСЃС‚")
     def test_table_note_cell_updates_decimal_note_field(self) -> None:
         response = self.client.post(
             "/table/note-cell/",
@@ -2111,7 +2173,7 @@ class TableInlineNoteUpdateTests(TestCase):
                     "product_id": self.product.id,
                     "note_date": "2026-03-18",
                     "field": "primary_keyword",
-                    "value": "брюки мужские",
+                    "value": "Р±СЂСЋРєРё РјСѓР¶СЃРєРёРµ",
                 }
             ),
             content_type="application/json",
@@ -2119,10 +2181,10 @@ class TableInlineNoteUpdateTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["value"], "брюки мужские")
+        self.assertEqual(payload["value"], "Р±СЂСЋРєРё РјСѓР¶СЃРєРёРµ")
 
         self.product.refresh_from_db()
-        self.assertEqual(self.product.primary_keyword, "брюки мужские")
+        self.assertEqual(self.product.primary_keyword, "Р±СЂСЋРєРё РјСѓР¶СЃРєРёРµ")
 
     def test_table_note_cell_updates_daily_keyword_query(self) -> None:
         response = self.client.post(
@@ -2132,7 +2194,7 @@ class TableInlineNoteUpdateTests(TestCase):
                     "product_id": self.product.id,
                     "note_date": "2026-03-18",
                     "field": "keyword_query",
-                    "value": "брюки мужские черные",
+                    "value": "Р±СЂСЋРєРё РјСѓР¶СЃРєРёРµ С‡РµСЂРЅС‹Рµ",
                     "keyword_prev": "",
                 }
             ),
@@ -2141,13 +2203,13 @@ class TableInlineNoteUpdateTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["value"], "брюки мужские черные")
+        self.assertEqual(payload["value"], "Р±СЂСЋРєРё РјСѓР¶СЃРєРёРµ С‡РµСЂРЅС‹Рµ")
 
         self.note.refresh_from_db()
-        self.assertEqual(self.note.keywords, ["брюки мужские черные"])
+        self.assertEqual(self.note.keywords, ["Р±СЂСЋРєРё РјСѓР¶СЃРєРёРµ С‡РµСЂРЅС‹Рµ"])
 
     def test_table_note_cell_updates_daily_keyword_metrics(self) -> None:
-        self.note.keywords = ["брюки мужские черные"]
+        self.note.keywords = ["Р±СЂСЋРєРё РјСѓР¶СЃРєРёРµ С‡РµСЂРЅС‹Рµ"]
         self.note.save(update_fields=["keywords", "updated_at"])
 
         response = self.client.post(
@@ -2158,8 +2220,8 @@ class TableInlineNoteUpdateTests(TestCase):
                     "note_date": "2026-03-18",
                     "field": "keyword_frequency",
                     "value": "120",
-                    "keyword_prev": "брюки мужские черные",
-                    "keyword_query": "брюки мужские черные",
+                    "keyword_prev": "Р±СЂСЋРєРё РјСѓР¶СЃРєРёРµ С‡РµСЂРЅС‹Рµ",
+                    "keyword_query": "Р±СЂСЋРєРё РјСѓР¶СЃРєРёРµ С‡РµСЂРЅС‹Рµ",
                 }
             ),
             content_type="application/json",
@@ -2177,8 +2239,8 @@ class TableInlineNoteUpdateTests(TestCase):
                     "note_date": "2026-03-18",
                     "field": "keyword_boosted_ctr",
                     "value": "8,40",
-                    "keyword_prev": "брюки мужские черные",
-                    "keyword_query": "брюки мужские черные",
+                    "keyword_prev": "Р±СЂСЋРєРё РјСѓР¶СЃРєРёРµ С‡РµСЂРЅС‹Рµ",
+                    "keyword_query": "Р±СЂСЋРєРё РјСѓР¶СЃРєРёРµ С‡РµСЂРЅС‹Рµ",
                 }
             ),
             content_type="application/json",
@@ -2191,13 +2253,13 @@ class TableInlineNoteUpdateTests(TestCase):
         stat = DailyProductKeywordStat.objects.get(
             product=self.product,
             stats_date=date(2026, 3, 18),
-            query_text="брюки мужские черные",
+            query_text="Р±СЂСЋРєРё РјСѓР¶СЃРєРёРµ С‡РµСЂРЅС‹Рµ",
         )
         self.assertEqual(stat.frequency, 120)
         self.assertEqual(stat.boosted_ctr, Decimal("8.40"))
 
     def test_table_note_cell_changes_keyword_rows_count(self) -> None:
-        self.note.keywords = ["ключ 1", "ключ 2"]
+        self.note.keywords = ["РєР»СЋС‡ 1", "РєР»СЋС‡ 2"]
         self.note.keyword_rows_count = 3
         self.note.save(update_fields=["keywords", "keyword_rows_count", "updated_at"])
 
@@ -2234,13 +2296,13 @@ class TableInlineNoteUpdateTests(TestCase):
         self.assertEqual(self.note.keyword_rows_count, 3)
 
     def test_table_note_cell_trims_keywords_when_rows_are_removed(self) -> None:
-        self.note.keywords = ["ключ 1", "ключ 2", "ключ 3"]
+        self.note.keywords = ["РєР»СЋС‡ 1", "РєР»СЋС‡ 2", "РєР»СЋС‡ 3"]
         self.note.keyword_rows_count = 3
         self.note.save(update_fields=["keywords", "keyword_rows_count", "updated_at"])
         DailyProductKeywordStat.objects.create(
             product=self.product,
             stats_date=date(2026, 3, 18),
-            query_text="ключ 3",
+            query_text="РєР»СЋС‡ 3",
             frequency=50,
         )
 
@@ -2260,11 +2322,11 @@ class TableInlineNoteUpdateTests(TestCase):
 
         self.note.refresh_from_db()
         self.assertEqual(self.note.keyword_rows_count, 2)
-        self.assertEqual(self.note.keywords, ["ключ 1", "ключ 2"])
+        self.assertEqual(self.note.keywords, ["РєР»СЋС‡ 1", "РєР»СЋС‡ 2"])
         self.assertFalse(
             DailyProductKeywordStat.objects.filter(
                 product=self.product,
                 stats_date=date(2026, 3, 18),
-                query_text="ключ 3",
+                query_text="РєР»СЋС‡ 3",
             ).exists()
         )

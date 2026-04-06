@@ -62,7 +62,24 @@
         if (!Number.isFinite(value)) {
             return "";
         }
+        if (value !== 0 && Math.abs(value) < 0.01) {
+            return value > 0 ? "<0,01%" : ">-0,01%";
+        }
         return `${formatDecimalValue(value)}%`;
+    }
+
+    function formatRatioCell(numerator, denominator, { percent = false, blankWhenZeroNumerator = false } = {}) {
+        if (!Number.isFinite(denominator) || denominator === 0) {
+            return "-";
+        }
+        if (!Number.isFinite(numerator)) {
+            return "-";
+        }
+        if (blankWhenZeroNumerator && numerator === 0) {
+            return "-";
+        }
+        const value = numerator / denominator;
+        return percent ? formatPercentValue(value * 100) : formatDecimalValue(value);
     }
 
     function initLiveCalculations(tableWrap) {
@@ -152,8 +169,12 @@
             setCellText(ROW.CTR, blockIndex, COL.OVERALL, "-");
             setCellText(ROW.CPM, blockIndex, COL.OVERALL, "-");
 
-            const cpc = clicks ? (spend || 0) / clicks : null;
-            setCellText(ROW.CPC, blockIndex, COL.OVERALL, Number.isFinite(cpc) ? formatDecimalValue(cpc) : "-");
+            setCellText(
+                ROW.CPC,
+                blockIndex,
+                COL.OVERALL,
+                formatRatioCell(spend, clicks),
+            );
 
             const conversionCart = clicks ? (carts || 0) * 100 / clicks : null;
             setCellText(ROW.CONVERSION_CART, blockIndex, COL.OVERALL, Number.isFinite(conversionCart) ? formatPercentValue(conversionCart) : "-");
@@ -166,8 +187,8 @@
             const buyouts = orderSum && buyoutFraction ? orderSum * buyoutFraction : null;
             setCellText(ROW.BUYOUTS, blockIndex, COL.OVERALL, Number.isFinite(buyouts) ? formatDecimalValue(buyouts) : "-");
 
-            const drrSalesRatio = buyouts ? (spend || 0) / buyouts : null;
-            setCellText(ROW.DRR_SALES, blockIndex, COL.OVERALL, Number.isFinite(drrSalesRatio) ? formatPercentValue(drrSalesRatio * 100) : "-");
+            const drrSalesCell = formatRatioCell(spend, buyouts, { percent: true, blankWhenZeroNumerator: true });
+            setCellText(ROW.DRR_SALES, blockIndex, COL.OVERALL, drrSalesCell);
 
             const sellerPrice = readNumber(ROW.SELLER_PRICE, blockIndex, COL.SELLER_PRICE) || 0;
             const unitCost = readNumber(ROW.UNIT_COST, blockIndex, COL.INPUT_MAIN) || 0;
@@ -176,7 +197,10 @@
 
             let profit = null;
             if (sellerPrice && buyoutFraction > 0) {
-                const drrRatioForProfit = Number.isFinite(drrSalesRatio) ? drrSalesRatio : 0;
+                const drrRatioForProfit =
+                    Number.isFinite(spend) && spend > 0 && Number.isFinite(buyouts) && buyouts > 0
+                        ? spend / buyouts
+                        : 0;
                 const logisticsAdjustment = logistics / buyoutFraction - 50;
                 const margin =
                     sellerPrice -
