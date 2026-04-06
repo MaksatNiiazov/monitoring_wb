@@ -364,7 +364,6 @@ class SyncForm(StyledFormMixin, forms.Form):
         "date_from": "Начало периода: с этой даты будут перезаписываться данные.",
         "date_to": "Конец периода: обновятся только записи внутри выбранного диапазона.",
         "reference_date": "Остатки, реклама и воронка будут собраны на эту же дату.",
-        "force": "Перезапишет уже сохранённые данные только за выбранный период.",
     }
 
     product_ids = forms.ModelMultipleChoiceField(
@@ -379,8 +378,6 @@ class SyncForm(StyledFormMixin, forms.Form):
         label="Дата запуска",
         widget=forms.DateInput(attrs={"type": "date"}),
     )
-    force = forms.BooleanField(required=False, initial=True, label="Перезаписывать данные за дату")
-
 
     date_from = forms.DateField(
         required=False,
@@ -398,11 +395,9 @@ class SyncForm(StyledFormMixin, forms.Form):
     def __init__(self, *args, show_products: bool = True, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["reference_date"].widget = forms.HiddenInput()
-        self.fields["force"].widget = forms.HiddenInput()
-        self.fields["force"].initial = True
         if not show_products:
             self.fields["product_ids"].widget = forms.HiddenInput()
-        self.order_fields(["product_ids", "date_from", "date_to", "force", "reference_date"])
+        self.order_fields(["product_ids", "date_from", "date_to", "reference_date"])
 
     def clean(self):
         cleaned_data = super().clean()
@@ -425,7 +420,6 @@ class SyncForm(StyledFormMixin, forms.Form):
         cleaned_data["date_to"] = date_to
         # Для обратной совместимости со старым single-day режимом.
         cleaned_data["reference_date"] = date_to or reference_date
-        cleaned_data["force"] = True
         return cleaned_data
 
 
@@ -542,7 +536,6 @@ class MonitoringSettingsForm(StyledFormMixin, forms.ModelForm):
         "report_timezone": "Например, Asia/Bishkek или Europe/Moscow.",
         "sync_hour": "Час автосинхронизации.",
         "sync_minute": "Минуты автосинхронизации.",
-        "overwrite_within_day": "Повторный запуск в тот же день обновит данные за эту дату.",
         "monitoring_history_days": "Глубина истории для книги и витрины.",
         "table_default_compact_mode": "Как открывать рабочую таблицу по умолчанию: компактно или в обычной плотности.",
         "table_default_fullscreen_mode": "Нужно ли сразу раскрывать рабочую таблицу на весь экран при открытии.",
@@ -557,7 +550,6 @@ class MonitoringSettingsForm(StyledFormMixin, forms.ModelForm):
             "report_timezone",
             "sync_hour",
             "sync_minute",
-            "overwrite_within_day",
             "monitoring_history_days",
             "table_default_compact_mode",
             "table_default_fullscreen_mode",

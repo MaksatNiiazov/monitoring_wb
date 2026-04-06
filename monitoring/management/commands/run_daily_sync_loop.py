@@ -39,7 +39,7 @@ class Command(BaseCommand):
                     report_now = self._report_now(runtime_settings.report_timezone)
                     run_sync(
                         kind=SyncKind.FULL,
-                        overwrite=runtime_settings.overwrite_within_day,
+                        overwrite=True,
                         reference_date=report_now.date(),
                     )
                     self.stdout.write(self.style.SUCCESS("Ежедневная синхронизация выполнена."))

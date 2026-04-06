@@ -397,7 +397,7 @@ def build_day_block(
                 "",
             ],
             ["", "Меняли цену?(WBSeller)", "", "", _bool_label(note.price_changed), "", "", ""],
-            ["", "Комментарии:", "", "", "", note.comment, "", ""],
+            ["Комментарий:", note.comment, "", "", "", "", "", ""],
         ]
     )
     return rows

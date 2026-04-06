@@ -99,5 +99,4 @@ class MonitoringSettingsAdmin(admin.ModelAdmin):
         "report_timezone",
         "sync_hour",
         "sync_minute",
-        "overwrite_within_day",
     )

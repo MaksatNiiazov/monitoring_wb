@@ -32,7 +32,6 @@ def _fallback_monitoring_settings() -> SimpleNamespace:
         report_timezone=settings.WB_REPORT_TIMEZONE,
         sync_hour=settings.WB_SYNC_HOUR,
         sync_minute=settings.WB_SYNC_MINUTE,
-        overwrite_within_day=True,
         monitoring_history_days=14,
         table_default_compact_mode=True,
         table_default_fullscreen_mode=False,

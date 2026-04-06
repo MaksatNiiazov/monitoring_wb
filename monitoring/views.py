@@ -516,7 +516,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
             },
             (41, 4): {"type": "bool", "field": "ads_enabled"},
             (42, 4): {"type": "bool", "field": "price_changed"},
-            (43, 5): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
+            (43, 1): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
         }
 
         display_spans: dict[tuple[int, int], dict[str, bool]] = {
@@ -738,7 +738,6 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 "reference_date": reference_date,
                 "date_from": reference_date,
                 "date_to": reference_date,
-                "force": workspace_settings.overwrite_within_day,
             }
         ),
         "workspace_settings": workspace_settings,
@@ -1024,7 +1023,7 @@ def sync_all(request: HttpRequest) -> HttpResponse:
         date_from=form.cleaned_data["date_from"],
         date_to=form.cleaned_data["date_to"],
         reference_date=form.cleaned_data["reference_date"],
-        overwrite=form.cleaned_data["force"],
+        overwrite=True,
         kind=sync_kind,
     )
     if product_ids:
@@ -1059,7 +1058,6 @@ def product_detail(request: HttpRequest, pk: int) -> HttpResponse:
                 "reference_date": stock_date,
                 "date_from": stock_date,
                 "date_to": stock_date,
-                "force": get_monitoring_settings().overwrite_within_day,
             },
             show_products=False,
         ),
@@ -1090,7 +1088,7 @@ def sync_product(request: HttpRequest, pk: int) -> HttpResponse:
             date_from=form.cleaned_data["date_from"],
             date_to=form.cleaned_data["date_to"],
             reference_date=form.cleaned_data["reference_date"],
-            overwrite=form.cleaned_data["force"],
+            overwrite=True,
             kind=SyncKind.PRODUCT,
         )
         messages.success(
@@ -1630,7 +1628,6 @@ def workspace_settings(request: HttpRequest) -> HttpResponse:
                 "report_timezone": settings_obj.report_timezone,
                 "sync_hour": settings_obj.sync_hour,
                 "sync_minute": settings_obj.sync_minute,
-                "overwrite_within_day": settings_obj.overwrite_within_day,
                 "monitoring_history_days": getattr(settings_obj, "monitoring_history_days", 14),
                 "table_default_compact_mode": getattr(settings_obj, "table_default_compact_mode", True),
                 "table_default_fullscreen_mode": getattr(settings_obj, "table_default_fullscreen_mode", False),

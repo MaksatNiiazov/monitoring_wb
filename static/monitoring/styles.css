@@ -2063,7 +2063,7 @@ body.is-modal-open {
     width: 8px;
     max-width: 8px;
     padding: 0;
-    background: #f5f8fc;
+    background: rgba(241, 246, 252, 0.9);
 }
 
 .monitoring-grid-table td.is-block-start {
@@ -2094,7 +2094,12 @@ body.is-modal-open {
     position: sticky;
     left: 0;
     z-index: 4;
-    box-shadow: 10px 0 16px rgba(19, 37, 49, 0.12);
+    background: rgba(248, 251, 255, 0.9);
+    -webkit-backdrop-filter: blur(5px);
+    backdrop-filter: blur(5px);
+    box-shadow:
+        10px 0 16px rgba(19, 37, 49, 0.14),
+        inset -1px 0 0 rgba(188, 201, 219, 0.72);
 }
 
 .monitoring-grid-table.is-product td.is-keyword-label-col:not(.is-spacer-col) {
@@ -2108,7 +2113,12 @@ body.is-modal-open {
     position: sticky;
     left: 136px;
     z-index: 4;
-    box-shadow: 6px 0 10px rgba(19, 37, 49, 0.08);
+    background: rgba(240, 245, 251, 0.9);
+    -webkit-backdrop-filter: blur(5px);
+    backdrop-filter: blur(5px);
+    box-shadow:
+        6px 0 10px rgba(19, 37, 49, 0.1),
+        inset -1px 0 0 rgba(188, 201, 219, 0.58);
 }
 
 .monitoring-grid-table td.is-control-cell {
@@ -2179,12 +2189,20 @@ body.is-modal-open {
     background: rgba(255, 236, 209, 0.9);
 }
 
+.monitoring-grid-table tr.is-row-match td.is-spacer-col {
+    background: rgba(255, 236, 209, 0.92);
+}
+
 .monitoring-grid-table tbody tr:hover td:not(.is-gap-col) {
     background: rgba(230, 238, 252, 0.92);
 }
 
 .monitoring-grid-table tbody tr:hover td.is-label-col:not(.is-gap-col) {
     background: rgba(214, 228, 249, 0.98);
+}
+
+.monitoring-grid-table tbody tr:hover td.is-spacer-col {
+    background: rgba(214, 228, 249, 0.96);
 }
 
 .sync-quick-panel {

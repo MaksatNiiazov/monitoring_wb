@@ -297,7 +297,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             ["", "Действия:", "", "", "", "", "", ""],
             ["", "Включили рекламу?", "", "", "Да" if (note.unified_enabled or note.manual_search_enabled or note.manual_shelves_enabled) else "Нет", "", "", ""],
             ["", "Меняли цену?(WBSeller)", "", "", "Да" if note.price_changed else "Нет", "", "", ""],
-            ["", "Комментарии:", "", "", "", note.comment, "", ""],
+            ["Комментарий:", note.comment, "", "", "", "", "", ""],
         ]
     )
     return rows
