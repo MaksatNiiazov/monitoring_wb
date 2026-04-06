@@ -673,80 +673,332 @@
         if (!form) {
             return;
         }
-
         const referenceInput = form.querySelector("input[name='reference_date']");
         const historyInput = form.querySelector("input[name='history_days']");
-        const presetsRoot = document.querySelector("[data-table-filter-presets]");
-        const presetButtons = presetsRoot ? Array.from(presetsRoot.querySelectorAll(".table-preset-button")) : [];
-
-        const clampHistoryDays = () => {
-            if (!historyInput) {
-                return;
-            }
-            const fallback = 14;
-            const parsed = Number(historyInput.value || fallback);
-            const normalized = Number.isFinite(parsed) ? Math.max(1, Math.min(90, Math.round(parsed))) : fallback;
-            historyInput.value = String(normalized);
-        };
-
-        const updateActivePreset = () => {
-            if (!historyInput || !presetButtons.length) {
-                return;
-            }
-            const currentDays = String(historyInput.value || "").trim();
-            presetButtons.forEach((button) => {
-                if (!button.dataset.filterDays) {
-                    return;
-                }
-                button.classList.toggle("is-active", button.dataset.filterDays === currentDays);
-            });
-        };
-
-        if (historyInput) {
-            historyInput.addEventListener("change", () => {
-                clampHistoryDays();
-                updateActivePreset();
-            });
-            historyInput.addEventListener("blur", () => {
-                clampHistoryDays();
-                updateActivePreset();
-            });
-            clampHistoryDays();
-            updateActivePreset();
-        }
-
-        if (!presetButtons.length) {
+        const picker = form.querySelector("[data-table-period-picker]");
+        if (!referenceInput || !historyInput || !picker) {
             return;
         }
+        const trigger = picker.querySelector("[data-period-trigger]");
+        const triggerLabel = picker.querySelector("[data-period-trigger-label]");
+        const panel = picker.querySelector("[data-period-panel]");
+        const monthsHead = picker.querySelector("[data-period-months]");
+        const calendarsRoot = picker.querySelector("[data-period-calendars]");
+        const summaryLabel = picker.querySelector("[data-period-summary-label]");
+        const summaryMeta = picker.querySelector("[data-period-summary-meta]");
+        const applyButton = picker.querySelector("[data-period-apply]");
+        const cancelButton = picker.querySelector("[data-period-cancel]");
+        const customButton = picker.querySelector("[data-period-custom]");
+        const navButtons = Array.from(picker.querySelectorAll("[data-period-nav]"));
+        const presetButtons = Array.from(picker.querySelectorAll("[data-period-preset]"));
+        const maxDays = Math.max(1, Math.min(90, Number.parseInt(picker.dataset.maxDays || "90", 10) || 90));
 
-        const todayValue = () => {
-            const now = new Date();
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, "0");
-            const day = String(now.getDate()).padStart(2, "0");
+        const monthFormatter = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" });
+        const triggerFormatter = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+        const weekdayLabels = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+
+        const parseIsoDate = (rawValue) => {
+            const match = String(rawValue || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (!match) {
+                return null;
+            }
+            return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+        };
+
+        const formatIsoDate = (dateValue) => {
+            const year = dateValue.getFullYear();
+            const month = String(dateValue.getMonth() + 1).padStart(2, "0");
+            const day = String(dateValue.getDate()).padStart(2, "0");
             return `${year}-${month}-${day}`;
         };
 
-        presetButtons.forEach((button) => {
-            button.addEventListener("click", () => {
-                let changed = false;
+        const formatTriggerRange = (startDate, endDate) =>
+            `${triggerFormatter.format(startDate)} — ${triggerFormatter.format(endDate)}`;
 
-                if (button.dataset.filterDays && historyInput) {
-                    historyInput.value = button.dataset.filterDays;
-                    changed = true;
-                }
-                if (button.dataset.filterReference === "today" && referenceInput) {
-                    referenceInput.value = todayValue();
-                    changed = true;
-                }
+        const stripTime = (dateValue) => new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate());
+        const addDays = (dateValue, days) => {
+            const next = new Date(dateValue);
+            next.setDate(next.getDate() + days);
+            return stripTime(next);
+        };
+        const addMonths = (dateValue, months) => new Date(dateValue.getFullYear(), dateValue.getMonth() + months, 1);
+        const startOfMonth = (dateValue) => new Date(dateValue.getFullYear(), dateValue.getMonth(), 1);
+        const endOfMonth = (dateValue) => new Date(dateValue.getFullYear(), dateValue.getMonth() + 1, 0);
+        const isSameDay = (left, right) =>
+            left &&
+            right &&
+            left.getFullYear() === right.getFullYear() &&
+            left.getMonth() === right.getMonth() &&
+            left.getDate() === right.getDate();
+        const diffDaysInclusive = (startDate, endDate) =>
+            Math.round((stripTime(endDate).getTime() - stripTime(startDate).getTime()) / 86400000) + 1;
+        const rangeLength = (startDate, endDate) => diffDaysInclusive(startDate, endDate);
 
-                clampHistoryDays();
-                updateActivePreset();
+        const fallbackEnd = parseIsoDate(referenceInput.value) || stripTime(new Date());
+        const fallbackDays = Math.max(1, Math.min(maxDays, Number.parseInt(historyInput.value || "14", 10) || 14));
+        const appliedEnd = parseIsoDate(picker.dataset.currentEnd) || fallbackEnd;
+        const appliedStart = parseIsoDate(picker.dataset.currentStart) || addDays(appliedEnd, -(fallbackDays - 1));
 
-                if (changed) {
-                    form.requestSubmit();
-                }
+        const state = {
+            appliedStart: stripTime(appliedStart),
+            appliedEnd: stripTime(appliedEnd),
+            appliedIsCustom: false,
+            draftStart: stripTime(appliedStart),
+            draftEnd: stripTime(appliedEnd),
+            draftIsCustom: false,
+            visibleMonth: startOfMonth(appliedStart),
+            selectingRange: false,
+        };
+
+        const syncTrigger = () => {
+            if (triggerLabel) {
+                triggerLabel.textContent = formatTriggerRange(state.appliedStart, state.appliedEnd);
+            }
+        };
+
+        const syncSummary = () => {
+            const days = rangeLength(state.draftStart, state.draftEnd);
+            if (summaryLabel) {
+                summaryLabel.textContent = formatTriggerRange(state.draftStart, state.draftEnd);
+            }
+            if (summaryMeta) {
+                summaryMeta.textContent = days > maxDays ? `Максимум ${maxDays} дн.` : `${days} дн.`;
+            }
+            if (applyButton) {
+                applyButton.disabled = days > maxDays;
+            }
+        };
+
+        const syncPresets = () => {
+            const days = rangeLength(state.draftStart, state.draftEnd);
+            let matched = false;
+            presetButtons.forEach((button) => {
+                const presetDays = Number.parseInt(button.dataset.periodPreset || "", 10);
+                const isCustom = button.hasAttribute("data-period-custom");
+                const isActive = !isCustom && !state.draftIsCustom && Number.isFinite(presetDays) && presetDays === days;
+                button.classList.toggle("is-active", isActive);
+                matched = matched || isActive;
             });
+            if (customButton) {
+                customButton.classList.toggle("is-active", state.draftIsCustom || !matched);
+            }
+        };
+
+        const renderCalendars = () => {
+            if (!monthsHead || !calendarsRoot) {
+                return;
+            }
+            monthsHead.innerHTML = "";
+            calendarsRoot.innerHTML = "";
+
+            [state.visibleMonth, addMonths(state.visibleMonth, 1)].forEach((monthDate) => {
+                const monthTitle = document.createElement("div");
+                monthTitle.className = "table-period-month-heading";
+                monthTitle.textContent = monthFormatter.format(monthDate);
+                monthsHead.appendChild(monthTitle);
+
+                const month = document.createElement("section");
+                month.className = "table-period-month";
+
+                const weekdays = document.createElement("div");
+                weekdays.className = "table-period-weekdays";
+                weekdayLabels.forEach((label) => {
+                    const node = document.createElement("span");
+                    node.textContent = label;
+                    weekdays.appendChild(node);
+                });
+                month.appendChild(weekdays);
+
+                const daysGrid = document.createElement("div");
+                daysGrid.className = "table-period-days";
+                const monthStart = startOfMonth(monthDate);
+                const monthEnd = endOfMonth(monthDate);
+                const startOffset = (monthStart.getDay() || 7) - 1;
+                const daysInMonth = monthEnd.getDate();
+                const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+
+                for (let cellIndex = 0; cellIndex < totalCells; cellIndex += 1) {
+                    const dayNumber = cellIndex - startOffset + 1;
+                    if (dayNumber < 1 || dayNumber > daysInMonth) {
+                        const placeholder = document.createElement("span");
+                        placeholder.className = "table-period-day is-placeholder";
+                        placeholder.setAttribute("aria-hidden", "true");
+                        daysGrid.appendChild(placeholder);
+                        continue;
+                    }
+
+                    const cursor = new Date(monthDate.getFullYear(), monthDate.getMonth(), dayNumber);
+                    const dayButton = document.createElement("button");
+                    dayButton.type = "button";
+                    dayButton.className = "table-period-day";
+                    dayButton.textContent = String(cursor.getDate());
+                    dayButton.dataset.date = formatIsoDate(cursor);
+
+                    const isStart = isSameDay(cursor, state.draftStart);
+                    const isEnd = isSameDay(cursor, state.draftEnd);
+                    const inRange = cursor >= state.draftStart && cursor <= state.draftEnd;
+                    if (inRange) {
+                        dayButton.classList.add("is-in-range");
+                    }
+                    if (isStart && isEnd) {
+                        dayButton.classList.add("is-single");
+                    } else {
+                        if (isStart) {
+                            dayButton.classList.add("is-range-start");
+                        }
+                        if (isEnd) {
+                            dayButton.classList.add("is-range-end");
+                        }
+                    }
+
+                    dayButton.addEventListener("click", () => {
+                        const picked = parseIsoDate(dayButton.dataset.date);
+                        if (!picked) {
+                            return;
+                        }
+                        state.draftIsCustom = true;
+                        if (!state.selectingRange) {
+                            state.draftStart = picked;
+                            state.draftEnd = picked;
+                            state.selectingRange = true;
+                        } else {
+                            if (picked < state.draftStart) {
+                                state.draftEnd = state.draftStart;
+                                state.draftStart = picked;
+                            } else {
+                                state.draftEnd = picked;
+                            }
+                            state.selectingRange = false;
+                        }
+                        syncSummary();
+                        syncPresets();
+                        renderCalendars();
+                    });
+
+                    daysGrid.appendChild(dayButton);
+                }
+                month.appendChild(daysGrid);
+                calendarsRoot.appendChild(month);
+            });
+        };
+
+        const openPanel = () => {
+            state.draftStart = stripTime(state.appliedStart);
+            state.draftEnd = stripTime(state.appliedEnd);
+            state.draftIsCustom = state.appliedIsCustom;
+            state.visibleMonth = startOfMonth(state.draftStart);
+            state.selectingRange = false;
+            picker.classList.add("is-open");
+            panel.hidden = false;
+            trigger.setAttribute("aria-expanded", "true");
+            syncSummary();
+            syncPresets();
+            renderCalendars();
+        };
+
+        const closePanel = () => {
+            picker.classList.remove("is-open");
+            panel.hidden = true;
+            trigger.setAttribute("aria-expanded", "false");
+            state.selectingRange = false;
+        };
+
+        syncTrigger();
+        syncSummary();
+        syncPresets();
+
+        trigger.addEventListener("click", () => {
+            if (picker.classList.contains("is-open")) {
+                closePanel();
+                return;
+            }
+            openPanel();
+        });
+
+        picker.addEventListener("click", (event) => {
+            event.stopPropagation();
+        });
+
+        navButtons.forEach((button) => {
+            button.addEventListener("click", () => {
+                const direction = Number.parseInt(button.dataset.periodNav || "0", 10);
+                if (!Number.isFinite(direction) || direction === 0) {
+                    return;
+                }
+                state.visibleMonth = addMonths(state.visibleMonth, direction);
+                renderCalendars();
+            });
+        });
+
+        presetButtons.forEach((button) => {
+            if (!button.dataset.periodPreset) {
+                return;
+            }
+            button.addEventListener("click", () => {
+                const days = Number.parseInt(button.dataset.periodPreset || "0", 10);
+                if (!Number.isFinite(days) || days <= 0) {
+                    return;
+                }
+                state.draftEnd = stripTime(state.draftEnd);
+                state.draftStart = addDays(state.draftEnd, -(days - 1));
+                state.visibleMonth = startOfMonth(state.draftStart);
+                state.selectingRange = false;
+                syncSummary();
+                syncPresets();
+                renderCalendars();
+            });
+        });
+
+        if (customButton) {
+            customButton.addEventListener("click", () => {
+                state.draftIsCustom = true;
+                state.draftStart = stripTime(state.draftEnd);
+                state.draftEnd = stripTime(state.draftEnd);
+                state.selectingRange = false;
+                state.visibleMonth = startOfMonth(state.draftEnd);
+                syncSummary();
+                syncPresets();
+                renderCalendars();
+            });
+        }
+
+        if (cancelButton) {
+            cancelButton.addEventListener("click", () => {
+                closePanel();
+            });
+        }
+
+        if (applyButton) {
+            applyButton.addEventListener("click", () => {
+                const days = rangeLength(state.draftStart, state.draftEnd);
+                if (days > maxDays) {
+                    syncSummary();
+                    return;
+                }
+                state.appliedStart = stripTime(state.draftStart);
+                state.appliedEnd = stripTime(state.draftEnd);
+                state.appliedIsCustom = state.draftIsCustom;
+                referenceInput.value = formatIsoDate(state.appliedEnd);
+                historyInput.value = String(days);
+                syncTrigger();
+                closePanel();
+                form.requestSubmit();
+            });
+        }
+
+        document.addEventListener("click", (event) => {
+            if (!picker.classList.contains("is-open")) {
+                return;
+            }
+            if (!picker.contains(event.target)) {
+                closePanel();
+            }
+        });
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape" && picker.classList.contains("is-open")) {
+                closePanel();
+            }
         });
     }
 

@@ -1557,6 +1557,8 @@ class PageRenderTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "monitoring-grid-table")
         self.assertContains(response, "data-sync-indicator")
+        self.assertContains(response, "data-table-period-picker")
+        self.assertContains(response, "Выбранный период")
         self.assertContains(response, "table-timeline-chart-data")
         self.assertContains(response, "Динамика SKU")
         self.assertContains(response, 'data-default-density="compact"')

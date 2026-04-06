@@ -1476,84 +1476,322 @@ textarea:focus-visible {
 
 .table-toolbar {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
-    align-items: end;
-    padding: 14px;
-    border: 1px solid rgba(20, 33, 42, 0.08);
-    border-radius: 18px;
-    background: rgba(255, 255, 255, 0.72);
+    gap: 8px;
 }
 
 .table-toolbar-shell {
-    position: static;
-    z-index: auto;
-    display: grid;
-    gap: 10px;
-    padding: 12px;
-    border: 1px solid rgba(20, 33, 42, 0.08);
-    border-radius: 20px;
-    background: rgba(248, 250, 251, 0.92);
-    box-shadow: 0 16px 36px rgba(15, 32, 43, 0.06);
-    backdrop-filter: blur(8px);
+    position: relative;
+    z-index: 40;
+    isolation: isolate;
+    overflow: visible;
 }
 
 .table-toolbar-shell .table-toolbar {
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
+    padding: 10px 14px;
+    border: 1px solid rgba(20, 33, 42, 0.08);
+    border-radius: 18px;
+    background: rgba(247, 249, 251, 0.96);
+    box-shadow: 0 10px 24px rgba(15, 32, 43, 0.05);
+    backdrop-filter: blur(10px);
 }
 
-.table-toolbar .field,
-.table-toolbar .checkbox-field {
-    margin: 0;
-}
-
-.table-toolbar .field input,
-.table-toolbar .field select {
-    min-height: 48px;
-}
-
-.table-toolbar-submit {
-    min-height: 48px;
-}
-
-.table-toolbar-presets {
+.table-period-picker {
+    position: relative;
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
     align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 48px;
 }
 
-.table-preset-button {
-    min-height: 32px;
-    padding: 0 12px;
-    border: 1px solid rgba(20, 33, 42, 0.12);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.84);
-    color: var(--muted);
-    font-size: 0.82rem;
+.table-period-picker.is-open {
+    z-index: 2;
+}
+
+.table-period-label {
+    flex: 1 1 auto;
+    color: rgba(88, 105, 123, 0.92);
+    font-size: 0.9rem;
     font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+.table-period-trigger {
+    width: auto;
+    min-width: 228px;
+    max-width: 100%;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 15px;
+    border: 1px solid rgba(20, 33, 42, 0.12);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.99);
+    color: rgba(89, 103, 121, 0.98);
+    font-size: 0.93rem;
+    font-weight: 700;
+    text-align: left;
+    white-space: nowrap;
+    box-shadow: 0 2px 6px rgba(15, 32, 43, 0.04);
     cursor: pointer;
-    transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
-.table-preset-button:hover {
-    border-color: rgba(15, 106, 92, 0.24);
+.table-period-trigger::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-right: 1.5px solid rgba(91, 105, 123, 0.8);
+    border-bottom: 1.5px solid rgba(91, 105, 123, 0.8);
+    transform: rotate(45deg) translateY(-2px);
+    flex: 0 0 auto;
+}
+
+.table-period-trigger span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.table-period-picker.is-open .table-period-trigger,
+.table-period-trigger:hover,
+.table-period-trigger:focus-visible {
+    outline: none;
+    border-color: rgba(15, 106, 92, 0.22);
+    box-shadow:
+        0 0 0 4px rgba(15, 106, 92, 0.05),
+        0 4px 12px rgba(15, 32, 43, 0.06);
+}
+
+.table-period-picker.is-open .table-period-trigger::after {
+    transform: rotate(-135deg) translateY(1px);
+}
+
+.table-period-panel {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    z-index: 60;
+    width: min(860px, calc(100vw - 56px));
+    padding: 14px;
+    border: 1px solid rgba(20, 33, 42, 0.08);
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.97);
+    box-shadow: 0 28px 50px rgba(15, 32, 43, 0.16);
+    backdrop-filter: blur(18px);
+}
+
+.table-period-panel-grid {
+    display: grid;
+    grid-template-columns: 190px minmax(0, 1fr);
+    gap: 16px;
+}
+
+.table-period-presets {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    padding: 10px 0;
+    border-right: 1px solid rgba(20, 33, 42, 0.08);
+}
+
+.table-period-presets-head {
+    margin-bottom: 6px;
+    padding: 0 12px 8px;
     color: var(--ink);
+    font-size: 0.94rem;
+    font-weight: 800;
 }
 
-.table-preset-button.is-active {
-    border-color: rgba(15, 106, 92, 0.28);
+.table-period-preset {
+    min-height: 40px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--ink);
+    font-size: 0.9rem;
+    font-weight: 700;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease;
+}
+
+.table-period-preset:hover {
+    background: rgba(15, 106, 92, 0.08);
+}
+
+.table-period-preset.is-active {
     background: rgba(15, 106, 92, 0.14);
     color: var(--accent-strong);
 }
 
-.table-workbench-tools {
+.table-period-preset.is-custom {
+    margin-top: 8px;
+    border-top: 1px solid rgba(20, 33, 42, 0.08);
+    border-radius: 0 0 12px 12px;
+    padding-top: 12px;
+}
+
+.table-period-calendar {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+}
+
+.table-period-calendar-head {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) 40px;
+    align-items: center;
+    gap: 12px;
+}
+
+.table-period-months {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.table-period-month-heading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    color: var(--ink);
+    font-size: 0.94rem;
+    font-weight: 800;
+}
+
+.table-period-nav {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    border: 1px solid rgba(20, 33, 42, 0.08);
+    border-radius: 12px;
+    background: rgba(243, 247, 250, 0.9);
+    color: var(--ink);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.table-period-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.table-period-month {
+    display: grid;
+    gap: 8px;
+}
+
+.table-period-weekdays,
+.table-period-days {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 4px;
+}
+
+.table-period-weekdays span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 26px;
+    color: var(--muted);
+    font-size: 0.76rem;
+    font-weight: 700;
+    text-transform: lowercase;
+}
+
+.table-period-day {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 38px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--ink);
+    font-size: 0.88rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.table-period-day:hover {
+    background: rgba(15, 106, 92, 0.08);
+}
+
+.table-period-day.is-placeholder {
+    cursor: default;
+    pointer-events: none;
+    color: transparent;
+}
+
+.table-period-day.is-muted {
+    color: rgba(97, 112, 122, 0.42);
+}
+
+.table-period-day.is-in-range {
+    background: rgba(15, 106, 92, 0.12);
+    color: var(--accent-strong);
+    border-radius: 0;
+}
+
+.table-period-day.is-range-start,
+.table-period-day.is-range-end,
+.table-period-day.is-single {
+    background: var(--accent);
+    color: #ffffff;
+    border-radius: 999px;
+}
+
+.table-period-day.is-range-start {
+    border-top-right-radius: 12px;
+    border-bottom-right-radius: 12px;
+}
+
+.table-period-day.is-range-end {
+    border-top-left-radius: 12px;
+    border-bottom-left-radius: 12px;
+}
+
+.table-period-day.is-range-start.is-range-end,
+.table-period-day.is-single {
+    border-radius: 999px;
+}
+
+.table-period-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(20, 33, 42, 0.08);
+}
+
+.table-period-summary {
+    display: grid;
+    gap: 4px;
+}
+
+.table-period-summary strong {
+    font-size: 0.95rem;
+    letter-spacing: -0.01em;
+}
+
+.table-period-summary span {
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.table-period-actions {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
     gap: 8px;
 }
 
@@ -3361,12 +3599,12 @@ th {
         grid-template-columns: minmax(250px, 290px) minmax(0, 1fr);
     }
 
-    .table-toolbar {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+    .table-period-panel {
+        width: min(760px, calc(100vw - 48px));
     }
 
-    .table-toolbar-submit {
-        grid-column: 1 / -1;
+    .table-period-panel-grid {
+        grid-template-columns: 168px minmax(0, 1fr);
     }
 
     .dashboard-layout-grid {
@@ -3472,13 +3710,8 @@ th {
         grid-template-columns: 1fr;
     }
 
-    .table-workbench-tools {
-        flex-direction: column;
-        align-items: stretch;
-    }
-
-    .table-toolbar-presets {
-        gap: 6px;
+    .table-period-panel-grid {
+        grid-template-columns: 1fr;
     }
 
     .table-day-nav {
@@ -3490,8 +3723,10 @@ th {
         min-height: 32px;
     }
 
-    .table-toolbar-submit {
-        grid-column: 1;
+    .table-period-presets {
+        border-right: 0;
+        border-bottom: 1px solid rgba(20, 33, 42, 0.08);
+        padding: 0 0 12px;
     }
 
     .table-primary-title h1 {
@@ -3693,23 +3928,52 @@ th {
         width: 100%;
     }
 
-    .table-toolbar-presets {
+    .table-period-panel {
+        left: 0;
+        right: 0;
+        width: auto;
+        padding: 12px;
+    }
+
+    .table-period-presets {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .table-period-presets-head {
+        grid-column: 1 / -1;
+        padding: 0 4px 4px;
+    }
+
+    .table-period-preset.is-custom {
+        grid-column: 1 / -1;
+        margin-top: 0;
+        padding-top: 10px;
+    }
+
+    .table-period-months,
+    .table-period-calendar-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .table-period-footer {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .table-period-actions {
         width: 100%;
     }
 
-    .table-preset-button {
-        flex: 1 1 calc(50% - 6px);
-        justify-content: center;
+    .table-period-actions .primary-button,
+    .table-period-actions .secondary-button {
+        flex: 1 1 0;
     }
 
     .table-modal-actions .primary-button,
     .table-modal-actions .secondary-button {
         width: 100%;
         min-width: 0;
-    }
-
-    .table-workbench-tools .secondary-button {
-        width: 100%;
     }
 
     .table-toolbar-stats {

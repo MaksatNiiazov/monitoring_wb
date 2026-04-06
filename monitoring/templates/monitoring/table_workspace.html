@@ -29,18 +29,60 @@
     <div class="table-toolbar-shell" data-table-toolbar-shell>
         <form method="get" class="table-toolbar" data-table-filter-form>
             <input type="hidden" name="sheet" value="{% if active_sheet %}{{ active_sheet.key }}{% endif %}">
-            {% for field in table_filters_form %}
-                {% include "monitoring/includes/form_field.html" with field=field compact_help=True %}
-            {% endfor %}
-            <button class="primary-button table-toolbar-submit" type="submit">Обновить</button>
+            {{ table_filters_form.reference_date }}
+            {{ table_filters_form.history_days }}
+            <div
+                class="table-period-picker"
+                data-table-period-picker
+                data-current-start="{{ table_period_start|date:'Y-m-d' }}"
+                data-current-end="{{ table_period_end|date:'Y-m-d' }}"
+                data-current-days="{{ history_days }}"
+                data-max-days="90"
+            >
+                <span class="table-period-label">Выбранный период</span>
+                <button
+                    class="table-period-trigger"
+                    type="button"
+                    data-period-trigger
+                    aria-haspopup="dialog"
+                    aria-expanded="false"
+                >
+                    <span data-period-trigger-label>{{ table_period_start|date:"d.m.Y" }} — {{ table_period_end|date:"d.m.Y" }}</span>
+                </button>
+                <div class="table-period-panel" data-period-panel hidden>
+                    <div class="table-period-panel-grid">
+                        <aside class="table-period-presets">
+                            <div class="table-period-presets-head">Период</div>
+                            <button class="table-period-preset" type="button" data-period-preset="7">7 дней</button>
+                            <button class="table-period-preset" type="button" data-period-preset="14">14 дней</button>
+                            <button class="table-period-preset" type="button" data-period-preset="30">30 дней</button>
+                            <button class="table-period-preset" type="button" data-period-preset="60">60 дней</button>
+                            <button class="table-period-preset" type="button" data-period-preset="90">90 дней</button>
+                            <button class="table-period-preset is-custom" type="button" data-period-custom>Произвольный период</button>
+                        </aside>
+                        <section class="table-period-calendar">
+                            <div class="table-period-calendar-head">
+                                <button class="table-period-nav" type="button" data-period-nav="-1" aria-label="Предыдущие месяцы">‹</button>
+                                <div class="table-period-months" data-period-months></div>
+                                <button class="table-period-nav" type="button" data-period-nav="1" aria-label="Следующие месяцы">›</button>
+                            </div>
+                            <div class="table-period-calendar-grid" data-period-calendars></div>
+                            <div class="table-period-footer">
+                                <div class="table-period-summary">
+                                    <strong data-period-summary-label>{{ table_period_start|date:"d.m.Y" }} — {{ table_period_end|date:"d.m.Y" }}</strong>
+                                    <span data-period-summary-meta>{{ history_days }} дн.</span>
+                                </div>
+                                <div class="table-period-actions">
+                                    <button class="secondary-button" type="button" data-period-cancel>Отмена</button>
+                                    <button class="primary-button" type="button" data-period-apply>Применить</button>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+            <button class="table-toolbar-submit" type="submit" hidden aria-hidden="true" tabindex="-1">Обновить</button>
         </form>
-        <div class="table-toolbar-presets" data-table-filter-presets>
-            <button class="table-preset-button" type="button" data-filter-reference="today">Сегодня</button>
-            <button class="table-preset-button {% if history_days == 7 %}is-active{% endif %}" type="button" data-filter-days="7">7 дней</button>
-            <button class="table-preset-button {% if history_days == 14 %}is-active{% endif %}" type="button" data-filter-days="14">14 дней</button>
-            <button class="table-preset-button {% if history_days == 30 %}is-active{% endif %}" type="button" data-filter-days="30">30 дней</button>
-            <button class="table-preset-button {% if history_days == 60 %}is-active{% endif %}" type="button" data-filter-days="60">60 дней</button>
-        </div>
         <p class="table-inline-status" data-inline-status aria-live="polite" hidden></p>
     </div>
 

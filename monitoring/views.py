@@ -6,6 +6,7 @@ import json
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
+from django import forms as django_forms
 from django.contrib import messages
 from django.db.models import Count, Max
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -420,6 +421,9 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
     else:
         reference_date = initial_reference_date
         history_days = initial_history_days
+    filters_form.fields["reference_date"].widget = django_forms.HiddenInput()
+    filters_form.fields["history_days"].widget = django_forms.HiddenInput()
+    table_period_start = reference_date - timedelta(days=max(history_days - 1, 0))
 
     requested_sheet = (request.GET.get("sheet") or "").strip()
     products_count = Product.objects.filter(is_active=True).count()
@@ -727,6 +731,8 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
     context = {
         "reference_date": reference_date,
         "history_days": history_days,
+        "table_period_start": table_period_start,
+        "table_period_end": reference_date,
         "table_filters_form": filters_form,
         "sheet_tabs": sheet_tabs,
         "active_sheet": active_sheet,
