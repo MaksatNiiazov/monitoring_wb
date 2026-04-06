@@ -1557,6 +1557,8 @@ class PageRenderTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "monitoring-grid-table")
         self.assertContains(response, "data-sync-indicator")
+        self.assertContains(response, "table-timeline-chart-data")
+        self.assertContains(response, "Динамика SKU")
 
     def test_campaigns_page_renders_management_workspace(self) -> None:
         seed_demo_dataset()

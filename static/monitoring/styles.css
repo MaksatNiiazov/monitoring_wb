@@ -3003,6 +3003,10 @@ th {
     overflow: hidden;
 }
 
+.table-timeline-panel {
+    margin-top: 18px;
+}
+
 .chart-widget {
     display: grid;
     gap: 16px;

@@ -271,6 +271,36 @@
             </div>
             <p class="muted" data-day-meta></p>
         {% endif %}
+        {% if table_timeline %}
+            <article class="panel panel-spacious chart-panel table-timeline-panel">
+                <div class="panel-head">
+                    <div>
+                        <h2>{{ table_timeline.title }}</h2>
+                        <p class="muted">{{ table_timeline.subtitle }}</p>
+                    </div>
+                </div>
+                <div class="chart-widget" data-chart-script="table-timeline-chart-data">
+                    <div class="chart-toolbar">
+                        <div class="segmented-control" data-chart-group="metric">
+                            <button type="button" class="segmented-button is-active" data-chart-metric="revenue">Оборот</button>
+                            <button type="button" class="segmented-button" data-chart-metric="orders">Заказы</button>
+                            <button type="button" class="segmented-button" data-chart-metric="spend">Расход</button>
+                            <button type="button" class="segmented-button" data-chart-metric="stock">Остатки</button>
+                            <button type="button" class="segmented-button" data-chart-metric="organic_share">Органика</button>
+                            <button type="button" class="segmented-button" data-chart-metric="cpo">CPO</button>
+                            <button type="button" class="segmented-button" data-chart-metric="drr">ДРР</button>
+                        </div>
+                        <div class="segmented-control" data-chart-group="type">
+                            <button type="button" class="segmented-button is-active" data-chart-type="line">Линия</button>
+                            <button type="button" class="segmented-button" data-chart-type="bar">Столбцы</button>
+                        </div>
+                    </div>
+                    <div class="chart-stage" aria-live="polite"></div>
+                    <div class="chart-caption"></div>
+                    <div class="chart-legend"></div>
+                </div>
+            </article>
+        {% endif %}
     {% else %}
         <div class="empty-state">
             <strong>Листы ещё не сформированы</strong>
@@ -278,6 +308,9 @@
         </div>
     {% endif %}
 </section>
+{% if table_timeline %}
+    {{ table_timeline.chart|json_script:"table-timeline-chart-data" }}
+{% endif %}
 
 <section class="table-modal" id="table-modal-sync" data-table-modal hidden>
     <div class="table-modal-backdrop" data-modal-close></div>
@@ -382,6 +415,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
+    <script src="{% static 'monitoring/reports.js' %}" defer></script>
     <script src="{% static 'monitoring/sync_status.js' %}" defer></script>
     <script src="{% static 'monitoring/table_grid_controls.js' %}" defer></script>
 {% endblock %}

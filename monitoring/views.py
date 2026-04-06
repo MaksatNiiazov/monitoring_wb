@@ -54,6 +54,7 @@ from .services.monitoring_table import (
 )
 from .services.campaigns import build_campaign_detail_context
 from .services.reporting_hub import build_reports_context
+from .services.table_charts import build_table_timeline_context
 from .services.reports import build_product_report, decimalize, get_default_dates, normalize_warehouse_name, resolve_product_economics
 from .services.sync import (
     get_running_sync,
@@ -717,12 +718,19 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
             prepared_rows.append({"cells": prepared_cells})
         active_sheet = {**active_sheet, "rows": prepared_rows, "keyword_offset": keyword_offset}
 
+    table_timeline = build_table_timeline_context(
+        active_sheet=active_sheet,
+        reference_date=reference_date,
+        history_days=history_days,
+    )
+
     context = {
         "reference_date": reference_date,
         "history_days": history_days,
         "table_filters_form": filters_form,
         "sheet_tabs": sheet_tabs,
         "active_sheet": active_sheet,
+        "table_timeline": table_timeline,
         "product_form": ProductCreateForm(),
         "campaign_form": CampaignWorkspaceCreateForm(),
         "sync_form": SyncForm(
