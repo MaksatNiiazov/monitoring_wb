@@ -1577,7 +1577,7 @@ textarea:focus-visible {
     padding: 14px;
     border: 1px solid rgba(20, 33, 42, 0.08);
     border-radius: 22px;
-    background: rgba(255, 255, 255, 0.97);
+    background: rgba(255, 255, 255, 1);
     box-shadow: 0 28px 50px rgba(15, 32, 43, 0.16);
     backdrop-filter: blur(18px);
 }
