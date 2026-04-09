@@ -304,10 +304,22 @@ def summarize_supplier_orders(order_rows: list[dict[str, Any]]) -> dict[str, Dec
 
 def resolve_campaign_group(payload: dict[str, Any]) -> str:
     bid_type = (payload.get("bid_type") or "").strip().lower()
+    campaign_type = int(payload.get("type") or 0)
     settings = payload.get("settings") or {}
     placements = settings.get("placements") or {}
+    placement_types = {str(value).strip().lower() for value in (payload.get("placement_types") or []) if str(value).strip()}
+    if "search" in placement_types:
+        placements["search"] = True
+    if "recommendations" in placement_types:
+        placements["recommendations"] = True
     if bid_type == "unified":
         return CampaignMonitoringGroup.UNIFIED
+    if campaign_type == 4:
+        return CampaignMonitoringGroup.MANUAL_CATALOG
+    if campaign_type == 6:
+        return CampaignMonitoringGroup.MANUAL_SEARCH
+    if campaign_type in {5, 7}:
+        return CampaignMonitoringGroup.MANUAL_SHELVES
     if placements.get("search") and placements.get("recommendations"):
         return CampaignMonitoringGroup.UNIFIED
     if placements.get("search"):

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from functools import lru_cache
 from typing import Any
 
@@ -194,6 +194,15 @@ def clamp_metric_cell_to_total(cell: MetricCell, total: MetricCell) -> MetricCel
     return clamped
 
 
+def derive_order_sum_from_orders(source: MetricCell, target_orders: int) -> Decimal:
+    source_orders = max(int(source.orders or 0), 0)
+    target_orders = max(int(target_orders or 0), 0)
+    if source_orders <= 0 or target_orders <= 0:
+        return ZERO
+    average_order_sum = safe_divide(decimalize(source.order_sum), source_orders)
+    return quantize_money(average_order_sum * Decimal(target_orders))
+
+
 def subtract_metric_cells(total: MetricCell, part: MetricCell) -> MetricCell:
     return MetricCell(
         impressions=max(total.impressions - part.impressions, 0),
@@ -204,6 +213,66 @@ def subtract_metric_cells(total: MetricCell, part: MetricCell) -> MetricCell:
         order_sum=max(decimalize(total.order_sum) - decimalize(part.order_sum), ZERO),
         units=max(total.units - part.units, 0),
     )
+
+
+def split_int_by_ratio(total: int, left_basis: int, right_basis: int) -> tuple[int, int]:
+    total = max(int(total or 0), 0)
+    left_basis = max(int(left_basis or 0), 0)
+    right_basis = max(int(right_basis or 0), 0)
+    basis_total = left_basis + right_basis
+    if total <= 0:
+        return 0, 0
+    if basis_total <= 0:
+        return total, 0
+    left_value = int(
+        (Decimal(total) * Decimal(left_basis) / Decimal(basis_total)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
+    left_value = max(0, min(total, left_value))
+    return left_value, total - left_value
+
+
+def split_decimal_by_ratio(
+    total: Decimal | int | float,
+    left_basis: Decimal | int | float,
+    right_basis: Decimal | int | float,
+) -> tuple[Decimal, Decimal]:
+    total_value = max(decimalize(total), ZERO)
+    left_basis_value = max(decimalize(left_basis), ZERO)
+    right_basis_value = max(decimalize(right_basis), ZERO)
+    basis_total = left_basis_value + right_basis_value
+    if total_value <= ZERO:
+        return ZERO, ZERO
+    if basis_total <= ZERO:
+        return quantize_money(total_value), ZERO
+    left_value = quantize_money(total_value * left_basis_value / basis_total)
+    left_value = max(ZERO, min(total_value, left_value))
+    return left_value, quantize_money(total_value - left_value)
+
+
+def distribute_metric_cell_between(
+    total: MetricCell,
+    left_basis: MetricCell,
+    right_basis: MetricCell,
+) -> tuple[MetricCell, MetricCell]:
+    left = MetricCell()
+    right = MetricCell()
+
+    left.impressions, right.impressions = split_int_by_ratio(
+        total.impressions,
+        left_basis.impressions,
+        right_basis.impressions,
+    )
+    left.clicks, right.clicks = split_int_by_ratio(total.clicks, left_basis.clicks, right_basis.clicks)
+    left.carts, right.carts = split_int_by_ratio(total.carts, left_basis.carts, right_basis.carts)
+    left.orders, right.orders = split_int_by_ratio(total.orders, left_basis.orders, right_basis.orders)
+    left.units, right.units = split_int_by_ratio(total.units, left_basis.units, right_basis.units)
+    left.spend, right.spend = split_decimal_by_ratio(total.spend, left_basis.spend, right_basis.spend)
+    left.order_sum, right.order_sum = split_decimal_by_ratio(
+        total.order_sum,
+        left_basis.order_sum,
+        right_basis.order_sum,
+    )
+    return left, right
 
 
 @dataclass(frozen=True)
@@ -675,7 +744,8 @@ def build_product_report(
     for stat in campaign_stats:
         group_totals[stat.campaign.monitoring_group].add(stat)
 
-    def resolve_group_cells(group: str) -> tuple[MetricCell, MetricCell, MetricCell]:
+    def resolve_unified_group_cells() -> tuple[MetricCell, MetricCell, MetricCell]:
+        group = CampaignMonitoringGroup.UNIFIED
         cluster_rows = search_clusters_by_group.get(group, [])
         if not cluster_rows:
             return (
@@ -692,35 +762,41 @@ def build_product_report(
         search.impressions = search_cluster.impressions
         search.clicks = search_cluster.clicks
         search.spend = search_cluster.spend
-        explicit_non_search = add_metric_cells(legacy_shelves, legacy_catalog)
-        if any(
-            [
-                explicit_non_search.impressions,
-                explicit_non_search.clicks,
-                explicit_non_search.carts,
-                explicit_non_search.orders,
-                decimalize(explicit_non_search.order_sum),
-                decimalize(explicit_non_search.spend),
-            ]
-        ):
-            search_total = subtract_metric_cells(total, explicit_non_search)
-            search = clamp_metric_cell_to_total(search, search_total)
-            return search, clone_metric_cell(legacy_shelves), clone_metric_cell(legacy_catalog)
+        search.carts = search_cluster.carts
+        search.orders = search_cluster.orders
+        search.units = search_cluster.units
+        search.order_sum = derive_order_sum_from_orders(legacy_search, search_cluster.orders)
         search = clamp_metric_cell_to_total(search, total)
-        shelves = subtract_metric_cells(total, search)
-        return search, shelves, MetricCell()
+        # In the reference sheet the standard-bid block is effectively split into
+        # search vs. the remaining non-search traffic, without surfacing a
+        # separate unified "catalog" slice. Keeping the whole remainder in
+        # shelves makes the matrix much closer to the business expectation and
+        # avoids unstable re-splitting based on legacy appType buckets.
+        non_search_total = subtract_metric_cells(total, search)
+        return search, non_search_total, MetricCell()
 
-    cells: dict[tuple[str, str], MetricCell] = {}
-    for group in (
-        CampaignMonitoringGroup.UNIFIED,
-        CampaignMonitoringGroup.MANUAL_SEARCH,
-        CampaignMonitoringGroup.MANUAL_SHELVES,
-        CampaignMonitoringGroup.MANUAL_CATALOG,
-    ):
-        search_cell, shelves_cell, catalog_cell = resolve_group_cells(group)
-        cells[(group, CampaignZone.SEARCH)] = search_cell
-        cells[(group, CampaignZone.RECOMMENDATION)] = shelves_cell
-        cells[(group, CampaignZone.CATALOG)] = catalog_cell
+    unified_search, unified_shelves, unified_catalog = resolve_unified_group_cells()
+
+    cells: dict[tuple[str, str], MetricCell] = {
+        (CampaignMonitoringGroup.UNIFIED, CampaignZone.SEARCH): unified_search,
+        (CampaignMonitoringGroup.UNIFIED, CampaignZone.RECOMMENDATION): unified_shelves,
+        (CampaignMonitoringGroup.UNIFIED, CampaignZone.CATALOG): unified_catalog,
+        (CampaignMonitoringGroup.MANUAL_SEARCH, CampaignZone.SEARCH): clone_metric_cell(
+            group_totals.get(CampaignMonitoringGroup.MANUAL_SEARCH, MetricCell())
+        ),
+        (CampaignMonitoringGroup.MANUAL_SEARCH, CampaignZone.RECOMMENDATION): MetricCell(),
+        (CampaignMonitoringGroup.MANUAL_SEARCH, CampaignZone.CATALOG): MetricCell(),
+        (CampaignMonitoringGroup.MANUAL_SHELVES, CampaignZone.SEARCH): MetricCell(),
+        (CampaignMonitoringGroup.MANUAL_SHELVES, CampaignZone.RECOMMENDATION): clone_metric_cell(
+            group_totals.get(CampaignMonitoringGroup.MANUAL_SHELVES, MetricCell())
+        ),
+        (CampaignMonitoringGroup.MANUAL_SHELVES, CampaignZone.CATALOG): MetricCell(),
+        (CampaignMonitoringGroup.MANUAL_CATALOG, CampaignZone.SEARCH): MetricCell(),
+        (CampaignMonitoringGroup.MANUAL_CATALOG, CampaignZone.RECOMMENDATION): MetricCell(),
+        (CampaignMonitoringGroup.MANUAL_CATALOG, CampaignZone.CATALOG): clone_metric_cell(
+            group_totals.get(CampaignMonitoringGroup.MANUAL_CATALOG, MetricCell())
+        ),
+    }
 
     traffic_totals = {
         CampaignMonitoringGroup.UNIFIED: sum(
