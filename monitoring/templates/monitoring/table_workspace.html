@@ -115,7 +115,7 @@
             <table class="monitoring-grid-table {% if active_sheet.kind == 'product' %}is-product{% else %}is-dashboard{% endif %}">
                 <tbody>
                     {% for row in active_sheet.rows %}
-                        <tr>
+                        <tr{% if row.row_visual_key %} class="table-row-tone-{{ row.row_visual_key }}"{% endif %}>
                             {% for cell in row.cells %}
                                 <td
                                     {% if cell.colspan and cell.colspan > 1 %}colspan="{{ cell.colspan }}"{% endif %}

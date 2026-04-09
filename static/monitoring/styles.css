@@ -2516,6 +2516,28 @@ body.is-modal-open {
     background: rgba(255, 236, 209, 0.92);
 }
 
+.monitoring-grid-table tr.table-row-tone-spend td:not(.is-gap-col) {
+    color: #22724d;
+}
+
+.monitoring-grid-table tr.table-row-tone-carts td:not(.is-gap-col),
+.monitoring-grid-table tr.table-row-tone-conversion-cart td:not(.is-gap-col) {
+    color: #2563eb;
+}
+
+.monitoring-grid-table tr.table-row-tone-orders td:not(.is-gap-col),
+.monitoring-grid-table tr.table-row-tone-conversion-order td:not(.is-gap-col) {
+    color: #d97706;
+}
+
+.monitoring-grid-table tr.table-row-tone-spend td.is-label-col:not(.is-gap-col),
+.monitoring-grid-table tr.table-row-tone-carts td.is-label-col:not(.is-gap-col),
+.monitoring-grid-table tr.table-row-tone-conversion-cart td.is-label-col:not(.is-gap-col),
+.monitoring-grid-table tr.table-row-tone-orders td.is-label-col:not(.is-gap-col),
+.monitoring-grid-table tr.table-row-tone-conversion-order td.is-label-col:not(.is-gap-col) {
+    font-weight: 800;
+}
+
 .monitoring-grid-table tbody tr:hover td:not(.is-gap-col) {
     background: rgba(230, 238, 252, 0.92);
 }

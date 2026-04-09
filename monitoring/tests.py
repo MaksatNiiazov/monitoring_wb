@@ -50,7 +50,7 @@ from monitoring.services.sync import (
     SyncServiceError,
 )
 from monitoring.templatetags.monitoring_extras import css_percent
-from monitoring.views import _build_stock_popup_payload
+from monitoring.views import _build_stock_popup_payload, _table_row_visual_key
 from monitoring.services.wb_client import AnalyticsWBClient, WBApiError
 
 
@@ -164,7 +164,8 @@ class ReportingTests(TestCase):
         )
         rows = exporter_rows(report)
         self.assertEqual(rows[0][1], "17.03.2026")
-        self.assertEqual(rows[4][5], "2000")
+        self.assertEqual(rows[4][1], "2000")
+        self.assertEqual(rows[4][7], "2000")
 
     def test_exporter_uses_overall_funnel_in_summary_column(self) -> None:
         report = build_product_report(
@@ -173,9 +174,9 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         rows = exporter_rows(report)
-        self.assertEqual(rows[10][5], "50")
-        self.assertEqual(rows[12][5], "10")
-        self.assertEqual(rows[14][5], "10000")
+        self.assertEqual(rows[10][7], "50")
+        self.assertEqual(rows[12][7], "10")
+        self.assertEqual(rows[14][7], "10000")
 
     def test_exporter_normalizes_buyout_percent_when_saved_as_fraction(self) -> None:
         ProductEconomicsVersion.objects.filter(
@@ -189,7 +190,7 @@ class ReportingTests(TestCase):
         )
         rows = exporter_rows(report)
         self.assertEqual(rows[21][1], "24%")
-        self.assertEqual(rows[15][5], "2400")
+        self.assertEqual(rows[15][7], "2400")
 
     def test_exporter_populates_overall_ctr_cpm_and_cpc(self) -> None:
         report = build_product_report(
@@ -198,9 +199,9 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         rows = exporter_rows(report)
-        self.assertEqual(rows[6][5], "10%")
-        self.assertEqual(rows[7][5], "2000")
-        self.assertEqual(rows[8][5], "20")
+        self.assertEqual(rows[6][7], "10%")
+        self.assertEqual(rows[7][7], "2000")
+        self.assertEqual(rows[8][7], "20")
 
     def test_exporter_profit_uses_drr_sales_fraction(self) -> None:
         DailyProductNote.objects.create(
@@ -234,12 +235,12 @@ class ReportingTests(TestCase):
         )
         rows = exporter_rows(report)
         self.assertEqual(rows[8][1], "-")
-        self.assertEqual(rows[11][5], "-")
-        self.assertEqual(rows[13][5], "-")
-        self.assertEqual(rows[16][5], "-")
-        self.assertEqual(rows[17][5], "-")
-        self.assertEqual(rows[18][5], "-")
-        self.assertEqual(rows[19][5], "-")
+        self.assertEqual(rows[11][7], "-")
+        self.assertEqual(rows[13][7], "-")
+        self.assertEqual(rows[16][7], "-")
+        self.assertEqual(rows[17][7], "-")
+        self.assertEqual(rows[18][7], "-")
+        self.assertEqual(rows[19][7], "-")
 
     def test_exporter_keeps_revenue_and_buyouts_but_hides_efficiency_metrics_when_spend_is_zero(self) -> None:
         DailyCampaignProductStat.objects.filter(
@@ -262,12 +263,12 @@ class ReportingTests(TestCase):
         self.assertEqual(rows[17][1], "-")
         self.assertEqual(rows[18][1], "-")
         self.assertEqual(rows[19][1], "-")
-        self.assertEqual(rows[14][5], "10000")
-        self.assertEqual(rows[15][5], "2400")
-        self.assertEqual(rows[16][5], "-")
-        self.assertEqual(rows[17][5], "-")
-        self.assertEqual(rows[18][5], "-")
-        self.assertEqual(rows[19][5], "-")
+        self.assertEqual(rows[14][7], "10000")
+        self.assertEqual(rows[15][7], "2400")
+        self.assertEqual(rows[16][7], "-")
+        self.assertEqual(rows[17][7], "-")
+        self.assertEqual(rows[18][7], "-")
+        self.assertEqual(rows[19][7], "-")
 
     def test_exporter_shows_tiny_nonzero_percentages_without_rounding_to_zero(self) -> None:
         DailyCampaignProductStat.objects.filter(
@@ -286,8 +287,8 @@ class ReportingTests(TestCase):
 
         self.assertEqual(rows[18][1], "<0,01%")
         self.assertEqual(rows[19][1], "<0,01%")
-        self.assertEqual(rows[18][5], "<0,01%")
-        self.assertEqual(rows[19][5], "<0,01%")
+        self.assertEqual(rows[18][7], "<0,01%")
+        self.assertEqual(rows[19][7], "<0,01%")
 
     def test_dashboard_context_builds_aggregated_totals(self) -> None:
         context = build_dashboard_context(stats_date=date(2026, 3, 16), stock_date=date(2026, 3, 17))
@@ -352,16 +353,16 @@ class ReportingTests(TestCase):
         self.assertEqual(unified_search.impressions, 200)
         self.assertEqual(unified_search.clicks, 20)
         self.assertEqual(unified_search.spend, Decimal("400.00"))
-        self.assertEqual(unified_search.carts, 20)
-        self.assertEqual(unified_search.orders, 6)
-        self.assertEqual(unified_search.order_sum, Decimal("6000.00"))
+        self.assertEqual(unified_search.carts, 5)
+        self.assertEqual(unified_search.orders, 2)
+        self.assertEqual(unified_search.order_sum, Decimal("2000.00"))
 
         self.assertEqual(unified_shelves.impressions, 800)
         self.assertEqual(unified_shelves.clicks, 80)
         self.assertEqual(unified_shelves.spend, Decimal("1600.00"))
-        self.assertEqual(unified_shelves.carts, 0)
-        self.assertEqual(unified_shelves.orders, 0)
-        self.assertEqual(unified_shelves.order_sum, Decimal("0.00"))
+        self.assertEqual(unified_shelves.carts, 15)
+        self.assertEqual(unified_shelves.orders, 4)
+        self.assertEqual(unified_shelves.order_sum, Decimal("4000.00"))
 
     def test_product_report_keeps_catalog_zone_when_cluster_stats_exist(self) -> None:
         DailyCampaignProductStat.objects.create(
@@ -413,12 +414,36 @@ class ReportingTests(TestCase):
         self.assertEqual(unified_search.impressions, 200)
         self.assertEqual(unified_search.clicks, 20)
         self.assertEqual(unified_search.spend, Decimal("400.00"))
-        self.assertEqual(unified_shelves.impressions, 500)
-        self.assertEqual(unified_shelves.clicks, 50)
-        self.assertEqual(unified_shelves.spend, Decimal("900.00"))
-        self.assertEqual(unified_catalog.impressions, 3000)
-        self.assertEqual(unified_catalog.clicks, 120)
-        self.assertEqual(unified_catalog.spend, Decimal("1400.00"))
+        self.assertEqual(unified_search.carts, 5)
+        self.assertEqual(unified_search.orders, 2)
+        self.assertEqual(unified_search.order_sum, Decimal("2000.00"))
+        self.assertEqual(unified_shelves.impressions, 614)
+        self.assertEqual(unified_shelves.clicks, 74)
+        self.assertEqual(unified_shelves.spend, Decimal("1526.09"))
+        self.assertEqual(unified_shelves.carts, 18)
+        self.assertEqual(unified_shelves.orders, 5)
+        self.assertEqual(unified_shelves.order_sum, Decimal("4466.67"))
+        self.assertEqual(unified_catalog.impressions, 3686)
+        self.assertEqual(unified_catalog.clicks, 176)
+        self.assertEqual(unified_catalog.spend, Decimal("2373.91"))
+        self.assertEqual(unified_catalog.carts, 15)
+        self.assertEqual(unified_catalog.orders, 2)
+        self.assertEqual(unified_catalog.order_sum, Decimal("2233.33"))
+        self.assertEqual(
+            unified_search.impressions + unified_shelves.impressions + unified_catalog.impressions,
+            4500,
+        )
+        self.assertEqual(unified_search.clicks + unified_shelves.clicks + unified_catalog.clicks, 270)
+        self.assertEqual(unified_search.carts + unified_shelves.carts + unified_catalog.carts, 38)
+        self.assertEqual(unified_search.orders + unified_shelves.orders + unified_catalog.orders, 9)
+        self.assertEqual(
+            unified_search.spend + unified_shelves.spend + unified_catalog.spend,
+            Decimal("4300.00"),
+        )
+        self.assertEqual(
+            unified_search.order_sum + unified_shelves.order_sum + unified_catalog.order_sum,
+            Decimal("8700.00"),
+        )
 
     def test_monitoring_day_block_uses_overall_totals_and_single_profit_cell(self) -> None:
         report = build_product_report(
@@ -427,11 +452,11 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         block = build_day_block(report, start_row=1, start_col=1)
-        self.assertEqual(block[12][5], 10)
-        self.assertEqual(block[12][6], "=F13-SUM(B13:E13)")
+        self.assertEqual(block[12][7], 10)
+        self.assertEqual(block[12][8], "=H13-SUM(B13:D13)")
         self.assertTrue(block[20][1].startswith("=IFERROR(IF("))
         self.assertIn("*25/100", block[20][1])
-        self.assertEqual(block[20][2:], ["", "", "", "", ""])
+        self.assertEqual(block[20][2:], ["", "", "", "", "", "", ""])
 
     def test_monitoring_day_block_populates_overall_ctr_cpm_and_cpc_formulas(self) -> None:
         report = build_product_report(
@@ -440,9 +465,9 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         block = build_day_block(report, start_row=1, start_col=1)
-        self.assertEqual(block[6][5], '=IFERROR(IF(OR(F6="",F6=0),"-",(SUM(B10:E10)/F6)*100),"-")')
-        self.assertEqual(block[7][5], '=IFERROR(IF(OR(F6="",F6=0),"-",F5*1000/F6),"-")')
-        self.assertEqual(block[8][5], '=IFERROR(IF(OR(SUM(B10:E10)="",SUM(B10:E10)=0),"-",F5/SUM(B10:E10)),"-")')
+        self.assertEqual(block[6][7], '=IFERROR(IF(OR(H6="",H6=0),"-",(SUM(B10:D10)/H6)*100),"-")')
+        self.assertEqual(block[7][7], '=IFERROR(IF(OR(H6="",H6=0),"-",H5*1000/H6),"-")')
+        self.assertEqual(block[8][7], '=IFERROR(IF(OR(SUM(B10:D10)="",SUM(B10:D10)=0),"-",H5/SUM(B10:D10)),"-")')
 
     def test_monitoring_day_block_profit_formula_uses_drr_sales_fraction(self) -> None:
         report = build_product_report(
@@ -452,7 +477,7 @@ class ReportingTests(TestCase):
         )
         block = build_day_block(report, start_row=1, start_col=1)
         self.assertNotIn("/100))", block[20][1])
-        self.assertIn("*F20)", block[20][1])
+        self.assertIn("(I36*H20)", block[20][1])
 
     def test_monitoring_day_block_uses_safe_divide_formulas_for_derived_metrics(self) -> None:
         report = build_product_report(
@@ -461,8 +486,8 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         block = build_day_block(report, start_row=1, start_col=1)
-        self.assertTrue(block[11][5].startswith("=IFERROR(IF("))
-        self.assertTrue(block[13][5].startswith("=IFERROR(IF("))
+        self.assertTrue(block[11][7].startswith("=IFERROR(IF("))
+        self.assertTrue(block[13][7].startswith("=IFERROR(IF("))
         self.assertTrue(block[16][1].startswith("=IFERROR(IF("))
         self.assertTrue(block[17][1].startswith("=IFERROR(IF("))
         self.assertTrue(block[18][1].startswith("=IFERROR(IF("))
@@ -480,10 +505,10 @@ class ReportingTests(TestCase):
         self.assertIn('B5=0', block[17][1])
         self.assertIn('B5=0', block[18][1])
         self.assertIn('B5=0', block[19][1])
-        self.assertIn('F5=0', block[16][5])
-        self.assertIn('F5=0', block[17][5])
-        self.assertIn('F5=0', block[18][5])
-        self.assertIn('F5=0', block[19][5])
+        self.assertIn('H5=0', block[16][7])
+        self.assertIn('H5=0', block[17][7])
+        self.assertIn('H5=0', block[18][7])
+        self.assertIn('H5=0', block[19][7])
 
     def test_monitoring_day_block_traffic_share_matches_template_logic(self) -> None:
         manual_search_campaign = Campaign.objects.create(
@@ -556,12 +581,13 @@ class ReportingTests(TestCase):
         block = build_day_block(report, start_row=1, start_col=1)
         traffic_row = block[3]
 
-        self.assertAlmostEqual(traffic_row[1], 0.2137, places=4)
-        self.assertAlmostEqual(traffic_row[2], 0.1453, places=4)
-        self.assertAlmostEqual(traffic_row[3], 0.6410, places=4)
-        self.assertEqual(traffic_row[4], "")
-        self.assertEqual(traffic_row[5], 1.0)
-        self.assertEqual(traffic_row[6], "-")
+        self.assertAlmostEqual(traffic_row[1], 0.2222, places=4)
+        self.assertAlmostEqual(traffic_row[2], 0.1111, places=4)
+        self.assertAlmostEqual(traffic_row[3], 0.6667, places=4)
+        self.assertEqual(traffic_row[4], 1.0)
+        self.assertEqual(traffic_row[5], "")
+        self.assertEqual(traffic_row[6], "")
+        self.assertEqual(traffic_row[8], "-")
 
     def test_exporter_traffic_share_matches_template_logic(self) -> None:
         manual_search_campaign = Campaign.objects.create(
@@ -634,12 +660,14 @@ class ReportingTests(TestCase):
         rows = exporter_rows(report)
         traffic_row = rows[3]
 
-        self.assertEqual(traffic_row[1], "21,37%")
-        self.assertEqual(traffic_row[2], "14,53%")
-        self.assertEqual(traffic_row[3], "64,1%")
-        self.assertEqual(traffic_row[4], "")
-        self.assertEqual(traffic_row[5], "100%")
-        self.assertEqual(traffic_row[6], "-")
+        self.assertEqual(traffic_row[1], "22,22%")
+        self.assertEqual(traffic_row[2], "11,11%")
+        self.assertEqual(traffic_row[3], "66,67%")
+        self.assertEqual(traffic_row[4], "100%")
+        self.assertEqual(traffic_row[5], "")
+        self.assertEqual(traffic_row[6], "")
+        self.assertEqual(traffic_row[7], "100%")
+        self.assertEqual(traffic_row[8], "-")
 
     def test_table_blocks_keep_manual_search_separate_from_manual_shelves(self) -> None:
         manual_search_campaign = Campaign.objects.create(
@@ -705,8 +733,8 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         block = build_day_block(report, start_row=1, start_col=11)
-        self.assertEqual(block[9][6], "=P10-SUM(L10:O10)")
-        self.assertEqual(block[12][6], "=P13-SUM(L13:O13)")
+        self.assertEqual(block[9][8], "=R10-SUM(L10:N10)")
+        self.assertEqual(block[12][8], "=R13-SUM(L13:N13)")
 
     def test_product_report_ignores_stats_from_unlinked_campaigns(self) -> None:
         other_campaign = Campaign.objects.create(
@@ -1404,6 +1432,13 @@ class PreparationTests(TestCase):
         second = MonitoringSettings.get_solo()
         self.assertEqual(first.pk, second.pk)
 
+    def test_table_row_visual_key_uses_exact_labels(self) -> None:
+        self.assertEqual(_table_row_visual_key("Клики"), "")
+        self.assertEqual(_table_row_visual_key("Корзины"), "carts")
+        self.assertEqual(_table_row_visual_key("Заказы"), "orders")
+        self.assertEqual(_table_row_visual_key("Заказы (руб.)"), "")
+        self.assertEqual(_table_row_visual_key("Конверсия в заказ (%)"), "conversion-order")
+
     def test_seed_demo_data_creates_products(self) -> None:
         seed_demo_dataset()
         self.assertGreaterEqual(Product.objects.count(), 2)
@@ -1804,7 +1839,7 @@ class PageRenderTests(TestCase):
         self.assertContains(response, 'data-note-control="input"')
         self.assertContains(response, 'data-note-control="text"')
         self.assertContains(response, "is-comment-span")
-        self.assertContains(response, 'colspan="6"')
+        self.assertContains(response, 'colspan="8"')
         self.assertContains(response, "is-stock-span")
         self.assertContains(response, "data-stock-popup-button")
         self.assertContains(response, "data-stock-url")

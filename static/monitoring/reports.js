@@ -261,6 +261,20 @@
             return SERIES_PALETTE[index % SERIES_PALETTE.length];
         }
 
+        resolveSeriesFormat(series, metricKey = this.ensureViewState(this.activeViewKey).metric) {
+            return series?.format || this.data.metrics?.[metricKey]?.format || "int";
+        }
+
+        getWindowLabel(labels) {
+            if (this.data.windowLabel) {
+                return this.data.windowLabel;
+            }
+            if (!labels.length) {
+                return "";
+            }
+            return `${labels[0]} — ${labels[labels.length - 1]}`;
+        }
+
         getAvailableMetricMap(viewData) {
             if (this.resolveMode(viewData) === "campaigns") {
                 return viewData.metrics || {};
@@ -394,7 +408,7 @@
                     const isActive = state.activeSeries.has(key);
                     const values = (series.values || []).map((value) => Number(value || 0));
                     const avgValue = average(values);
-                    const formatName = series.format || this.data.metrics?.[state.metric]?.format || "int";
+                    const formatName = this.resolveSeriesFormat(series, state.metric);
                     return `
                         <button
                             type="button"
@@ -796,7 +810,7 @@
             this.applySeriesHoverState();
         }
 
-        buildSeriesEntriesFromCurrentView() {
+        buildSeriesEntriesFromCurrentView(formatOverride = null) {
             const state = this.ensureViewState(this.activeViewKey);
             const seriesMap = this.getAvailableSeries(this.data, state.metric);
             const seriesOrder = this.getSeriesOrder(this.data, state.metric);
@@ -808,7 +822,7 @@
                     return {
                         key,
                         label: series.label || key,
-                        format: series.format || this.data.metrics?.[state.metric]?.format || "int",
+                        format: formatOverride || this.resolveSeriesFormat(series, state.metric),
                         values,
                         color: this.resolveSeriesColor(series, index),
                         minValue: Math.min(...values),
@@ -817,22 +831,7 @@
                 });
         }
 
-        renderMulti() {
-            const labels = Array.isArray(this.data.labels) ? this.data.labels : [];
-            const seriesEntries = this.buildSeriesEntriesFromCurrentView();
-            const windowLabel = this.data.windowLabel || `${labels[0]} — ${labels[labels.length - 1]}`;
-
-            this.renderMultiSeries(
-                labels,
-                seriesEntries,
-                `Графики по товару за период ${windowLabel}.`
-            );
-
-            if (!labels.length || !seriesEntries.length) {
-                return;
-            }
-
-            this.caption.textContent = `Cредние значения за период ${windowLabel}.`;
+        renderAverageLegend(seriesEntries) {
             this.legend.innerHTML = seriesEntries
                 .map((series) => `
                     <div class="legend-chip legend-chip-series legend-chip-average" data-chart-legend-series="${series.key}" tabindex="0">
@@ -850,6 +849,25 @@
                 (chip) => chip.dataset.chartLegendSeries
             );
             this.syncLegendHover();
+        }
+
+        renderMulti() {
+            const labels = Array.isArray(this.data.labels) ? this.data.labels : [];
+            const seriesEntries = this.buildSeriesEntriesFromCurrentView();
+            const windowLabel = this.getWindowLabel(labels);
+
+            this.renderMultiSeries(
+                labels,
+                seriesEntries,
+                `Графики по товару за период ${windowLabel}.`
+            );
+
+            if (!labels.length || !seriesEntries.length) {
+                return;
+            }
+
+            this.caption.textContent = `Средние значения за период ${windowLabel}.`;
+            this.renderAverageLegend(seriesEntries);
 
             this.syncButtons();
         }
@@ -858,11 +876,8 @@
             const labels = Array.isArray(this.data.labels) ? this.data.labels : [];
             const state = this.ensureViewState(this.activeViewKey);
             const metricData = this.data.metrics?.[state.metric];
-            const seriesEntries = this.buildSeriesEntriesFromCurrentView().map((item) => ({
-                ...item,
-                format: metricData?.format || item.format,
-            }));
-            const windowLabel = this.data.windowLabel || `${labels[0]} — ${labels[labels.length - 1]}`;
+            const seriesEntries = this.buildSeriesEntriesFromCurrentView(metricData?.format || null);
+            const windowLabel = this.getWindowLabel(labels);
 
             this.renderMultiSeries(
                 labels,
@@ -875,23 +890,7 @@
             }
 
             this.caption.textContent = `${metricData?.label || "Метрика"} по рекламным кампаниям за период ${windowLabel}. Ниже показаны средние значения по каждой РК.`;
-            this.legend.innerHTML = seriesEntries
-                .map((series) => `
-                    <div class="legend-chip legend-chip-series legend-chip-average" data-chart-legend-series="${series.key}" tabindex="0">
-                        <span class="legend-series-label">
-                            <span class="chart-series-swatch" style="--series-color:${series.color}"></span>
-                            <span>${series.label}</span>
-                        </span>
-                        <strong>${formatValue(average(series.values), metricData?.format || series.format)}</strong>
-                    </div>
-                `)
-                .join("");
-
-            this.bindSeriesHover(
-                Array.from(this.legend.querySelectorAll("[data-chart-legend-series]")),
-                (chip) => chip.dataset.chartLegendSeries
-            );
-            this.syncLegendHover();
+            this.renderAverageLegend(seriesEntries);
 
             this.syncButtons();
         }

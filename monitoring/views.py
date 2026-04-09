@@ -447,6 +447,22 @@ def _safe_next_url(raw: str | None, fallback: str) -> str:
     return fallback
 
 
+def _table_row_visual_key(value: object) -> str:
+    normalized = " ".join(str(value or "").strip().lower().split())
+    exact_mapping = {
+        "затраты": "spend",
+        "затраты (руб)": "spend",
+        "затраты (руб.)": "spend",
+        "корзины": "carts",
+        "конверсия в корзину": "conversion-cart",
+        "конверсия в корзину (%)": "conversion-cart",
+        "заказы": "orders",
+        "конверсия в заказ": "conversion-order",
+        "конверсия в заказ (%)": "conversion-order",
+    }
+    return exact_mapping.get(normalized, "")
+
+
 def dashboard(request: HttpRequest) -> HttpResponse:
     target = reverse("monitoring:table")
     query_string = request.META.get("QUERY_STRING", "").strip()
@@ -560,21 +576,21 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 "centered": True,
             },
             (25, 1): {"type": "stock_popup"},
-            (35, 5): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%"},
-            (36, 6): {"type": "input", "field": "seller_price", "placeholder": "0,00"},
-            (37, 6): {"type": "input", "field": "wb_price", "placeholder": "0,00"},
-            (38, 6): {
+            (35, 7): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%"},
+            (36, 8): {"type": "input", "field": "seller_price", "placeholder": "0,00"},
+            (37, 8): {"type": "input", "field": "wb_price", "placeholder": "0,00"},
+            (38, 8): {
                 "type": "select",
                 "field": "promo_status",
                 "options": ["Не участвуем", "Участвуем", "Тест", "Акция"],
             },
-            (39, 6): {
+            (39, 8): {
                 "type": "select",
                 "field": "negative_feedback",
                 "options": ["Без изменений", "Есть негатив", "Нужна проверка", "Критично"],
             },
-            (41, 5): {"type": "bool", "field": "ads_enabled"},
-            (42, 5): {"type": "bool", "field": "price_changed"},
+            (41, 7): {"type": "bool", "field": "ads_enabled"},
+            (42, 7): {"type": "bool", "field": "price_changed"},
             (43, 1): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
         }
 
@@ -589,6 +605,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         for row_index, row in enumerate(active_sheet["rows"]):
             prepared_cells: list[dict] = []
             row_number = row_index + 1
+            row_visual_key = _table_row_visual_key(row[0] if row else "")
 
             column_index = 0
             while column_index < len(row):
@@ -711,7 +728,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                     }
                 )
                 column_index += colspan
-            prepared_rows.append({"cells": prepared_cells})
+            prepared_rows.append({"cells": prepared_cells, "row_visual_key": row_visual_key})
         active_sheet = {**active_sheet, "rows": prepared_rows, "keyword_offset": keyword_offset}
 
     table_timeline = build_table_timeline_context(
