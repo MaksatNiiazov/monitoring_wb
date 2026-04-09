@@ -1,4 +1,4 @@
-﻿from io import BytesIO
+from io import BytesIO
 import json
 import re
 from datetime import date, datetime
