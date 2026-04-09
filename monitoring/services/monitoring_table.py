@@ -40,7 +40,7 @@ from monitoring.services.reports import (
 
 BASE_BLOCK_HEIGHT = 43
 BASE_KEYWORD_ROWS = 0
-BLOCK_WIDTH = 6
+BLOCK_WIDTH = 7
 BLOCK_GAP = 1
 SHEETS_MAX_TITLE_LENGTH = 100
 
@@ -220,9 +220,10 @@ def build_day_block(
 
     search = report["table_blocks"]["search"]
     shelves = report["table_blocks"]["shelves"]
+    catalog = report["table_blocks"]["catalog"]
     manual = report["table_blocks"]["manual"]
 
-    columns = [search, shelves, manual]
+    columns = [search, shelves, catalog, manual]
     active_columns = [has_metric_cell_data(cell) for cell in columns]
 
     def pick_numbers(metric_name: str) -> list[int | float | str]:
@@ -239,16 +240,16 @@ def build_day_block(
         return values
 
     def traffic_value(relative_col: int) -> float | str:
-        if relative_col == 4:
-            return ""
         if relative_col == 5:
-            return 1.0
+            return ""
         if relative_col == 6:
+            return 1.0
+        if relative_col == 7:
             return "-"
         cell = columns[relative_col - 2]
         if not has_metric_cell_data(cell):
             return ""
-        unified_total = search.impressions + shelves.impressions
+        unified_total = search.impressions + shelves.impressions + catalog.impressions
         if unified_total <= 0:
             return ""
         return _fraction(decimalize(cell.impressions) * Decimal("100") / decimalize(unified_total))
@@ -260,7 +261,7 @@ def build_day_block(
         start_row=start_row,
         start_col=start_col,
         relative_row=row_after_keywords(36),
-        relative_col=6,
+        relative_col=7,
     )
     buyout_percent_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=22, relative_col=2)
     unit_cost_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=23, relative_col=2)
@@ -321,9 +322,9 @@ def build_day_block(
         buyout_fraction = f"IF({buyout_percent_ref}>1,{buyout_percent_ref}/100,{buyout_percent_ref})"
         return (
             f"=IFERROR(IF({seller_price_ref}=0,0,"
-            f"(({seller_price_ref}-{unit_cost_ref}-({seller_price_ref}*{row_value_ref(20, 5)}))-"
+            f"(({seller_price_ref}-{unit_cost_ref}-({seller_price_ref}*{row_value_ref(20, 6)}))-"
             f"({seller_price_ref}*25/100)-(({logistics_ref}/{buyout_fraction})-50))*"
-            f"({row_value_ref(13, 5)}*{buyout_fraction})),0)"
+            f"({row_value_ref(13, 6)}*{buyout_fraction})),0)"
         )
 
     def maybe_formula(relative_col: int, formula: str) -> str:
@@ -343,7 +344,7 @@ def build_day_block(
                     start_row=start_row,
                     start_col=block_start_col,
                     relative_row=13,
-                    relative_col=5,
+                    relative_col=6,
                 )
             )
         if len(refs) <= 1:
@@ -360,52 +361,127 @@ def build_day_block(
     spp_delta_text = spp_delta_value or spp_delta_label
 
     rows: list[list[Any]] = [
-        ["", _block_header(report), "", "", "", ""],
-        ["Тип рекламной кампании", "Единая ставка", "", "Руч. поиск", "Общая", "ОРГ"],
-        ["Зоны показов", "Поиск", "Полки", "", "", ""],
-        ["Доля трафика (%)", traffic_value(2), traffic_value(3), "", 1.0, "-"],
-        ["Затраты (руб)", *pick_numbers("spend"), f"=SUM({row_value_ref(5, 2)}:{row_value_ref(5, 4)})", "-"],
-        ["Показы ", *pick_numbers("impressions"), f"=SUM({row_value_ref(6, 2)}:{row_value_ref(6, 4)})", "-"],
-        ["CTR", maybe_formula(2, safe_divide_formula(row_value_ref(10, 2), row_value_ref(6, 2), scale=100)), maybe_formula(3, safe_divide_formula(row_value_ref(10, 3), row_value_ref(6, 3), scale=100)), maybe_formula(4, safe_divide_formula(row_value_ref(10, 4), row_value_ref(6, 4), scale=100)), "-", "-"],
-        ["CPM", maybe_formula(2, safe_divide_formula(f"{row_value_ref(5, 2)}*1000", row_value_ref(6, 2))), maybe_formula(3, safe_divide_formula(f"{row_value_ref(5, 3)}*1000", row_value_ref(6, 3))), maybe_formula(4, safe_divide_formula(f"{row_value_ref(5, 4)}*1000", row_value_ref(6, 4))), "-", "-"],
-        ["CPC", maybe_formula(2, safe_divide_formula(row_value_ref(5, 2), row_value_ref(10, 2))), maybe_formula(3, safe_divide_formula(row_value_ref(5, 3), row_value_ref(10, 3))), maybe_formula(4, safe_divide_formula(row_value_ref(5, 4), row_value_ref(10, 4))), safe_divide_formula(row_value_ref(5, 5), f"SUM({row_value_ref(10, 2)}:{row_value_ref(10, 4)})"), "-"],
-        ["Клики ", *pick_numbers("clicks"), _int(metrics.open_count if metrics else 0), f'={row_value_ref(10, 5)}-SUM({row_value_ref(10, 2)}:{row_value_ref(10, 3)})'],
-        ["Корзины ", *pick_numbers("carts"), _int(metrics.add_to_cart_count if metrics else 0), f'={row_value_ref(11, 5)}-SUM({row_value_ref(11, 2)}:{row_value_ref(11, 4)})'],
-        ["Конверсия в корзину", "", "", "", safe_divide_formula(row_value_ref(11, 5), row_value_ref(10, 5), scale=100), ""],
-        ["Заказы", *pick_numbers("orders"), _int(metrics.order_count if metrics else 0), f'={row_value_ref(13, 5)}-SUM({row_value_ref(13, 2)}:{row_value_ref(13, 3)})'],
-        ["Конверсия в заказ", "", "", "", safe_divide_formula(row_value_ref(13, 5), row_value_ref(11, 5), scale=100), ""],
-        ["Заказы (руб.)", *pick_numbers("order_sum"), _money(metrics.order_sum if metrics else 0), f'={row_value_ref(15, 5)}-SUM({row_value_ref(15, 2)}:{row_value_ref(15, 3)})'],
-        ["Выкупы ≈ (руб.)", maybe_formula(2, buyout_formula(2)), maybe_formula(3, buyout_formula(3)), "", buyout_formula(5), "-"],
-        ["Стоимость заказа", maybe_formula(2, cost_per_order_formula(2)), maybe_formula(3, cost_per_order_formula(3)), "", cost_per_order_formula(5), "-"],
-        ["Стоимость корзины", maybe_formula(2, cost_per_cart_formula(2)), maybe_formula(3, cost_per_cart_formula(3)), "", cost_per_cart_formula(5), "-"],
-        ["ДРР от заказов (%)", maybe_formula(2, ratio_formula(2, 15)), maybe_formula(3, ratio_formula(3, 15)), "", ratio_formula(5, 15), "-"],
-        ["ДРР от продаж ≈ (%)", maybe_formula(2, ratio_formula(2, 16)), maybe_formula(3, ratio_formula(3, 16)), "", ratio_formula(5, 16), "-"],
-        ["Прибыль", overall_profit_formula(), "", "", "", ""],
-        ["Процент выкупа %", _fraction(economics.buyout_percent), "", "", "", ""],
-        ["Себестоимость", _money(economics.unit_cost), "", "", "", ""],
-        ["Логистика", _money(economics.logistics_cost), "", "", "", ""],
-        ["", "Остатки:", "", "", "", ""],
-        ["", "Остатки на складах WB", "", "", _int(stock.total_stock if stock else 0), ""],
-        ["", "Едут к клиенту", "", "", _int(stock.in_way_to_client if stock else 0), ""],
-        ["", "Возвращаются на склад", "", "", _int(stock.in_way_from_client if stock else 0), ""],
-        ["", "Ср. кол-во заказов/день", "", "", average_orders_formula(), ""],
-        ["", "Ср. убыль остатков/день", "", "", average_stock_drop_value(), ""],
-        ["", "Дней до АУТА", "", "", days_until_zero_value(), ""],
-        ["", "", "", "", "", ""],
-        ["", "", "", "", "", ""],
+        ["", _block_header(report), "", "", "", "", ""],
+        ["Тип рекламной кампании", "Единая ставка", "", "", "Руч. поиск", "Общая", "ОРГ"],
+        ["Зоны показов", "Поиск", "Полки", "Каталог", "", "", ""],
+        ["Доля трафика (%)", traffic_value(2), traffic_value(3), traffic_value(4), "", 1.0, "-"],
+        ["Затраты (руб)", *pick_numbers("spend"), f"=SUM({row_value_ref(5, 2)}:{row_value_ref(5, 5)})", "-"],
+        ["Показы ", *pick_numbers("impressions"), f"=SUM({row_value_ref(6, 2)}:{row_value_ref(6, 5)})", "-"],
+        [
+            "CTR",
+            maybe_formula(2, safe_divide_formula(row_value_ref(10, 2), row_value_ref(6, 2), scale=100)),
+            maybe_formula(3, safe_divide_formula(row_value_ref(10, 3), row_value_ref(6, 3), scale=100)),
+            maybe_formula(4, safe_divide_formula(row_value_ref(10, 4), row_value_ref(6, 4), scale=100)),
+            maybe_formula(5, safe_divide_formula(row_value_ref(10, 5), row_value_ref(6, 5), scale=100)),
+            safe_divide_formula(f"SUM({row_value_ref(10, 2)}:{row_value_ref(10, 5)})", row_value_ref(6, 6), scale=100),
+            "-",
+        ],
+        [
+            "CPM",
+            maybe_formula(2, safe_divide_formula(f"{row_value_ref(5, 2)}*1000", row_value_ref(6, 2))),
+            maybe_formula(3, safe_divide_formula(f"{row_value_ref(5, 3)}*1000", row_value_ref(6, 3))),
+            maybe_formula(4, safe_divide_formula(f"{row_value_ref(5, 4)}*1000", row_value_ref(6, 4))),
+            maybe_formula(5, safe_divide_formula(f"{row_value_ref(5, 5)}*1000", row_value_ref(6, 5))),
+            safe_divide_formula(f"{row_value_ref(5, 6)}*1000", row_value_ref(6, 6)),
+            "-",
+        ],
+        [
+            "CPC",
+            maybe_formula(2, safe_divide_formula(row_value_ref(5, 2), row_value_ref(10, 2))),
+            maybe_formula(3, safe_divide_formula(row_value_ref(5, 3), row_value_ref(10, 3))),
+            maybe_formula(4, safe_divide_formula(row_value_ref(5, 4), row_value_ref(10, 4))),
+            maybe_formula(5, safe_divide_formula(row_value_ref(5, 5), row_value_ref(10, 5))),
+            safe_divide_formula(row_value_ref(5, 6), f"SUM({row_value_ref(10, 2)}:{row_value_ref(10, 5)})"),
+            "-",
+        ],
+        ["Клики ", *pick_numbers("clicks"), _int(metrics.open_count if metrics else 0), f'={row_value_ref(10, 6)}-SUM({row_value_ref(10, 2)}:{row_value_ref(10, 5)})'],
+        ["Корзины ", *pick_numbers("carts"), _int(metrics.add_to_cart_count if metrics else 0), f'={row_value_ref(11, 6)}-SUM({row_value_ref(11, 2)}:{row_value_ref(11, 5)})'],
+        ["Конверсия в корзину", "", "", "", "", safe_divide_formula(row_value_ref(11, 6), row_value_ref(10, 6), scale=100), ""],
+        ["Заказы", *pick_numbers("orders"), _int(metrics.order_count if metrics else 0), f'={row_value_ref(13, 6)}-SUM({row_value_ref(13, 2)}:{row_value_ref(13, 5)})'],
+        ["Конверсия в заказ", "", "", "", "", safe_divide_formula(row_value_ref(13, 6), row_value_ref(11, 6), scale=100), ""],
+        ["Заказы (руб.)", *pick_numbers("order_sum"), _money(metrics.order_sum if metrics else 0), f'={row_value_ref(15, 6)}-SUM({row_value_ref(15, 2)}:{row_value_ref(15, 5)})'],
+        ["Выкупы ≈ (руб.)", maybe_formula(2, buyout_formula(2)), maybe_formula(3, buyout_formula(3)), maybe_formula(4, buyout_formula(4)), maybe_formula(5, buyout_formula(5)), buyout_formula(6), "-"],
+        ["Стоимость заказа", maybe_formula(2, cost_per_order_formula(2)), maybe_formula(3, cost_per_order_formula(3)), maybe_formula(4, cost_per_order_formula(4)), maybe_formula(5, cost_per_order_formula(5)), cost_per_order_formula(6), "-"],
+        ["Стоимость корзины", maybe_formula(2, cost_per_cart_formula(2)), maybe_formula(3, cost_per_cart_formula(3)), maybe_formula(4, cost_per_cart_formula(4)), maybe_formula(5, cost_per_cart_formula(5)), cost_per_cart_formula(6), "-"],
+        ["ДРР от заказов (%)", maybe_formula(2, ratio_formula(2, 15)), maybe_formula(3, ratio_formula(3, 15)), maybe_formula(4, ratio_formula(4, 15)), maybe_formula(5, ratio_formula(5, 15)), ratio_formula(6, 15), "-"],
+        ["ДРР от продаж ≈ (%)", maybe_formula(2, ratio_formula(2, 16)), maybe_formula(3, ratio_formula(3, 16)), maybe_formula(4, ratio_formula(4, 16)), maybe_formula(5, ratio_formula(5, 16)), ratio_formula(6, 16), "-"],
+        ["Прибыль", overall_profit_formula(), "", "", "", "", ""],
+        ["Процент выкупа %", _fraction(economics.buyout_percent), "", "", "", "", ""],
+        ["Себестоимость", _money(economics.unit_cost), "", "", "", "", ""],
+        ["Логистика", _money(economics.logistics_cost), "", "", "", "", ""],
+        ["", "Остатки:", "", "", "", "", ""],
+        ["", "Остатки на складах WB", "", "", "", _int(stock.total_stock if stock else 0), ""],
+        ["", "Едут к клиенту", "", "", "", _int(stock.in_way_to_client if stock else 0), ""],
+        ["", "Возвращаются на склад", "", "", "", _int(stock.in_way_from_client if stock else 0), ""],
+        ["", "Ср. кол-во заказов/день", "", "", "", average_orders_formula(), ""],
+        ["", "Ср. убыль остатков/день", "", "", "", average_stock_drop_value(), ""],
+        ["", "Дней до АУТА", "", "", "", days_until_zero_value(), ""],
+        ["", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", ""],
     ]
     rows.extend(
         [
-            ["", "Обзор:", "", "", "", ""],
-            ["", "СПП", "", _optional_fraction(note.spp_percent), "", spp_delta_text],
-            ["", "Цена WBSELLER (наша)", "", "", "", _optional_money(note.seller_price)],
-            ["", "Цена WB (на сайте)", "", "", "", _optional_money(note.wb_price)],
-            ["", "Акция", "", "", "", promo_status_value],
-            ["", "Негативные отзывы", "", "", "", negative_feedback_value],
-            ["", "Действия:", "", "", "", ""],
-            ["", "Включили рекламу?", "", "", _bool_label(note.unified_enabled or note.manual_search_enabled or note.manual_shelves_enabled), ""],
-            ["", "Меняли цену?(WBSeller)", "", "", _bool_label(note.price_changed), ""],
-            ["Комментарий:", note.comment, "", "", "", ""],
+            ["", "Обзор:", "", "", "", "", ""],
+            ["", "СПП", "", "", "", _optional_fraction(note.spp_percent), spp_delta_text],
+            ["", "Цена WBSELLER (наша)", "", "", "", "", _optional_money(note.seller_price)],
+            ["", "Цена WB (на сайте)", "", "", "", "", _optional_money(note.wb_price)],
+            ["", "Акция", "", "", "", "", promo_status_value],
+            ["", "Негативные отзывы", "", "", "", "", negative_feedback_value],
+            ["", "Действия:", "", "", "", "", ""],
+            ["", "Включили рекламу?", "", "", "", _bool_label(note.unified_enabled or note.manual_search_enabled or note.manual_shelves_enabled or getattr(note, "manual_catalog_enabled", False)), ""],
+            ["", "Меняли цену?(WBSeller)", "", "", "", _bool_label(note.price_changed), ""],
+            ["Комментарий:", note.comment, "", "", "", "", ""],
+        ]
+    )
+    return rows
+
+    rows: list[list[Any]] = [
+        ["", _block_header(report), "", "", "", "", ""],
+        ["Тип рекламной кампании", "Единая ставка", "", "", "Руч. поиск", "Общая", "ОРГ"],
+        ["Зоны показов", "Поиск", "Полки", "Каталог", "", "", ""],
+        ["Доля трафика (%)", traffic_value(2), traffic_value(3), traffic_value(4), "", 1.0, "-"],
+        ["Затраты (руб)", *pick_numbers("spend"), f"=SUM({row_value_ref(5, 2)}:{row_value_ref(5, 5)})", "-"],
+        ["Показы ", *pick_numbers("impressions"), f"=SUM({row_value_ref(6, 2)}:{row_value_ref(6, 5)})", "-"],
+        ["CTR", maybe_formula(2, safe_divide_formula(row_value_ref(10, 2), row_value_ref(6, 2), scale=100)), maybe_formula(3, safe_divide_formula(row_value_ref(10, 3), row_value_ref(6, 3), scale=100)), maybe_formula(4, safe_divide_formula(row_value_ref(10, 4), row_value_ref(6, 4), scale=100)), maybe_formula(5, safe_divide_formula(row_value_ref(10, 5), row_value_ref(6, 5), scale=100)), "-", "-"],
+        ["CPM", maybe_formula(2, safe_divide_formula(f"{row_value_ref(5, 2)}*1000", row_value_ref(6, 2))), maybe_formula(3, safe_divide_formula(f"{row_value_ref(5, 3)}*1000", row_value_ref(6, 3))), maybe_formula(4, safe_divide_formula(f"{row_value_ref(5, 4)}*1000", row_value_ref(6, 4))), maybe_formula(5, safe_divide_formula(f"{row_value_ref(5, 5)}*1000", row_value_ref(6, 5))), "-", "-"],
+        ["CPC", maybe_formula(2, safe_divide_formula(row_value_ref(5, 2), row_value_ref(10, 2))), maybe_formula(3, safe_divide_formula(row_value_ref(5, 3), row_value_ref(10, 3))), maybe_formula(4, safe_divide_formula(row_value_ref(5, 4), row_value_ref(10, 4))), maybe_formula(5, safe_divide_formula(row_value_ref(5, 5), row_value_ref(10, 5))), safe_divide_formula(row_value_ref(5, 6), f"SUM({row_value_ref(10, 2)}:{row_value_ref(10, 5)})"), "-"],
+        ["Клики ", *pick_numbers("clicks"), _int(metrics.open_count if metrics else 0), f'={row_value_ref(10, 6)}-SUM({row_value_ref(10, 2)}:{row_value_ref(10, 5)})'],
+        ["Корзины ", *pick_numbers("carts"), _int(metrics.add_to_cart_count if metrics else 0), f'={row_value_ref(11, 6)}-SUM({row_value_ref(11, 2)}:{row_value_ref(11, 5)})'],
+        ["Конверсия в корзину", "", "", "", "", safe_divide_formula(row_value_ref(11, 6), row_value_ref(10, 6), scale=100), ""],
+        ["Заказы", *pick_numbers("orders"), _int(metrics.order_count if metrics else 0), f'={row_value_ref(13, 6)}-SUM({row_value_ref(13, 2)}:{row_value_ref(13, 5)})'],
+        ["Конверсия в заказ", "", "", "", "", safe_divide_formula(row_value_ref(13, 6), row_value_ref(11, 6), scale=100), ""],
+        ["Заказы (руб.)", *pick_numbers("order_sum"), _money(metrics.order_sum if metrics else 0), f'={row_value_ref(15, 6)}-SUM({row_value_ref(15, 2)}:{row_value_ref(15, 5)})'],
+        ["Выкупы ≈ (руб.)", maybe_formula(2, buyout_formula(2)), maybe_formula(3, buyout_formula(3)), maybe_formula(4, buyout_formula(4)), maybe_formula(5, buyout_formula(5)), buyout_formula(6), "-"],
+        ["Стоимость заказа", maybe_formula(2, cost_per_order_formula(2)), maybe_formula(3, cost_per_order_formula(3)), maybe_formula(4, cost_per_order_formula(4)), maybe_formula(5, cost_per_order_formula(5)), cost_per_order_formula(6), "-"],
+        ["Стоимость корзины", maybe_formula(2, cost_per_cart_formula(2)), maybe_formula(3, cost_per_cart_formula(3)), maybe_formula(4, cost_per_cart_formula(4)), maybe_formula(5, cost_per_cart_formula(5)), cost_per_cart_formula(6), "-"],
+        ["ДРР от заказов (%)", maybe_formula(2, ratio_formula(2, 15)), maybe_formula(3, ratio_formula(3, 15)), maybe_formula(4, ratio_formula(4, 15)), maybe_formula(5, ratio_formula(5, 15)), ratio_formula(6, 15), "-"],
+        ["ДРР от продаж ≈ (%)", maybe_formula(2, ratio_formula(2, 16)), maybe_formula(3, ratio_formula(3, 16)), maybe_formula(4, ratio_formula(4, 16)), maybe_formula(5, ratio_formula(5, 16)), ratio_formula(6, 16), "-"],
+        ["Прибыль", overall_profit_formula(), "", "", "", "", ""],
+        ["Процент выкупа %", _fraction(economics.buyout_percent), "", "", "", "", ""],
+        ["Себестоимость", _money(economics.unit_cost), "", "", "", "", ""],
+        ["Логистика", _money(economics.logistics_cost), "", "", "", "", ""],
+        ["", "Остатки:", "", "", "", "", ""],
+        ["", "Остатки на складах WB", "", "", "", _int(stock.total_stock if stock else 0), ""],
+        ["", "Едут к клиенту", "", "", "", _int(stock.in_way_to_client if stock else 0), ""],
+        ["", "Возвращаются на склад", "", "", "", _int(stock.in_way_from_client if stock else 0), ""],
+        ["", "Ср. кол-во заказов/день", "", "", "", average_orders_formula(), ""],
+        ["", "Ср. убыль остатков/день", "", "", "", average_stock_drop_value(), ""],
+        ["", "Дней до АУТА", "", "", "", days_until_zero_value(), ""],
+        ["", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", ""],
+    ]
+    rows.extend(
+        [
+            ["", "Обзор:", "", "", "", "", ""],
+            ["", "СПП", "", "", "", _optional_fraction(note.spp_percent), spp_delta_text],
+            ["", "Цена WBSELLER (наша)", "", "", "", "", _optional_money(note.seller_price)],
+            ["", "Цена WB (на сайте)", "", "", "", "", _optional_money(note.wb_price)],
+            ["", "Акция", "", "", "", "", promo_status_value],
+            ["", "Негативные отзывы", "", "", "", "", negative_feedback_value],
+            ["", "Действия:", "", "", "", "", ""],
+            ["", "Включили рекламу?", "", "", "", _bool_label(note.unified_enabled or note.manual_search_enabled or note.manual_shelves_enabled), ""],
+            ["", "Меняли цену?(WBSeller)", "", "", "", _bool_label(note.price_changed), ""],
+            ["Комментарий:", note.comment, "", "", "", "", ""],
         ]
     )
     return rows

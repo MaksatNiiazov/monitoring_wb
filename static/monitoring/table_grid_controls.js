@@ -112,10 +112,14 @@
             SELLER_PRICE: 36,
         };
         const COL = {
-            OVERALL: 4,
+            SEARCH: 1,
+            SHELVES: 2,
+            CATALOG: 3,
+            MANUAL: 4,
+            OVERALL: 5,
             INPUT_MAIN: 1,
-            SELLER_PRICE: 5,
-            STOCK: 4,
+            SELLER_PRICE: 6,
+            STOCK: 5,
         };
 
         const getCell = (row, block, inBlockCol) =>
@@ -165,15 +169,34 @@
             const orders = readNumber(ROW.ORDERS, blockIndex, COL.OVERALL);
             const orderSum = readNumber(ROW.ORDER_SUM, blockIndex, COL.OVERALL);
             const spend = readNumber(ROW.SPEND, blockIndex, COL.OVERALL);
+            const adCols = [COL.SEARCH, COL.SHELVES, COL.CATALOG, COL.MANUAL];
+            const adImpressions = adCols.reduce(
+                (sum, col) => sum + (readNumber(ROW.IMPRESSIONS, blockIndex, col) || 0),
+                0,
+            );
+            const adClicks = adCols.reduce(
+                (sum, col) => sum + (readNumber(ROW.CLICKS, blockIndex, col) || 0),
+                0,
+            );
 
-            setCellText(ROW.CTR, blockIndex, COL.OVERALL, "-");
-            setCellText(ROW.CPM, blockIndex, COL.OVERALL, "-");
+            setCellText(
+                ROW.CTR,
+                blockIndex,
+                COL.OVERALL,
+                formatRatioCell(adClicks, adImpressions, { percent: true }),
+            );
+            setCellText(
+                ROW.CPM,
+                blockIndex,
+                COL.OVERALL,
+                formatRatioCell(spend ? spend * 1000 : spend, adImpressions),
+            );
 
             setCellText(
                 ROW.CPC,
                 blockIndex,
                 COL.OVERALL,
-                formatRatioCell(spend, clicks),
+                formatRatioCell(spend, adClicks),
             );
 
             const conversionCart = clicks ? (carts || 0) * 100 / clicks : null;

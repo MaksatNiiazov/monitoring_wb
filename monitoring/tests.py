@@ -164,7 +164,7 @@ class ReportingTests(TestCase):
         )
         rows = exporter_rows(report)
         self.assertEqual(rows[0][1], "17.03.2026")
-        self.assertEqual(rows[4][4], "2000")
+        self.assertEqual(rows[4][5], "2000")
 
     def test_exporter_uses_overall_funnel_in_summary_column(self) -> None:
         report = build_product_report(
@@ -173,9 +173,9 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         rows = exporter_rows(report)
-        self.assertEqual(rows[10][4], "50")
-        self.assertEqual(rows[12][4], "10")
-        self.assertEqual(rows[14][4], "10000")
+        self.assertEqual(rows[10][5], "50")
+        self.assertEqual(rows[12][5], "10")
+        self.assertEqual(rows[14][5], "10000")
 
     def test_exporter_normalizes_buyout_percent_when_saved_as_fraction(self) -> None:
         ProductEconomicsVersion.objects.filter(
@@ -189,7 +189,7 @@ class ReportingTests(TestCase):
         )
         rows = exporter_rows(report)
         self.assertEqual(rows[21][1], "24%")
-        self.assertEqual(rows[15][4], "2400")
+        self.assertEqual(rows[15][5], "2400")
 
     def test_exporter_populates_overall_ctr_cpm_and_cpc(self) -> None:
         report = build_product_report(
@@ -198,9 +198,9 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         rows = exporter_rows(report)
-        self.assertEqual(rows[6][4], "-")
-        self.assertEqual(rows[7][4], "-")
-        self.assertEqual(rows[8][4], "20")
+        self.assertEqual(rows[6][5], "10%")
+        self.assertEqual(rows[7][5], "2000")
+        self.assertEqual(rows[8][5], "20")
 
     def test_exporter_profit_uses_drr_sales_fraction(self) -> None:
         DailyProductNote.objects.create(
@@ -234,12 +234,12 @@ class ReportingTests(TestCase):
         )
         rows = exporter_rows(report)
         self.assertEqual(rows[8][1], "-")
-        self.assertEqual(rows[11][4], "-")
-        self.assertEqual(rows[13][4], "-")
-        self.assertEqual(rows[16][4], "-")
-        self.assertEqual(rows[17][4], "-")
-        self.assertEqual(rows[18][4], "-")
-        self.assertEqual(rows[19][4], "-")
+        self.assertEqual(rows[11][5], "-")
+        self.assertEqual(rows[13][5], "-")
+        self.assertEqual(rows[16][5], "-")
+        self.assertEqual(rows[17][5], "-")
+        self.assertEqual(rows[18][5], "-")
+        self.assertEqual(rows[19][5], "-")
 
     def test_exporter_keeps_revenue_and_buyouts_but_hides_efficiency_metrics_when_spend_is_zero(self) -> None:
         DailyCampaignProductStat.objects.filter(
@@ -262,12 +262,12 @@ class ReportingTests(TestCase):
         self.assertEqual(rows[17][1], "-")
         self.assertEqual(rows[18][1], "-")
         self.assertEqual(rows[19][1], "-")
-        self.assertEqual(rows[14][4], "10000")
-        self.assertEqual(rows[15][4], "2400")
-        self.assertEqual(rows[16][4], "-")
-        self.assertEqual(rows[17][4], "-")
-        self.assertEqual(rows[18][4], "-")
-        self.assertEqual(rows[19][4], "-")
+        self.assertEqual(rows[14][5], "10000")
+        self.assertEqual(rows[15][5], "2400")
+        self.assertEqual(rows[16][5], "-")
+        self.assertEqual(rows[17][5], "-")
+        self.assertEqual(rows[18][5], "-")
+        self.assertEqual(rows[19][5], "-")
 
     def test_exporter_shows_tiny_nonzero_percentages_without_rounding_to_zero(self) -> None:
         DailyCampaignProductStat.objects.filter(
@@ -286,8 +286,8 @@ class ReportingTests(TestCase):
 
         self.assertEqual(rows[18][1], "<0,01%")
         self.assertEqual(rows[19][1], "<0,01%")
-        self.assertEqual(rows[18][4], "<0,01%")
-        self.assertEqual(rows[19][4], "<0,01%")
+        self.assertEqual(rows[18][5], "<0,01%")
+        self.assertEqual(rows[19][5], "<0,01%")
 
     def test_dashboard_context_builds_aggregated_totals(self) -> None:
         context = build_dashboard_context(stats_date=date(2026, 3, 16), stock_date=date(2026, 3, 17))
@@ -427,11 +427,11 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         block = build_day_block(report, start_row=1, start_col=1)
-        self.assertEqual(block[12][4], 10)
-        self.assertEqual(block[12][5], "=E13-SUM(B13:C13)")
+        self.assertEqual(block[12][5], 10)
+        self.assertEqual(block[12][6], "=F13-SUM(B13:E13)")
         self.assertTrue(block[20][1].startswith("=IFERROR(IF("))
         self.assertIn("*25/100", block[20][1])
-        self.assertEqual(block[20][2:], ["", "", "", ""])
+        self.assertEqual(block[20][2:], ["", "", "", "", ""])
 
     def test_monitoring_day_block_populates_overall_ctr_cpm_and_cpc_formulas(self) -> None:
         report = build_product_report(
@@ -440,9 +440,9 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         block = build_day_block(report, start_row=1, start_col=1)
-        self.assertEqual(block[6][4], "-")
-        self.assertEqual(block[7][4], "-")
-        self.assertEqual(block[8][4], '=IFERROR(IF(OR(SUM(B10:D10)="",SUM(B10:D10)=0),"-",E5/SUM(B10:D10)),"-")')
+        self.assertEqual(block[6][5], '=IFERROR(IF(OR(F6="",F6=0),"-",(SUM(B10:E10)/F6)*100),"-")')
+        self.assertEqual(block[7][5], '=IFERROR(IF(OR(F6="",F6=0),"-",F5*1000/F6),"-")')
+        self.assertEqual(block[8][5], '=IFERROR(IF(OR(SUM(B10:E10)="",SUM(B10:E10)=0),"-",F5/SUM(B10:E10)),"-")')
 
     def test_monitoring_day_block_profit_formula_uses_drr_sales_fraction(self) -> None:
         report = build_product_report(
@@ -452,7 +452,7 @@ class ReportingTests(TestCase):
         )
         block = build_day_block(report, start_row=1, start_col=1)
         self.assertNotIn("/100))", block[20][1])
-        self.assertIn("*E20)", block[20][1])
+        self.assertIn("*F20)", block[20][1])
 
     def test_monitoring_day_block_uses_safe_divide_formulas_for_derived_metrics(self) -> None:
         report = build_product_report(
@@ -461,8 +461,8 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         block = build_day_block(report, start_row=1, start_col=1)
-        self.assertTrue(block[11][4].startswith("=IFERROR(IF("))
-        self.assertTrue(block[13][4].startswith("=IFERROR(IF("))
+        self.assertTrue(block[11][5].startswith("=IFERROR(IF("))
+        self.assertTrue(block[13][5].startswith("=IFERROR(IF("))
         self.assertTrue(block[16][1].startswith("=IFERROR(IF("))
         self.assertTrue(block[17][1].startswith("=IFERROR(IF("))
         self.assertTrue(block[18][1].startswith("=IFERROR(IF("))
@@ -480,10 +480,10 @@ class ReportingTests(TestCase):
         self.assertIn('B5=0', block[17][1])
         self.assertIn('B5=0', block[18][1])
         self.assertIn('B5=0', block[19][1])
-        self.assertIn('E5=0', block[16][4])
-        self.assertIn('E5=0', block[17][4])
-        self.assertIn('E5=0', block[18][4])
-        self.assertIn('E5=0', block[19][4])
+        self.assertIn('F5=0', block[16][5])
+        self.assertIn('F5=0', block[17][5])
+        self.assertIn('F5=0', block[18][5])
+        self.assertIn('F5=0', block[19][5])
 
     def test_monitoring_day_block_traffic_share_matches_template_logic(self) -> None:
         manual_search_campaign = Campaign.objects.create(
@@ -556,11 +556,12 @@ class ReportingTests(TestCase):
         block = build_day_block(report, start_row=1, start_col=1)
         traffic_row = block[3]
 
-        self.assertAlmostEqual(traffic_row[1], 0.2222, places=4)
-        self.assertAlmostEqual(traffic_row[2], 0.7778, places=4)
-        self.assertEqual(traffic_row[3], "")
-        self.assertEqual(traffic_row[4], 1.0)
-        self.assertEqual(traffic_row[5], "-")
+        self.assertAlmostEqual(traffic_row[1], 0.2137, places=4)
+        self.assertAlmostEqual(traffic_row[2], 0.1453, places=4)
+        self.assertAlmostEqual(traffic_row[3], 0.6410, places=4)
+        self.assertEqual(traffic_row[4], "")
+        self.assertEqual(traffic_row[5], 1.0)
+        self.assertEqual(traffic_row[6], "-")
 
     def test_exporter_traffic_share_matches_template_logic(self) -> None:
         manual_search_campaign = Campaign.objects.create(
@@ -633,11 +634,69 @@ class ReportingTests(TestCase):
         rows = exporter_rows(report)
         traffic_row = rows[3]
 
-        self.assertEqual(traffic_row[1], "22,22%")
-        self.assertEqual(traffic_row[2], "77,78%")
-        self.assertEqual(traffic_row[3], "")
-        self.assertEqual(traffic_row[4], "100%")
-        self.assertEqual(traffic_row[5], "-")
+        self.assertEqual(traffic_row[1], "21,37%")
+        self.assertEqual(traffic_row[2], "14,53%")
+        self.assertEqual(traffic_row[3], "64,1%")
+        self.assertEqual(traffic_row[4], "")
+        self.assertEqual(traffic_row[5], "100%")
+        self.assertEqual(traffic_row[6], "-")
+
+    def test_table_blocks_keep_manual_search_separate_from_manual_shelves(self) -> None:
+        manual_search_campaign = Campaign.objects.create(
+            external_id=28150157,
+            name="Manual search",
+            monitoring_group=CampaignMonitoringGroup.MANUAL_SEARCH,
+        )
+        manual_search_campaign.products.add(self.product)
+        manual_shelves_campaign = Campaign.objects.create(
+            external_id=28150158,
+            name="Manual shelves",
+            monitoring_group=CampaignMonitoringGroup.MANUAL_SHELVES,
+        )
+        manual_shelves_campaign.products.add(self.product)
+        DailyProductMetrics.objects.filter(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+        ).update(open_count=220, add_to_cart_count=40, order_count=12, order_sum=Decimal("12000.00"))
+        DailyCampaignProductStat.objects.create(
+            campaign=manual_search_campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.SEARCH,
+            impressions=200,
+            clicks=15,
+            spend=Decimal("300.00"),
+            add_to_cart_count=3,
+            order_count=1,
+            order_sum=Decimal("700.00"),
+        )
+        DailyCampaignProductStat.objects.create(
+            campaign=manual_shelves_campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.RECOMMENDATION,
+            impressions=180,
+            clicks=12,
+            spend=Decimal("260.00"),
+            add_to_cart_count=2,
+            order_count=1,
+            order_sum=Decimal("500.00"),
+        )
+
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+
+        self.assertEqual(report["table_blocks"]["manual"].clicks, 15)
+        self.assertEqual(report["table_blocks"]["manual"].spend, Decimal("300.00"))
+        self.assertEqual(report["table_blocks"]["shelves"].clicks, 12)
+        self.assertEqual(report["table_blocks"]["shelves"].spend, Decimal("260.00"))
+        self.assertEqual(report["table_organic"]["open_count"], 93)
+        self.assertEqual(report["table_organic"]["cart_count"], 15)
+        self.assertEqual(report["table_organic"]["order_count"], 4)
+        self.assertEqual(report["table_organic"]["order_sum"], Decimal("4800.00"))
 
     def test_monitoring_day_block_offsets_organic_formula_for_later_blocks(self) -> None:
         report = build_product_report(
@@ -646,8 +705,8 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         block = build_day_block(report, start_row=1, start_col=11)
-        self.assertEqual(block[9][5], "=O10-SUM(L10:M10)")
-        self.assertEqual(block[12][5], "=O13-SUM(L13:M13)")
+        self.assertEqual(block[9][6], "=P10-SUM(L10:O10)")
+        self.assertEqual(block[12][6], "=P13-SUM(L13:O13)")
 
     def test_product_report_ignores_stats_from_unlinked_campaigns(self) -> None:
         other_campaign = Campaign.objects.create(
@@ -1696,22 +1755,26 @@ class PageRenderTests(TestCase):
         self.assertEqual(products_page.status_code, 200)
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(reports.status_code, 200)
-        self.assertContains(products_page, "РЎРїРёСЃРѕРє С‚РѕРІР°СЂРѕРІ")
+        self.assertContains(products_page, "Список товаров")
         self.assertContains(detail, 'data-detail-tab-trigger="overview"')
+        self.assertContains(detail, 'data-chart-mode="multi"')
+        self.assertContains(detail, "product-metrics-chart")
         self.assertContains(reports, 'data-reports-tab-trigger="overview"')
         self.assertNotContains(reports, 'data-reports-tab-trigger="analytics"')
         self.assertNotContains(reports, 'data-reports-panel="analytics"')
 
     def test_table_page_renders_monitoring_grid(self) -> None:
         seed_demo_dataset()
-        response = self.client.get("/table/")
+        response = self.client.get("/table/?sheet=sheet-1")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "monitoring-grid-table")
         self.assertContains(response, "data-sync-indicator")
         self.assertContains(response, "data-table-period-picker")
-        self.assertContains(response, "Р’С‹Р±СЂР°РЅРЅС‹Р№ РїРµСЂРёРѕРґ")
+        self.assertContains(response, "Выбранный период")
         self.assertContains(response, "table-timeline-chart-data")
-        self.assertContains(response, "Р”РёРЅР°РјРёРєР° SKU")
+        self.assertContains(response, "Динамика SKU")
+        self.assertContains(response, 'data-chart-view="standard"')
+        self.assertContains(response, 'data-chart-view="campaigns"')
         self.assertContains(response, 'data-default-density="compact"')
         self.assertContains(response, 'data-default-fullscreen="normal"')
 
@@ -1730,7 +1793,7 @@ class PageRenderTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "campaign-timeline-chart")
         self.assertContains(response, 'data-detail-tab-trigger="overview"')
-        self.assertContains(response, "РўРѕРІР°СЂС‹ РІРЅСѓС‚СЂРё РєР°РјРїР°РЅРёРё")
+        self.assertContains(response, 'data-detail-tab-trigger="products"')
 
     def test_table_page_renders_inline_note_controls(self) -> None:
         seed_demo_dataset()
@@ -1741,7 +1804,7 @@ class PageRenderTests(TestCase):
         self.assertContains(response, 'data-note-control="input"')
         self.assertContains(response, 'data-note-control="text"')
         self.assertContains(response, "is-comment-span")
-        self.assertContains(response, 'colspan="5"')
+        self.assertContains(response, 'colspan="6"')
         self.assertContains(response, "is-stock-span")
         self.assertContains(response, "data-stock-popup-button")
         self.assertContains(response, "data-stock-url")
@@ -1790,7 +1853,9 @@ class PageRenderTests(TestCase):
         self.assertEqual(response.context["date_from"], date(2026, 3, 12))
         self.assertEqual(response.context["date_to"], date(2026, 3, 18))
         self.assertEqual(response.context["range_days"], 7)
-        self.assertContains(response, "12.03.2026 вЂ” 18.03.2026")
+        self.assertContains(response, "Период анализа")
+        self.assertContains(response, "12.03.2026")
+        self.assertContains(response, "18.03.2026")
 
     def test_reports_page_prefills_range_fields_from_reference_and_window_query(self) -> None:
         seed_demo_dataset()

@@ -56,6 +56,7 @@ from .services.campaigns import build_campaign_detail_context
 from .services.reporting_hub import build_reports_context
 from .services.table_charts import build_table_timeline_context
 from .services.reports import (
+    build_product_metrics_chart,
     build_product_report,
     decimalize,
     get_default_dates,
@@ -559,21 +560,21 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 "centered": True,
             },
             (25, 1): {"type": "stock_popup"},
-            (35, 3): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%"},
-            (36, 5): {"type": "input", "field": "seller_price", "placeholder": "0,00"},
-            (37, 5): {"type": "input", "field": "wb_price", "placeholder": "0,00"},
-            (38, 5): {
+            (35, 5): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%"},
+            (36, 6): {"type": "input", "field": "seller_price", "placeholder": "0,00"},
+            (37, 6): {"type": "input", "field": "wb_price", "placeholder": "0,00"},
+            (38, 6): {
                 "type": "select",
                 "field": "promo_status",
                 "options": ["Не участвуем", "Участвуем", "Тест", "Акция"],
             },
-            (39, 5): {
+            (39, 6): {
                 "type": "select",
                 "field": "negative_feedback",
                 "options": ["Без изменений", "Есть негатив", "Нужна проверка", "Критично"],
             },
-            (41, 4): {"type": "bool", "field": "ads_enabled"},
-            (42, 4): {"type": "bool", "field": "price_changed"},
+            (41, 5): {"type": "bool", "field": "ads_enabled"},
+            (42, 5): {"type": "bool", "field": "price_changed"},
             (43, 1): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
         }
 
@@ -1053,10 +1054,16 @@ def sync_all(request: HttpRequest) -> HttpResponse:
 
 def product_detail(request: HttpRequest, pk: int) -> HttpResponse:
     product = get_object_or_404(Product, pk=pk)
+    settings_obj = get_monitoring_settings()
     default_stats_date, default_stock_date = get_default_dates(product)
     stats_date = _selected_date(request.GET.get("stats_date"), default_stats_date)
     stock_date = _selected_date(request.GET.get("stock_date"), default_stock_date)
     report = build_product_report(product=product, stats_date=stats_date, stock_date=stock_date)
+    product_chart = build_product_metrics_chart(
+        product=product,
+        reference_date=stats_date,
+        history_days=getattr(settings_obj, "monitoring_history_days", 14) or 14,
+    )
     note = report["note"]
     linked_campaigns = list(
         product.campaigns.filter(is_active=True)
@@ -1071,6 +1078,7 @@ def product_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "note_form": DailyNoteForm(instance=note, initial={"note_date": stats_date}),
         "linked_campaigns": linked_campaigns,
         "economics_history": economics_history,
+        "product_chart": product_chart,
         "sync_form": SyncForm(
             initial={
                 "reference_date": stock_date,

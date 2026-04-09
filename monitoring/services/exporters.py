@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from decimal import Decimal
 
@@ -72,12 +72,12 @@ def spp_change_parts(report: dict, previous_report: dict | None = None) -> tuple
     if current == 0:
         return ("", "")
     if previous_report is None:
-        return ("Без изменений", "")
+        return ("Р‘РµР· РёР·РјРµРЅРµРЅРёР№", "")
     previous = decimalize(previous_report["note"].spp_percent)
     delta = current - previous
     if delta == 0:
-        return ("Без изменений", "")
-    label = "Вырос на" if delta > 0 else "Упал на"
+        return ("Р‘РµР· РёР·РјРµРЅРµРЅРёР№", "")
+    label = "Р’С‹СЂРѕСЃ РЅР°" if delta > 0 else "РЈРїР°Р» РЅР°"
     return (label, format_percent(abs(delta)))
 
 
@@ -121,15 +121,16 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
     metrics = report["metrics"]
     stock = report["stock"]
     note = report["note"]
-    promo_status_value = (note.promo_status or "").strip() or "Не участвуем"
-    negative_feedback_value = (note.negative_feedback or "").strip() or "Без изменений"
+    promo_status_value = (note.promo_status or "").strip() or "РќРµ СѓС‡Р°СЃС‚РІСѓРµРј"
+    negative_feedback_value = (note.negative_feedback or "").strip() or "Р‘РµР· РёР·РјРµРЅРµРЅРёР№"
     total_ad = report["table_blocks"]["ad_total"]
     organic = report["table_organic"]
     search = report["table_blocks"]["search"]
     shelves = report["table_blocks"]["shelves"]
+    catalog = report["table_blocks"]["catalog"]
     manual = report["table_blocks"]["manual"]
 
-    columns = [search, shelves, manual]
+    columns = [search, shelves, catalog, manual]
     active_columns = [has_metric_cell_data(cell) for cell in columns]
 
     def pick(metric_name: str) -> list[str]:
@@ -148,7 +149,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
     def traffic_value(cell) -> str:
         if not has_metric_cell_data(cell):
             return ""
-        total_unified_impressions = search.impressions + shelves.impressions
+        total_unified_impressions = search.impressions + shelves.impressions + catalog.impressions
         if total_unified_impressions <= 0:
             return ""
         return format_percent(cell.traffic_share(total_unified_impressions))
@@ -245,26 +246,51 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
     spp_delta_text = spp_delta_value or spp_delta_label
 
     rows = [
-        ["", f"{report['stock_date']:%d.%m.%Y}", "", "", "", ""],
-        ["Тип рекламной кампании", "Единая ставка", "", "Руч. поиск", "Общая", "ОРГ"],
-        ["Зоны показов", "Поиск", "Полки", "", "", ""],
-        ["Доля трафика (%)", traffic_value(search), traffic_value(shelves), "", "100%", "-"],
+        ["", f"{report['stock_date']:%d.%m.%Y}", "", "", "", "", ""],
+        ["Тип рекламной кампании", "Единая ставка", "", "", "Руч. поиск", "Общая", "ОРГ"],
+        ["Зоны показов", "Поиск", "Полки", "Каталог", "", "", ""],
+        ["Доля трафика (%)", traffic_value(search), traffic_value(shelves), traffic_value(catalog), "", "100%", "-"],
         ["Затраты (руб)", *pick("spend"), format_decimal(total_ad.spend), "-"],
         ["Показы ", *pick("impressions"), format_int(total_ad.impressions), "-"],
-        ["CTR", derived_ratio_decimal(search, search.clicks, search.impressions, scale=100), derived_ratio_decimal(shelves, shelves.clicks, shelves.impressions, scale=100), derived_ratio_decimal(manual, manual.clicks, manual.impressions, scale=100), "-", "-"],
-        ["CPM", derived_ratio_decimal(search, decimalize(search.spend) * 1000, search.impressions), derived_ratio_decimal(shelves, decimalize(shelves.spend) * 1000, shelves.impressions), derived_ratio_decimal(manual, decimalize(manual.spend) * 1000, manual.impressions), "-", "-"],
-        ["CPC", derived_ratio_decimal(search, search.spend, search.clicks), derived_ratio_decimal(shelves, shelves.spend, shelves.clicks), derived_ratio_decimal(manual, manual.spend, manual.clicks), format_ratio(total_ad.spend, overall_clicks), "-"],
+        [
+            "CTR",
+            derived_ratio_decimal(search, search.clicks, search.impressions, scale=100),
+            derived_ratio_decimal(shelves, shelves.clicks, shelves.impressions, scale=100),
+            derived_ratio_decimal(catalog, catalog.clicks, catalog.impressions, scale=100),
+            derived_ratio_decimal(manual, manual.clicks, manual.impressions, scale=100),
+            format_percent_ratio(total_ad.clicks, total_ad.impressions),
+            "-",
+        ],
+        [
+            "CPM",
+            derived_ratio_decimal(search, decimalize(search.spend) * 1000, search.impressions),
+            derived_ratio_decimal(shelves, decimalize(shelves.spend) * 1000, shelves.impressions),
+            derived_ratio_decimal(catalog, decimalize(catalog.spend) * 1000, catalog.impressions),
+            derived_ratio_decimal(manual, decimalize(manual.spend) * 1000, manual.impressions),
+            format_ratio(total_ad.spend * 1000, total_ad.impressions),
+            "-",
+        ],
+        [
+            "CPC",
+            derived_ratio_decimal(search, search.spend, search.clicks),
+            derived_ratio_decimal(shelves, shelves.spend, shelves.clicks),
+            derived_ratio_decimal(catalog, catalog.spend, catalog.clicks),
+            derived_ratio_decimal(manual, manual.spend, manual.clicks),
+            format_ratio(total_ad.spend, total_ad.clicks),
+            "-",
+        ],
         ["Клики ", *pick("clicks"), format_int(overall_clicks), format_int(organic["open_count"])],
         ["Корзины ", *pick("carts"), format_int(overall_carts), format_int(organic["cart_count"])],
-        ["Конверсия в корзину", "", "", "", format_percent_ratio(overall_carts, overall_clicks), ""],
+        ["Конверсия в корзину", "", "", "", "", format_percent_ratio(overall_carts, overall_clicks), ""],
         ["Заказы", *pick("orders"), format_int(overall_orders), format_int(organic["order_count"])],
-        ["Конверсия в заказ", "", "", "", format_percent_ratio(overall_orders, overall_carts), ""],
+        ["Конверсия в заказ", "", "", "", "", format_percent_ratio(overall_orders, overall_carts), ""],
         ["Заказы (руб.)", *pick("order_sum"), format_decimal(overall_order_sum), format_decimal(organic["order_sum"])],
         [
             "Выкупы ≈ (руб.)",
             derived_decimal(search, estimate_buyout_sum(economics, search.order_sum)),
             derived_decimal(shelves, estimate_buyout_sum(economics, shelves.order_sum)),
-            "",
+            derived_decimal(catalog, estimate_buyout_sum(economics, catalog.order_sum)),
+            derived_decimal(manual, estimate_buyout_sum(economics, manual.order_sum)),
             format_decimal(estimated_buyout_overall),
             "-",
         ],
@@ -272,7 +298,8 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             "Стоимость заказа",
             derived_ratio_decimal(search, search.spend, search.orders, treat_zero_numerator_as_empty=True),
             derived_ratio_decimal(shelves, shelves.spend, shelves.orders, treat_zero_numerator_as_empty=True),
-            "",
+            derived_ratio_decimal(catalog, catalog.spend, catalog.orders, treat_zero_numerator_as_empty=True),
+            derived_ratio_decimal(manual, manual.spend, manual.orders, treat_zero_numerator_as_empty=True),
             format_ratio(total_ad.spend, overall_orders, treat_zero_numerator_as_empty=True),
             "-",
         ],
@@ -280,7 +307,8 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             "Стоимость корзины",
             derived_ratio_decimal(search, search.spend, search.carts, treat_zero_numerator_as_empty=True),
             derived_ratio_decimal(shelves, shelves.spend, shelves.carts, treat_zero_numerator_as_empty=True),
-            "",
+            derived_ratio_decimal(catalog, catalog.spend, catalog.carts, treat_zero_numerator_as_empty=True),
+            derived_ratio_decimal(manual, manual.spend, manual.carts, treat_zero_numerator_as_empty=True),
             format_ratio(total_ad.spend, overall_carts, treat_zero_numerator_as_empty=True),
             "-",
         ],
@@ -288,50 +316,129 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             "ДРР от заказов (%)",
             derived_ratio_percent(search, search.spend, search.order_sum, treat_zero_numerator_as_empty=True),
             derived_ratio_percent(shelves, shelves.spend, shelves.order_sum, treat_zero_numerator_as_empty=True),
-            "",
+            derived_ratio_percent(catalog, catalog.spend, catalog.order_sum, treat_zero_numerator_as_empty=True),
+            derived_ratio_percent(manual, manual.spend, manual.order_sum, treat_zero_numerator_as_empty=True),
             format_percent_ratio(total_ad.spend, overall_order_sum, treat_zero_numerator_as_empty=True),
             "-",
         ],
         [
             "ДРР от продаж ≈ (%)",
-            derived_ratio_percent(
-                search,
-                search.spend,
-                estimate_buyout_sum(economics, search.order_sum),
-                treat_zero_numerator_as_empty=True,
-            ),
-            derived_ratio_percent(
-                shelves,
-                shelves.spend,
-                estimate_buyout_sum(economics, shelves.order_sum),
-                treat_zero_numerator_as_empty=True,
-            ),
-            "",
+            derived_ratio_percent(search, search.spend, estimate_buyout_sum(economics, search.order_sum), treat_zero_numerator_as_empty=True),
+            derived_ratio_percent(shelves, shelves.spend, estimate_buyout_sum(economics, shelves.order_sum), treat_zero_numerator_as_empty=True),
+            derived_ratio_percent(catalog, catalog.spend, estimate_buyout_sum(economics, catalog.order_sum), treat_zero_numerator_as_empty=True),
+            derived_ratio_percent(manual, manual.spend, estimate_buyout_sum(economics, manual.order_sum), treat_zero_numerator_as_empty=True),
             format_percent_ratio(total_ad.spend, estimated_buyout_overall, treat_zero_numerator_as_empty=True),
             "-",
         ],
-        ["Прибыль", format_decimal(profit_overall), "", "", "", ""],
-        ["Процент выкупа %", format_percent(percent_points(economics.buyout_percent)), "", "", "", ""],
-        ["Себестоимость", format_decimal(economics.unit_cost), "", "", "", ""],
-        ["Логистика", format_decimal(economics.logistics_cost), "", "", "", ""],
-        ["", "Остатки:", "", "", "", ""],
-        ["", "Остатки на складах WB", "", "", format_int(stock.total_stock if stock else 0), ""],
-        ["", "Едут к клиенту", "", "", format_int(stock.in_way_to_client if stock else 0), ""],
-        ["", "Возвращаются на склад", "", "", format_int(stock.in_way_from_client if stock else 0), ""],
-        ["", "Ср. кол-во заказов/день", "", "", format_decimal(report["avg_orders_per_day"]), ""],
-        ["", "Ср. убыль остатков/день", "", "", format_optional_decimal(report["avg_stock_drop_per_day"]), ""],
-        ["", "Дней до АУТА", "", "", format_optional_decimal(report["days_until_zero_from_stock_drop"]), ""],
-        ["", "", "", "", "", ""],
-        ["", "", "", "", "", ""],
-        ["", "Обзор:", "", "", "", ""],
-        ["", "СПП", "", format_optional_percent(note.spp_percent), "", spp_delta_text],
-        ["", "Цена WBSELLER (наша)", "", "", "", format_optional_decimal(note.seller_price)],
-        ["", "Цена WB (на сайте)", "", "", "", format_optional_decimal(note.wb_price)],
-        ["", "Акция", "", "", "", promo_status_value],
-        ["", "Негативные отзывы", "", "", "", negative_feedback_value],
-        ["", "Действия:", "", "", "", ""],
-        ["", "Включили рекламу?", "", "", "Да" if (note.unified_enabled or note.manual_search_enabled or note.manual_shelves_enabled) else "Нет", ""],
-        ["", "Меняли цену?(WBSeller)", "", "", "Да" if note.price_changed else "Нет", ""],
-        ["Комментарий:", note.comment, "", "", "", ""],
+        ["Прибыль", format_decimal(profit_overall), "", "", "", "", ""],
+        ["Процент выкупа %", format_percent(percent_points(economics.buyout_percent)), "", "", "", "", ""],
+        ["Себестоимость", format_decimal(economics.unit_cost), "", "", "", "", ""],
+        ["Логистика", format_decimal(economics.logistics_cost), "", "", "", "", ""],
+        ["", "Остатки:", "", "", "", "", ""],
+        ["", "Остатки на складах WB", "", "", "", format_int(stock.total_stock if stock else 0), ""],
+        ["", "Едут к клиенту", "", "", "", format_int(stock.in_way_to_client if stock else 0), ""],
+        ["", "Возвращаются на склад", "", "", "", format_int(stock.in_way_from_client if stock else 0), ""],
+        ["", "Ср. кол-во заказов/день", "", "", "", format_decimal(report["avg_orders_per_day"]), ""],
+        ["", "Ср. убыль остатков/день", "", "", "", format_optional_decimal(report["avg_stock_drop_per_day"]), ""],
+        ["", "Дней до АУТА", "", "", "", format_optional_decimal(report["days_until_zero_from_stock_drop"]), ""],
+        ["", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", ""],
+        ["", "Обзор:", "", "", "", "", ""],
+        ["", "СПП", "", "", "", format_optional_percent(note.spp_percent), spp_delta_text],
+        ["", "Цена WBSELLER (наша)", "", "", "", "", format_optional_decimal(note.seller_price)],
+        ["", "Цена WB (на сайте)", "", "", "", "", format_optional_decimal(note.wb_price)],
+        ["", "Акция", "", "", "", "", promo_status_value],
+        ["", "Негативные отзывы", "", "", "", "", negative_feedback_value],
+        ["", "Действия:", "", "", "", "", ""],
+        ["", "Включили рекламу?", "", "", "", "Да" if (note.unified_enabled or note.manual_search_enabled or note.manual_shelves_enabled or getattr(note, "manual_catalog_enabled", False)) else "Нет", ""],
+        ["", "Меняли цену?(WBSeller)", "", "", "", "Да" if note.price_changed else "Нет", ""],
+        ["Комментарий:", note.comment, "", "", "", "", ""],
+    ]
+    return rows
+
+    rows = [
+        ["", f"{report['stock_date']:%d.%m.%Y}", "", "", "", "", ""],
+        ["??? ????????? ????????", "?????? ??????", "", "", "???. ?????", "?????", "???"],
+        ["???? ???????", "?????", "?????", "???????", "", "", ""],
+        ["???? ??????? (%)", traffic_value(search), traffic_value(shelves), traffic_value(catalog), "", "100%", "-"],
+        ["??????? (???)", *pick("spend"), format_decimal(total_ad.spend), "-"],
+        ["?????? ", *pick("impressions"), format_int(total_ad.impressions), "-"],
+        ["CTR", derived_ratio_decimal(search, search.clicks, search.impressions, scale=100), derived_ratio_decimal(shelves, shelves.clicks, shelves.impressions, scale=100), derived_ratio_decimal(catalog, catalog.clicks, catalog.impressions, scale=100), derived_ratio_decimal(manual, manual.clicks, manual.impressions, scale=100), "-", "-"],
+        ["CPM", derived_ratio_decimal(search, decimalize(search.spend) * 1000, search.impressions), derived_ratio_decimal(shelves, decimalize(shelves.spend) * 1000, shelves.impressions), derived_ratio_decimal(catalog, decimalize(catalog.spend) * 1000, catalog.impressions), derived_ratio_decimal(manual, decimalize(manual.spend) * 1000, manual.impressions), "-", "-"],
+        ["CPC", derived_ratio_decimal(search, search.spend, search.clicks), derived_ratio_decimal(shelves, shelves.spend, shelves.clicks), derived_ratio_decimal(catalog, catalog.spend, catalog.clicks), derived_ratio_decimal(manual, manual.spend, manual.clicks), format_ratio(total_ad.spend, overall_clicks), "-"],
+        ["????? ", *pick("clicks"), format_int(overall_clicks), format_int(organic["open_count"])],
+        ["??????? ", *pick("carts"), format_int(overall_carts), format_int(organic["cart_count"])],
+        ["????????? ? ???????", "", "", "", "", format_percent_ratio(overall_carts, overall_clicks), ""],
+        ["??????", *pick("orders"), format_int(overall_orders), format_int(organic["order_count"])],
+        ["????????? ? ?????", "", "", "", "", format_percent_ratio(overall_orders, overall_carts), ""],
+        ["?????? (???.)", *pick("order_sum"), format_decimal(overall_order_sum), format_decimal(organic["order_sum"])],
+        [
+            "?????? ? (???.)",
+            derived_decimal(search, estimate_buyout_sum(economics, search.order_sum)),
+            derived_decimal(shelves, estimate_buyout_sum(economics, shelves.order_sum)),
+            derived_decimal(catalog, estimate_buyout_sum(economics, catalog.order_sum)),
+            derived_decimal(manual, estimate_buyout_sum(economics, manual.order_sum)),
+            format_decimal(estimated_buyout_overall),
+            "-",
+        ],
+        [
+            "????????? ??????",
+            derived_ratio_decimal(search, search.spend, search.orders, treat_zero_numerator_as_empty=True),
+            derived_ratio_decimal(shelves, shelves.spend, shelves.orders, treat_zero_numerator_as_empty=True),
+            derived_ratio_decimal(catalog, catalog.spend, catalog.orders, treat_zero_numerator_as_empty=True),
+            derived_ratio_decimal(manual, manual.spend, manual.orders, treat_zero_numerator_as_empty=True),
+            format_ratio(total_ad.spend, overall_orders, treat_zero_numerator_as_empty=True),
+            "-",
+        ],
+        [
+            "????????? ???????",
+            derived_ratio_decimal(search, search.spend, search.carts, treat_zero_numerator_as_empty=True),
+            derived_ratio_decimal(shelves, shelves.spend, shelves.carts, treat_zero_numerator_as_empty=True),
+            derived_ratio_decimal(catalog, catalog.spend, catalog.carts, treat_zero_numerator_as_empty=True),
+            derived_ratio_decimal(manual, manual.spend, manual.carts, treat_zero_numerator_as_empty=True),
+            format_ratio(total_ad.spend, overall_carts, treat_zero_numerator_as_empty=True),
+            "-",
+        ],
+        [
+            "??? ?? ??????? (%)",
+            derived_ratio_percent(search, search.spend, search.order_sum, treat_zero_numerator_as_empty=True),
+            derived_ratio_percent(shelves, shelves.spend, shelves.order_sum, treat_zero_numerator_as_empty=True),
+            derived_ratio_percent(catalog, catalog.spend, catalog.order_sum, treat_zero_numerator_as_empty=True),
+            derived_ratio_percent(manual, manual.spend, manual.order_sum, treat_zero_numerator_as_empty=True),
+            format_percent_ratio(total_ad.spend, overall_order_sum, treat_zero_numerator_as_empty=True),
+            "-",
+        ],
+        [
+            "??? ?? ?????? ? (%)",
+            derived_ratio_percent(search, search.spend, estimate_buyout_sum(economics, search.order_sum), treat_zero_numerator_as_empty=True),
+            derived_ratio_percent(shelves, shelves.spend, estimate_buyout_sum(economics, shelves.order_sum), treat_zero_numerator_as_empty=True),
+            derived_ratio_percent(catalog, catalog.spend, estimate_buyout_sum(economics, catalog.order_sum), treat_zero_numerator_as_empty=True),
+            derived_ratio_percent(manual, manual.spend, estimate_buyout_sum(economics, manual.order_sum), treat_zero_numerator_as_empty=True),
+            format_percent_ratio(total_ad.spend, estimated_buyout_overall, treat_zero_numerator_as_empty=True),
+            "-",
+        ],
+        ["???????", format_decimal(profit_overall), "", "", "", "", ""],
+        ["??????? ?????? %", format_percent(percent_points(economics.buyout_percent)), "", "", "", "", ""],
+        ["?????????????", format_decimal(economics.unit_cost), "", "", "", "", ""],
+        ["?????????", format_decimal(economics.logistics_cost), "", "", "", "", ""],
+        ["", "???????:", "", "", "", "", ""],
+        ["", "??????? ?? ??????? WB", "", "", "", format_int(stock.total_stock if stock else 0), ""],
+        ["", "???? ? ???????", "", "", "", format_int(stock.in_way_to_client if stock else 0), ""],
+        ["", "???????????? ?? ?????", "", "", "", format_int(stock.in_way_from_client if stock else 0), ""],
+        ["", "??. ???-?? ???????/????", "", "", "", format_decimal(report["avg_orders_per_day"]), ""],
+        ["", "??. ????? ????????/????", "", "", "", format_optional_decimal(report["avg_stock_drop_per_day"]), ""],
+        ["", "???? ?? ????", "", "", "", format_optional_decimal(report["days_until_zero_from_stock_drop"]), ""],
+        ["", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", ""],
+        ["", "?????:", "", "", "", "", ""],
+        ["", "???", "", "", "", format_optional_percent(note.spp_percent), spp_delta_text],
+        ["", "???? WBSELLER (????)", "", "", "", "", format_optional_decimal(note.seller_price)],
+        ["", "???? WB (?? ?????)", "", "", "", "", format_optional_decimal(note.wb_price)],
+        ["", "?????", "", "", "", "", promo_status_value],
+        ["", "?????????? ??????", "", "", "", "", negative_feedback_value],
+        ["", "????????:", "", "", "", "", ""],
+        ["", "???????? ????????", "", "", "", "??" if (note.unified_enabled or note.manual_search_enabled or note.manual_shelves_enabled) else "???", ""],
+        ["", "?????? ?????(WBSeller)", "", "", "", "??" if note.price_changed else "???", ""],
+        ["???????????:", note.comment, "", "", "", "", ""],
     ]
     return rows

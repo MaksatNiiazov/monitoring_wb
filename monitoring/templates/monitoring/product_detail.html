@@ -156,6 +156,21 @@
             </div>
         </article>
 
+        <article class="panel panel-spacious chart-panel detail-tab-panel" data-detail-tab-panel="overview">
+            <div class="panel-head">
+                <div>
+                    <h2>Графики по товару</h2>
+                    <p class="muted">Все ключевые метрики наложены линиями одновременно. Линии нормализованы по своему диапазону, а подписи на точках показывают реальные значения без наведения.</p>
+                </div>
+            </div>
+            <div class="chart-widget chart-widget-multi" data-chart-script="product-metrics-chart" data-chart-mode="multi">
+                <div class="chart-series-toggles" data-chart-series-toggles></div>
+                <div class="chart-stage chart-stage-multi" aria-live="polite"></div>
+                <div class="chart-caption"></div>
+                <div class="chart-legend"></div>
+            </div>
+        </article>
+
         <article class="panel detail-tab-panel" data-detail-tab-panel="ads">
             <div class="panel-head">
                 <div>
@@ -525,9 +540,11 @@
         </article>
     </aside>
 </section>
+{{ product_chart|json_script:"product-metrics-chart" }}
 {% endblock %}
 
 {% block extra_scripts %}
     <script src="{% static 'monitoring/sync_status.js' %}" defer></script>
     <script src="{% static 'monitoring/product_tabs.js' %}" defer></script>
+    <script src="{% static 'monitoring/reports.js' %}" defer></script>
 {% endblock %}

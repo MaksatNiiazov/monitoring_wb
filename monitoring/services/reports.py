@@ -309,6 +309,156 @@ def estimate_profit(
     return quantize_money(estimated_sales - spend - goods_cost - logistics)
 
 
+def estimate_monitoring_profit(
+    *,
+    seller_price: Decimal | int | float | None,
+    unit_cost: Decimal | int | float,
+    logistics_cost: Decimal | int | float,
+    buyout_percent: Decimal | int | float,
+    drr_sales_percent: Decimal | int | float,
+    total_orders: int | float,
+) -> Decimal:
+    if seller_price in (None, ""):
+        return ZERO
+    seller_price_value = decimalize(seller_price)
+    buyout_fraction = percent_fraction(buyout_percent)
+    if buyout_fraction <= 0:
+        return ZERO
+    logistics_adjustment = safe_divide(logistics_cost, buyout_fraction) - Decimal("50") if buyout_fraction else ZERO
+    margin_per_buyout_unit = (
+        seller_price_value
+        - decimalize(unit_cost)
+        - (seller_price_value * decimalize(drr_sales_percent))
+        - (seller_price_value * Decimal("0.25"))
+        - logistics_adjustment
+    )
+    return quantize_money(margin_per_buyout_unit * decimalize(total_orders) * buyout_fraction)
+
+
+def build_product_metrics_chart(
+    *,
+    product: Product,
+    reference_date: date,
+    history_days: int = 14,
+) -> dict[str, Any]:
+    resolved_days = max(1, min(int(history_days or 14), 90))
+    start_date = reference_date - timedelta(days=resolved_days - 1)
+    labels: list[str] = []
+    series_keys = [
+        "stock",
+        "spend",
+        "impressions",
+        "ctr",
+        "cpm",
+        "cpc",
+        "clicks",
+        "carts",
+        "conversion_cart",
+        "orders",
+        "conversion_order",
+        "order_sum",
+        "buyouts",
+        "cost_per_order",
+        "cost_per_cart",
+        "drr_orders",
+        "drr_sales",
+        "profit",
+    ]
+    palette = [
+        "#0f6a5c",
+        "#22724d",
+        "#986322",
+        "#9d483d",
+        "#345c8a",
+        "#7a5af8",
+        "#00838f",
+        "#5f6b7a",
+        "#ff7a59",
+        "#d97706",
+        "#2f855a",
+        "#c026d3",
+        "#2563eb",
+        "#0ea5e9",
+        "#9333ea",
+        "#dc2626",
+        "#475569",
+        "#6b7280",
+    ]
+    series: dict[str, dict[str, Any]] = {
+        "stock": {"label": "Остатки WB", "format": "int", "values": [], "color": palette[0]},
+        "spend": {"label": "Затраты (руб)", "format": "money", "values": [], "color": palette[1]},
+        "impressions": {"label": "Показы", "format": "int", "values": [], "color": palette[2]},
+        "ctr": {"label": "CTR", "format": "percent", "values": [], "color": palette[3]},
+        "cpm": {"label": "CPM", "format": "money", "values": [], "color": palette[4]},
+        "cpc": {"label": "CPC", "format": "money", "values": [], "color": palette[5]},
+        "clicks": {"label": "Клики", "format": "int", "values": [], "color": palette[6]},
+        "carts": {"label": "Корзины", "format": "int", "values": [], "color": palette[7]},
+        "conversion_cart": {"label": "Конверсия в корзину", "format": "percent", "values": [], "color": palette[8]},
+        "orders": {"label": "Заказы", "format": "int", "values": [], "color": palette[9]},
+        "conversion_order": {"label": "Конверсия в заказ", "format": "percent", "values": [], "color": palette[10]},
+        "order_sum": {"label": "Заказы (руб.)", "format": "money", "values": [], "color": palette[11]},
+        "buyouts": {"label": "Выкупы ≈ (руб.)", "format": "money", "values": [], "color": palette[12]},
+        "cost_per_order": {"label": "Стоимость заказа", "format": "money", "values": [], "color": palette[13]},
+        "cost_per_cart": {"label": "Стоимость корзины", "format": "money", "values": [], "color": palette[14]},
+        "drr_orders": {"label": "ДРР от заказов (%)", "format": "percent", "values": [], "color": palette[15]},
+        "drr_sales": {"label": "ДРР от продаж ≈ (%)", "format": "percent", "values": [], "color": palette[16]},
+        "profit": {"label": "Прибыль", "format": "money", "values": [], "color": palette[17]},
+    }
+
+    for offset in range(resolved_days):
+        current_date = start_date + timedelta(days=offset)
+        day_report = build_product_report(product=product, stats_date=current_date, stock_date=current_date)
+        metrics = day_report["metrics"]
+        note = day_report["note"]
+        economics = day_report["economics"]
+        total_ad = day_report["table_blocks"]["ad_total"]
+        order_sum = decimalize(metrics.order_sum if metrics else 0)
+        clicks = int(metrics.open_count if metrics else 0)
+        carts = int(metrics.add_to_cart_count if metrics else 0)
+        orders = int(metrics.order_count if metrics else 0)
+        spend = decimalize(total_ad.spend)
+        buyouts = estimate_buyout_sum(economics, order_sum)
+        drr_sales_ratio = safe_divide(spend, buyouts)
+        profit = estimate_monitoring_profit(
+            seller_price=getattr(note, "seller_price", None),
+            unit_cost=economics.unit_cost,
+            logistics_cost=economics.logistics_cost,
+            buyout_percent=economics.buyout_percent,
+            drr_sales_percent=drr_sales_ratio,
+            total_orders=orders,
+        )
+
+        labels.append(current_date.strftime("%d.%m"))
+        series["stock"]["values"].append(int(day_report["stock"].total_stock if day_report["stock"] else 0))
+        series["spend"]["values"].append(float(spend))
+        series["impressions"]["values"].append(int(total_ad.impressions))
+        series["ctr"]["values"].append(float(total_ad.ctr))
+        series["cpm"]["values"].append(float(total_ad.cpm))
+        series["cpc"]["values"].append(float(total_ad.cpc))
+        series["clicks"]["values"].append(clicks)
+        series["carts"]["values"].append(carts)
+        series["conversion_cart"]["values"].append(float(safe_divide(carts * 100, clicks)))
+        series["orders"]["values"].append(orders)
+        series["conversion_order"]["values"].append(float(safe_divide(orders * 100, carts)))
+        series["order_sum"]["values"].append(float(order_sum))
+        series["buyouts"]["values"].append(float(buyouts))
+        series["cost_per_order"]["values"].append(float(safe_divide(spend, orders)))
+        series["cost_per_cart"]["values"].append(float(safe_divide(spend, carts)))
+        series["drr_orders"]["values"].append(float(safe_divide(spend * 100, order_sum)))
+        series["drr_sales"]["values"].append(float(safe_divide(spend * 100, buyouts)))
+        series["profit"]["values"].append(float(profit))
+
+    return {
+        "mode": "multi",
+        "defaultType": "line",
+        "labels": labels,
+        "seriesOrder": series_keys,
+        "defaultSeries": series_keys,
+        "series": series,
+        "windowLabel": f"{start_date:%d.%m.%Y} — {reference_date:%d.%m.%Y}",
+    }
+
+
 def average_stock_drop_for_product(*, product: Product, stock_date: date, window: int = 5) -> Decimal:
     stock_rows = list(
         DailyProductStock.objects.filter(product=product, stats_date__lte=stock_date)
@@ -596,13 +746,15 @@ def build_product_report(
     }
 
     table_search = clone_metric_cell(blocks["unified_search"])
-    unified_total_for_table = clone_metric_cell(group_totals.get(CampaignMonitoringGroup.UNIFIED, MetricCell()))
-    table_shelves = subtract_metric_cells(unified_total_for_table, table_search)
-    table_manual = add_metric_cells(
-        blocks["manual_search"],
+    table_shelves = add_metric_cells(
+        blocks["unified_shelves"],
         blocks["manual_shelves"],
+    )
+    table_catalog = add_metric_cells(
+        blocks["unified_catalog"],
         blocks["manual_catalog"],
     )
+    table_manual = clone_metric_cell(blocks["manual_search"])
     table_ad_total = clone_metric_cell(total_ad)
 
     overall_open = metrics.open_count if metrics else 0
@@ -617,10 +769,28 @@ def build_product_report(
         "order_sum": quantize_money(max(overall_sum - total_ad.order_sum, ZERO)),
     }
     table_organic = {
-        "open_count": max(overall_open - table_search.clicks - table_shelves.clicks, 0),
-        "cart_count": max(overall_carts - table_search.carts - table_shelves.carts - table_manual.carts, 0),
-        "order_count": max(overall_orders - table_search.orders - table_shelves.orders, 0),
-        "order_sum": quantize_money(max(overall_sum - table_search.order_sum - table_shelves.order_sum, ZERO)),
+        "open_count": max(
+            overall_open - table_search.clicks - table_shelves.clicks - table_catalog.clicks - table_manual.clicks,
+            0,
+        ),
+        "cart_count": max(
+            overall_carts - table_search.carts - table_shelves.carts - table_catalog.carts - table_manual.carts,
+            0,
+        ),
+        "order_count": max(
+            overall_orders - table_search.orders - table_shelves.orders - table_catalog.orders - table_manual.orders,
+            0,
+        ),
+        "order_sum": quantize_money(
+            max(
+                overall_sum
+                - table_search.order_sum
+                - table_shelves.order_sum
+                - table_catalog.order_sum
+                - table_manual.order_sum,
+                ZERO,
+            )
+        ),
     }
     traffic_cards = [
         {
@@ -789,6 +959,7 @@ def build_product_report(
         "table_blocks": {
             "search": table_search,
             "shelves": table_shelves,
+            "catalog": table_catalog,
             "manual": table_manual,
             "ad_total": table_ad_total,
         },
