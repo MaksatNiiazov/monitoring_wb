@@ -259,7 +259,7 @@ class CampaignSettingsForm(StyledFormMixin, forms.ModelForm):
         model = Campaign
         fields = ["external_id", "name", "monitoring_group", "is_active", "products"]
         widgets = {
-            "external_id": forms.NumberInput(attrs={"placeholder": "РќР°РїСЂРёРјРµСЂ, 28150154"}),
+            "external_id": forms.NumberInput(attrs={"placeholder": "Например, 28150154"}),
         }
 
     def __init__(self, *args, **kwargs):

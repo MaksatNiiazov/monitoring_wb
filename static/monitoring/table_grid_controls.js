@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
     function getCookie(name) {
         const cookieValue = document.cookie
             .split(";")
@@ -68,12 +68,17 @@
         return `${formatDecimalValue(value)}%`;
     }
 
-    function formatRatioCell(numerator, denominator, { percent = false, blankWhenZeroNumerator = false } = {}) {
+    function formatRatioCell(numerator, denominator, {
+        percent = false,
+        blankWhenZeroNumerator = false,
+        fallbackOnInvalid = "-",
+        fallbackOnZeroDenominator = "-",
+    } = {}) {
         if (!Number.isFinite(denominator) || denominator === 0) {
-            return "-";
+            return fallbackOnZeroDenominator;
         }
         if (!Number.isFinite(numerator)) {
-            return "-";
+            return fallbackOnInvalid;
         }
         if (blankWhenZeroNumerator && numerator === 0) {
             return "-";
@@ -88,7 +93,7 @@
             return;
         }
 
-        const ROW = {
+        const ROW_FALLBACK = {
             SPEND: 5,
             IMPRESSIONS: 6,
             CTR: 7,
@@ -111,6 +116,29 @@
             DAYS_UNTIL_ZERO: 31,
             SELLER_PRICE: 36,
         };
+        const ROW_LABELS = {
+            SPEND: ["Затраты (руб)"],
+            IMPRESSIONS: ["Показы"],
+            CTR: ["CTR"],
+            CPM: ["CPM"],
+            CPC: ["CPC"],
+            CLICKS: ["Клики"],
+            CARTS: ["Корзины"],
+            CONVERSION_CART: ["Конверсия в корзину"],
+            ORDERS: ["Заказы"],
+            CONVERSION_ORDER: ["Конверсия в заказ"],
+            ORDER_SUM: ["Заказы (руб.)"],
+            BUYOUTS: ["Выкупы ≈ (руб.)"],
+            DRR_SALES: ["ДРР от продаж ≈ (%)"],
+            PROFIT: ["Прибыль"],
+            BUYOUT_PERCENT: ["Процент выкупа %"],
+            UNIT_COST: ["Себестоимость"],
+            LOGISTICS: ["Логистика"],
+            STOCK_TOTAL: ["Остатки по складам WB", "Остатки на складах WB"],
+            AVG_STOCK_DROP: ["Ср. убыль остатков/день"],
+            DAYS_UNTIL_ZERO: ["Дней до АУТА"],
+            SELLER_PRICE: ["Цена WBSELLER (наша)"],
+        };
         const COL = {
             SEARCH: 1,
             SHELVES: 2,
@@ -121,6 +149,39 @@
             SELLER_PRICE: 6,
             STOCK: 5,
         };
+
+        const normalizeLabel = (text) =>
+            String(text || "")
+                .trim()
+                .toLowerCase()
+                .replace(/\s+/g, " ");
+
+        const resolveRows = () => {
+            const resolved = { ...ROW_FALLBACK };
+            const rowsByLabel = new Map();
+            table.querySelectorAll('td[data-block="0"][data-in-block-col="0"]').forEach((cell) => {
+                const row = Number.parseInt(cell.dataset.row || "", 10);
+                if (!Number.isFinite(row)) {
+                    return;
+                }
+                const labelText = normalizeLabel(cell.textContent);
+                if (!labelText) {
+                    return;
+                }
+                rowsByLabel.set(labelText, row);
+            });
+
+            Object.entries(ROW_LABELS).forEach(([key, labels]) => {
+                const foundRow = labels
+                    .map((label) => rowsByLabel.get(normalizeLabel(label)))
+                    .find((value) => Number.isFinite(value));
+                if (Number.isFinite(foundRow)) {
+                    resolved[key] = foundRow;
+                }
+            });
+            return resolved;
+        };
+        const ROW = resolveRows();
 
         const getCell = (row, block, inBlockCol) =>
             table.querySelector(`td[data-row="${row}"][data-block="${block}"][data-in-block-col="${inBlockCol}"]`);
@@ -183,34 +244,34 @@
                 ROW.CTR,
                 blockIndex,
                 COL.OVERALL,
-                formatRatioCell(adClicks, adImpressions, { percent: true }),
+                formatRatioCell(adClicks, adImpressions, { percent: true, fallbackOnInvalid: "0%", fallbackOnZeroDenominator: "0%" }),
             );
             setCellText(
                 ROW.CPM,
                 blockIndex,
                 COL.OVERALL,
-                formatRatioCell(spend ? spend * 1000 : spend, adImpressions),
+                formatRatioCell(spend ? spend * 1000 : spend, adImpressions, { fallbackOnInvalid: "0", fallbackOnZeroDenominator: "0" }),
             );
 
             setCellText(
                 ROW.CPC,
                 blockIndex,
                 COL.OVERALL,
-                formatRatioCell(spend, adClicks),
+                formatRatioCell(spend, adClicks, { fallbackOnInvalid: "0", fallbackOnZeroDenominator: "0" }),
             );
 
-            const conversionCart = clicks ? (carts || 0) * 100 / clicks : null;
-            setCellText(ROW.CONVERSION_CART, blockIndex, COL.OVERALL, Number.isFinite(conversionCart) ? formatPercentValue(conversionCart) : "-");
+            const conversionCart = clicks ? (carts || 0) * 100 / clicks : 0;
+            setCellText(ROW.CONVERSION_CART, blockIndex, COL.OVERALL, formatPercentValue(conversionCart));
 
-            const conversionOrder = carts ? (orders || 0) * 100 / carts : null;
-            setCellText(ROW.CONVERSION_ORDER, blockIndex, COL.OVERALL, Number.isFinite(conversionOrder) ? formatPercentValue(conversionOrder) : "-");
+            const conversionOrder = carts ? (orders || 0) * 100 / carts : 0;
+            setCellText(ROW.CONVERSION_ORDER, blockIndex, COL.OVERALL, formatPercentValue(conversionOrder));
 
             const buyoutPercent = readNumber(ROW.BUYOUT_PERCENT, blockIndex, COL.INPUT_MAIN) || 0;
             const buyoutFraction = Math.abs(buyoutPercent) > 1 ? buyoutPercent / 100 : buyoutPercent;
-            const buyouts = orderSum && buyoutFraction ? orderSum * buyoutFraction : null;
-            setCellText(ROW.BUYOUTS, blockIndex, COL.OVERALL, Number.isFinite(buyouts) ? formatDecimalValue(buyouts) : "-");
+            const buyouts = orderSum && buyoutFraction ? orderSum * buyoutFraction : 0;
+            setCellText(ROW.BUYOUTS, blockIndex, COL.OVERALL, formatDecimalValue(buyouts));
 
-            const drrSalesCell = formatRatioCell(spend, buyouts, { percent: true, blankWhenZeroNumerator: true });
+            const drrSalesCell = formatRatioCell(spend, buyouts, { percent: true, fallbackOnInvalid: "0%", fallbackOnZeroDenominator: "0%" });
             setCellText(ROW.DRR_SALES, blockIndex, COL.OVERALL, drrSalesCell);
 
             const sellerPrice = readNumber(ROW.SELLER_PRICE, blockIndex, COL.SELLER_PRICE) || 0;
@@ -218,7 +279,7 @@
             const logistics = readNumber(ROW.LOGISTICS, blockIndex, COL.INPUT_MAIN) || 0;
             const totalOrders = orders || 0;
 
-            let profit = null;
+            let profit = 0;
             if (sellerPrice && buyoutFraction > 0) {
                 const drrRatioForProfit =
                     Number.isFinite(spend) && spend > 0 && Number.isFinite(buyouts) && buyouts > 0
@@ -233,7 +294,7 @@
                     logisticsAdjustment;
                 profit = margin * totalOrders * buyoutFraction;
             }
-            setCellText(ROW.PROFIT, blockIndex, COL.INPUT_MAIN, Number.isFinite(profit) ? formatDecimalValue(profit) : "-");
+            setCellText(ROW.PROFIT, blockIndex, COL.INPUT_MAIN, formatDecimalValue(profit));
         };
 
         const recalcAll = () => {
