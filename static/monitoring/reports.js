@@ -832,7 +832,7 @@
                 return;
             }
 
-            this.caption.textContent = `Метрики справа управляют видимостью линий. Ниже показаны средние значения за период ${windowLabel}.`;
+            this.caption.textContent = `Cредние значения за период ${windowLabel}.`;
             this.legend.innerHTML = seriesEntries
                 .map((series) => `
                     <div class="legend-chip legend-chip-series legend-chip-average" data-chart-legend-series="${series.key}" tabindex="0">
