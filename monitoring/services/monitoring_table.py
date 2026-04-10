@@ -235,6 +235,7 @@ def build_day_block(
         manual_shelves,
     ]
     unified_group_visible = any(has_metric_cell_data(cell) for cell in [unified_search, unified_shelves, unified_catalog])
+    ad_group_visible = any(has_metric_cell_data(cell) for cell in columns)
     active_columns = [
         unified_group_visible,
         unified_group_visible,
@@ -403,11 +404,11 @@ def build_day_block(
             manual_traffic_value(5),
             manual_traffic_value(6),
             "",
-            1 if unified_group_visible and unified_impressions > 0 else "",
+            1 if ad_group_visible else "",
             "-",
         ],
-        ["Затраты (руб)", *pick_numbers("spend"), f"=SUM({row_value_ref(5, 2)}:{row_value_ref(5, 4)})", "-"],
-        ["Показы", *pick_numbers("impressions"), f"=SUM({row_value_ref(6, 2)}:{row_value_ref(6, 4)})", "-"],
+        ["Затраты (руб)", *pick_numbers("spend"), f"=SUM({row_value_ref(5, 2)}:{row_value_ref(5, 7)})", "-"],
+        ["Показы", *pick_numbers("impressions"), f"=SUM({row_value_ref(6, 2)}:{row_value_ref(6, 7)})", "-"],
         [
             "CTR",
             maybe_formula(2, safe_divide_formula(row_value_ref(10, 2), row_value_ref(6, 2), scale=100)),
@@ -416,7 +417,7 @@ def build_day_block(
             maybe_formula(5, safe_divide_formula(row_value_ref(10, 5), row_value_ref(6, 5), scale=100)),
             maybe_formula(6, safe_divide_formula(row_value_ref(10, 6), row_value_ref(6, 6), scale=100)),
             maybe_formula(7, safe_divide_formula(row_value_ref(10, 7), row_value_ref(6, 7), scale=100)),
-            safe_divide_formula(f"SUM({row_value_ref(10, 2)}:{row_value_ref(10, 4)})", row_value_ref(6, 8), scale=100),
+            safe_divide_formula(f"SUM({row_value_ref(10, 2)}:{row_value_ref(10, 7)})", row_value_ref(6, 8), scale=100),
             "-",
         ],
         [
@@ -438,7 +439,7 @@ def build_day_block(
             maybe_formula(5, safe_divide_formula(row_value_ref(5, 5), row_value_ref(10, 5))),
             maybe_formula(6, safe_divide_formula(row_value_ref(5, 6), row_value_ref(10, 6))),
             maybe_formula(7, safe_divide_formula(row_value_ref(5, 7), row_value_ref(10, 7))),
-            safe_divide_formula(row_value_ref(5, 8), f"SUM({row_value_ref(10, 2)}:{row_value_ref(10, 4)})"),
+            safe_divide_formula(row_value_ref(5, 8), f"SUM({row_value_ref(10, 2)}:{row_value_ref(10, 7)})"),
             "-",
         ],
         ["Клики", *pick_numbers("clicks"), _int(metrics.open_count if metrics else 0), f'={row_value_ref(10, 8)}-SUM({row_value_ref(10, 2)}:{row_value_ref(10, 4)})'],

@@ -775,27 +775,55 @@ def build_product_report(
         non_search_total = subtract_metric_cells(total, search)
         return search, non_search_total, MetricCell()
 
+    def resolve_search_catalog_group_cells(group: str) -> tuple[MetricCell, MetricCell]:
+        cluster_rows = search_clusters_by_group.get(group, [])
+        total = group_totals.get(group, MetricCell())
+        legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
+        legacy_recommendation = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
+        if cluster_rows:
+            search = clone_metric_cell(legacy_search)
+            search_cluster = metric_cell_from_search_clusters(cluster_rows)
+            search.impressions = search_cluster.impressions
+            search.clicks = search_cluster.clicks
+            search.spend = search_cluster.spend
+            search.carts = search_cluster.carts
+            search.orders = search_cluster.orders
+            search.units = search_cluster.units
+            search.order_sum = derive_order_sum_from_orders(legacy_search, search_cluster.orders)
+        else:
+            search = clone_metric_cell(legacy_search)
+        # Manual-search campaigns have only Search/Catalog columns in the matrix.
+        # Any recommendation spill fits the search side better than catalog, so we
+        # append it to the extracted search cluster part and put the remaining
+        # balance into catalog.
+        search = add_metric_cells(search, legacy_recommendation)
+        search = clamp_metric_cell_to_total(search, total)
+        catalog = subtract_metric_cells(total, search)
+        return search, catalog
+
     unified_search, unified_shelves, unified_catalog = resolve_unified_group_cells()
+    manual_search_search, manual_search_catalog = resolve_search_catalog_group_cells(
+        CampaignMonitoringGroup.MANUAL_SEARCH
+    )
+    manual_catalog_total = add_metric_cells(
+        manual_search_catalog,
+        clone_metric_cell(group_totals.get(CampaignMonitoringGroup.MANUAL_CATALOG, MetricCell())),
+    )
+    manual_shelves_total = clone_metric_cell(group_totals.get(CampaignMonitoringGroup.MANUAL_SHELVES, MetricCell()))
 
     cells: dict[tuple[str, str], MetricCell] = {
         (CampaignMonitoringGroup.UNIFIED, CampaignZone.SEARCH): unified_search,
         (CampaignMonitoringGroup.UNIFIED, CampaignZone.RECOMMENDATION): unified_shelves,
         (CampaignMonitoringGroup.UNIFIED, CampaignZone.CATALOG): unified_catalog,
-        (CampaignMonitoringGroup.MANUAL_SEARCH, CampaignZone.SEARCH): clone_metric_cell(
-            group_totals.get(CampaignMonitoringGroup.MANUAL_SEARCH, MetricCell())
-        ),
+        (CampaignMonitoringGroup.MANUAL_SEARCH, CampaignZone.SEARCH): manual_search_search,
         (CampaignMonitoringGroup.MANUAL_SEARCH, CampaignZone.RECOMMENDATION): MetricCell(),
-        (CampaignMonitoringGroup.MANUAL_SEARCH, CampaignZone.CATALOG): MetricCell(),
+        (CampaignMonitoringGroup.MANUAL_SEARCH, CampaignZone.CATALOG): manual_search_catalog,
         (CampaignMonitoringGroup.MANUAL_SHELVES, CampaignZone.SEARCH): MetricCell(),
-        (CampaignMonitoringGroup.MANUAL_SHELVES, CampaignZone.RECOMMENDATION): clone_metric_cell(
-            group_totals.get(CampaignMonitoringGroup.MANUAL_SHELVES, MetricCell())
-        ),
+        (CampaignMonitoringGroup.MANUAL_SHELVES, CampaignZone.RECOMMENDATION): manual_shelves_total,
         (CampaignMonitoringGroup.MANUAL_SHELVES, CampaignZone.CATALOG): MetricCell(),
         (CampaignMonitoringGroup.MANUAL_CATALOG, CampaignZone.SEARCH): MetricCell(),
         (CampaignMonitoringGroup.MANUAL_CATALOG, CampaignZone.RECOMMENDATION): MetricCell(),
-        (CampaignMonitoringGroup.MANUAL_CATALOG, CampaignZone.CATALOG): clone_metric_cell(
-            group_totals.get(CampaignMonitoringGroup.MANUAL_CATALOG, MetricCell())
-        ),
+        (CampaignMonitoringGroup.MANUAL_CATALOG, CampaignZone.CATALOG): manual_catalog_total,
     }
 
     traffic_totals = {
@@ -820,6 +848,7 @@ def build_product_report(
         "manual_shelves": cells.get((CampaignMonitoringGroup.MANUAL_SHELVES, CampaignZone.RECOMMENDATION), MetricCell()),
         "manual_catalog": cells.get((CampaignMonitoringGroup.MANUAL_CATALOG, CampaignZone.CATALOG), MetricCell()),
     }
+    manual_search_total = add_metric_cells(blocks["manual_search"], blocks["manual_catalog"])
 
     table_search = clone_metric_cell(blocks["unified_search"])
     table_shelves = add_metric_cells(
@@ -887,7 +916,7 @@ def build_product_report(
         {
             "label": "Руч. поиск",
             "cell": blocks["manual_search"],
-            "share": blocks["manual_search"].traffic_share(traffic_totals[CampaignMonitoringGroup.MANUAL_SEARCH]),
+            "share": blocks["manual_search"].traffic_share(manual_search_total.impressions),
         },
         {
             "label": "Руч. полки",
@@ -907,7 +936,7 @@ def build_product_report(
             {
                 "label": "Руч. каталог",
                 "cell": blocks["manual_catalog"],
-                "share": blocks["manual_catalog"].traffic_share(traffic_totals[CampaignMonitoringGroup.MANUAL_CATALOG]),
+                "share": blocks["manual_catalog"].traffic_share(manual_search_total.impressions),
             }
         )
     insights = {

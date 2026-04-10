@@ -174,16 +174,16 @@
             const carts = readNumber(ROW.CARTS, blockIndex, COL.OVERALL);
             const orders = readNumber(ROW.ORDERS, blockIndex, COL.OVERALL);
             const orderSum = readNumber(ROW.ORDER_SUM, blockIndex, COL.OVERALL);
-            const unifiedCols = [COL.SEARCH, COL.SHELVES, COL.CATALOG];
-            const unifiedSpend = unifiedCols.reduce(
+            const adCols = [COL.SEARCH, COL.SHELVES, COL.CATALOG, COL.MANUAL_SEARCH, COL.MANUAL_CATALOG, COL.MANUAL_SHELVES];
+            const totalAdSpend = adCols.reduce(
                 (sum, col) => sum + (readNumber(ROW.SPEND, blockIndex, col) || 0),
                 0,
             );
-            const unifiedImpressions = unifiedCols.reduce(
+            const totalAdImpressions = adCols.reduce(
                 (sum, col) => sum + (readNumber(ROW.IMPRESSIONS, blockIndex, col) || 0),
                 0,
             );
-            const unifiedClicks = unifiedCols.reduce(
+            const totalAdClicks = adCols.reduce(
                 (sum, col) => sum + (readNumber(ROW.CLICKS, blockIndex, col) || 0),
                 0,
             );
@@ -192,20 +192,20 @@
                 ROW.CTR,
                 blockIndex,
                 COL.OVERALL,
-                formatRatioCell(unifiedClicks, unifiedImpressions, { percent: true }),
+                formatRatioCell(totalAdClicks, totalAdImpressions, { percent: true }),
             );
             setCellText(
                 ROW.CPM,
                 blockIndex,
                 COL.OVERALL,
-                formatRatioCell(unifiedSpend ? unifiedSpend * 1000 : unifiedSpend, unifiedImpressions),
+                formatRatioCell(totalAdSpend ? totalAdSpend * 1000 : totalAdSpend, totalAdImpressions),
             );
 
             setCellText(
                 ROW.CPC,
                 blockIndex,
                 COL.OVERALL,
-                formatRatioCell(unifiedSpend, unifiedClicks),
+                formatRatioCell(totalAdSpend, totalAdClicks),
             );
 
             const conversionCart = clicks ? (carts || 0) * 100 / clicks : null;
@@ -219,16 +219,16 @@
             const buyouts = orderSum && buyoutFraction ? orderSum * buyoutFraction : null;
             setCellText(ROW.BUYOUTS, blockIndex, COL.OVERALL, Number.isFinite(buyouts) ? formatDecimalValue(buyouts) : "-");
 
-            const costOrderCell = formatRatioCell(unifiedSpend, orders, { blankWhenZeroNumerator: true });
+            const costOrderCell = formatRatioCell(totalAdSpend, orders, { blankWhenZeroNumerator: true });
             setCellText(ROW.COST_ORDER, blockIndex, COL.OVERALL, costOrderCell);
 
-            const costCartCell = formatRatioCell(unifiedSpend, carts, { blankWhenZeroNumerator: true });
+            const costCartCell = formatRatioCell(totalAdSpend, carts, { blankWhenZeroNumerator: true });
             setCellText(ROW.COST_CART, blockIndex, COL.OVERALL, costCartCell);
 
-            const drrOrdersCell = formatRatioCell(unifiedSpend, orderSum, { percent: true, blankWhenZeroNumerator: true });
+            const drrOrdersCell = formatRatioCell(totalAdSpend, orderSum, { percent: true, blankWhenZeroNumerator: true });
             setCellText(ROW.DRR_ORDERS, blockIndex, COL.OVERALL, drrOrdersCell);
 
-            const drrSalesCell = formatRatioCell(unifiedSpend, buyouts, { percent: true, blankWhenZeroNumerator: true });
+            const drrSalesCell = formatRatioCell(totalAdSpend, buyouts, { percent: true, blankWhenZeroNumerator: true });
             setCellText(ROW.DRR_SALES, blockIndex, COL.OVERALL, drrSalesCell);
 
             const sellerPrice = readNumber(ROW.SELLER_PRICE, blockIndex, COL.SELLER_PRICE) || 0;
@@ -239,8 +239,8 @@
             let profit = null;
             if (sellerPrice && buyoutFraction > 0) {
                 const drrRatioForProfit =
-                    Number.isFinite(unifiedSpend) && unifiedSpend > 0 && Number.isFinite(buyouts) && buyouts > 0
-                        ? unifiedSpend / buyouts
+                    Number.isFinite(totalAdSpend) && totalAdSpend > 0 && Number.isFinite(buyouts) && buyouts > 0
+                        ? totalAdSpend / buyouts
                         : 0;
                 const logisticsAdjustment = logistics / buyoutFraction - 50;
                 const margin =

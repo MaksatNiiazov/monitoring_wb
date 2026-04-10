@@ -124,6 +124,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
     promo_status_value = (note.promo_status or "").strip() or "РќРµ СѓС‡Р°СЃС‚РІСѓРµРј"
     negative_feedback_value = (note.negative_feedback or "").strip() or "Р‘РµР· РёР·РјРµРЅРµРЅРёР№"
     blocks = report["blocks"]
+    total_ad = report["total_ad"]
     unified_search = blocks["unified_search"]
     unified_shelves = blocks["unified_shelves"]
     unified_catalog = blocks["unified_catalog"]
@@ -163,6 +164,10 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
         + decimalize(unified_shelves.order_sum)
         + decimalize(unified_catalog.order_sum)
     )
+    total_ad_spend = decimalize(total_ad.spend)
+    total_ad_impressions = total_ad.impressions
+    total_ad_clicks = total_ad.clicks
+    total_ad_order_sum = decimalize(total_ad.order_sum)
 
     def pick(metric_name: str) -> list[str]:
         values: list[str] = []
@@ -272,7 +277,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
     conversion_cart = safe_divide(decimalize(overall_carts) * 100, overall_clicks)
     conversion_order = safe_divide(decimalize(overall_orders) * 100, overall_carts)
     estimated_buyout_overall = estimate_buyout_sum(economics, overall_order_sum)
-    drr_sales_ratio = safe_divide(unified_spend, estimated_buyout_overall)
+    drr_sales_ratio = safe_divide(total_ad_spend, estimated_buyout_overall)
     profit_overall = estimate_monitoring_profit(
         seller_price=note.seller_price,
         unit_cost=economics.unit_cost,
@@ -297,11 +302,11 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             manual_search_traffic_value(manual_search),
             manual_search_traffic_value(manual_catalog),
             "",
-            "100%" if unified_impressions > 0 else "",
+            "100%" if total_ad_impressions > 0 else "",
             "-",
         ],
-        ["Затраты (руб)", *pick("spend"), format_decimal(unified_spend), "-"],
-        ["Показы", *pick("impressions"), format_int(unified_impressions), "-"],
+        ["Затраты (руб)", *pick("spend"), format_decimal(total_ad_spend), "-"],
+        ["Показы", *pick("impressions"), format_int(total_ad_impressions), "-"],
         [
             "CTR",
             derived_ratio_decimal(unified_search, unified_search.clicks, unified_search.impressions, scale=100),
@@ -310,7 +315,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             derived_ratio_decimal(manual_search, manual_search.clicks, manual_search.impressions, scale=100),
             derived_ratio_decimal(manual_catalog, manual_catalog.clicks, manual_catalog.impressions, scale=100),
             derived_ratio_decimal(manual_shelves, manual_shelves.clicks, manual_shelves.impressions, scale=100),
-            format_percent_ratio(unified_clicks, unified_impressions),
+            format_percent_ratio(total_ad_clicks, total_ad_impressions),
             "-",
         ],
         [
@@ -321,7 +326,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             derived_ratio_decimal(manual_search, decimalize(manual_search.spend) * 1000, manual_search.impressions),
             derived_ratio_decimal(manual_catalog, decimalize(manual_catalog.spend) * 1000, manual_catalog.impressions),
             derived_ratio_decimal(manual_shelves, decimalize(manual_shelves.spend) * 1000, manual_shelves.impressions),
-            format_ratio(unified_spend * 1000, unified_impressions),
+            format_ratio(total_ad_spend * 1000, total_ad_impressions),
             "-",
         ],
         [
@@ -332,7 +337,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             derived_ratio_decimal(manual_search, manual_search.spend, manual_search.clicks),
             derived_ratio_decimal(manual_catalog, manual_catalog.spend, manual_catalog.clicks),
             derived_ratio_decimal(manual_shelves, manual_shelves.spend, manual_shelves.clicks),
-            format_ratio(unified_spend, unified_clicks),
+            format_ratio(total_ad_spend, total_ad_clicks),
             "-",
         ],
         ["Клики", *pick("clicks"), format_int(overall_clicks), format_int(organic_clicks)],
@@ -360,7 +365,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             derived_ratio_decimal(manual_search, manual_search.spend, manual_search.orders, treat_zero_numerator_as_empty=True),
             derived_ratio_decimal(manual_catalog, manual_catalog.spend, manual_catalog.orders, treat_zero_numerator_as_empty=True),
             derived_ratio_decimal(manual_shelves, manual_shelves.spend, manual_shelves.orders, treat_zero_numerator_as_empty=True),
-            format_ratio(unified_spend, overall_orders, treat_zero_numerator_as_empty=True),
+            format_ratio(total_ad_spend, overall_orders, treat_zero_numerator_as_empty=True),
             "-",
         ],
         [
@@ -371,7 +376,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             derived_ratio_decimal(manual_search, manual_search.spend, manual_search.carts, treat_zero_numerator_as_empty=True),
             derived_ratio_decimal(manual_catalog, manual_catalog.spend, manual_catalog.carts, treat_zero_numerator_as_empty=True),
             derived_ratio_decimal(manual_shelves, manual_shelves.spend, manual_shelves.carts, treat_zero_numerator_as_empty=True),
-            format_ratio(unified_spend, overall_carts, treat_zero_numerator_as_empty=True),
+            format_ratio(total_ad_spend, overall_carts, treat_zero_numerator_as_empty=True),
             "-",
         ],
         [
@@ -382,7 +387,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             derived_ratio_percent(manual_search, manual_search.spend, manual_search.order_sum, treat_zero_numerator_as_empty=True),
             derived_ratio_percent(manual_catalog, manual_catalog.spend, manual_catalog.order_sum, treat_zero_numerator_as_empty=True),
             derived_ratio_percent(manual_shelves, manual_shelves.spend, manual_shelves.order_sum, treat_zero_numerator_as_empty=True),
-            format_percent_ratio(unified_spend, overall_order_sum, treat_zero_numerator_as_empty=True),
+            format_percent_ratio(total_ad_spend, overall_order_sum, treat_zero_numerator_as_empty=True),
             "-",
         ],
         [
@@ -393,7 +398,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             derived_ratio_percent(manual_search, manual_search.spend, estimate_buyout_sum(economics, manual_search.order_sum), treat_zero_numerator_as_empty=True),
             derived_ratio_percent(manual_catalog, manual_catalog.spend, estimate_buyout_sum(economics, manual_catalog.order_sum), treat_zero_numerator_as_empty=True),
             derived_ratio_percent(manual_shelves, manual_shelves.spend, estimate_buyout_sum(economics, manual_shelves.order_sum), treat_zero_numerator_as_empty=True),
-            format_percent_ratio(unified_spend, estimated_buyout_overall, treat_zero_numerator_as_empty=True),
+            format_percent_ratio(total_ad_spend, estimated_buyout_overall, treat_zero_numerator_as_empty=True),
             "-",
         ],
         ["Прибыль", format_decimal(profit_overall), "", "", "", "", "", "", ""],
