@@ -50,6 +50,28 @@ STANDARD_PALETTE = [
     "#475569",
     "#6b7280",
 ]
+METRIC_DEFINITIONS = [
+    ("stock", "Остатки WB", "int"),
+    ("spend", "Затраты (руб)", "money"),
+    ("impressions", "Показы", "int"),
+    ("ctr", "CTR", "percent"),
+    ("cpm", "CPM", "money"),
+    ("cpc", "CPC", "money"),
+    ("clicks", "Клики", "int"),
+    ("carts", "Корзины", "int"),
+    ("conversion_cart", "Конверсия в корзину", "percent"),
+    ("orders", "Заказы", "int"),
+    ("conversion_order", "Конверсия в заказ", "percent"),
+    ("order_sum", "Заказы (руб.)", "money"),
+    ("buyouts", "Выкупы ≈ (руб.)", "money"),
+    ("cost_per_order", "Стоимость заказа", "money"),
+    ("cost_per_cart", "Стоимость корзины", "money"),
+    ("drr_orders", "ДРР от заказов (%)", "percent"),
+    ("drr_sales", "ДРР от продаж ≈ (%)", "percent"),
+    ("profit", "Прибыль", "money"),
+]
+METRIC_INDEX = {key: index for index, (key, _label, _format) in enumerate(METRIC_DEFINITIONS)}
+CAMPAIGN_METRIC_KEYS = [key for key, _label, _format in METRIC_DEFINITIONS if key != "stock"]
 
 
 def _float(value: Decimal | int | float | str | None) -> float:
@@ -136,7 +158,7 @@ def _product_metrics_dataset(
         "defaultType": "line",
         "labels": [str(point["label"]) for point in series_points],
         "seriesOrder": series_order,
-        "defaultSeries": series_order,
+        "defaultSeries": [],
         "windowLabel": f"{start_label} — {end_label}",
         "series": {
             "stock": {"label": "Остатки WB", "format": "int", "values": [point["stock"] for point in series_points], "color": STANDARD_PALETTE[0]},
@@ -168,8 +190,39 @@ def _campaign_metrics_dataset(
     start_label: str,
     end_label: str,
 ) -> dict[str, object]:
-    metric_order = ["spend", "impressions", "clicks", "carts", "orders", "order_sum"]
+    metric_order = [
+        "stock",
+        "spend",
+        "impressions",
+        "ctr",
+        "cpm",
+        "cpc",
+        "clicks",
+        "carts",
+        "conversion_cart",
+        "orders",
+        "conversion_order",
+        "order_sum",
+        "buyouts",
+        "cost_per_order",
+        "cost_per_cart",
+        "drr_orders",
+        "drr_sales",
+        "profit",
+    ]
     metric_labels = {
+        "stock": ("Остатки WB", "int"),
+        "ctr": ("CTR", "percent"),
+        "cpm": ("CPM", "money"),
+        "cpc": ("CPC", "money"),
+        "conversion_cart": ("Конверсия в корзину", "percent"),
+        "conversion_order": ("Конверсия в заказ", "percent"),
+        "buyouts": ("Выкупы ≈ (руб.)", "money"),
+        "cost_per_order": ("Стоимость заказа", "money"),
+        "cost_per_cart": ("Стоимость корзины", "money"),
+        "drr_orders": ("ДРР от заказов (%)", "percent"),
+        "drr_sales": ("ДРР от продаж ≈ (%)", "percent"),
+        "profit": ("Прибыль", "money"),
         "spend": ("Затраты", "money"),
         "impressions": ("Показы", "int"),
         "clicks": ("Клики", "int"),
@@ -190,14 +243,14 @@ def _campaign_metrics_dataset(
         metrics[metric_key] = {
             "label": label,
             "format": format_name,
+            "color": STANDARD_PALETTE[METRIC_INDEX.get(metric_key, 0)],
             "seriesOrder": list(campaign_series.keys()),
             "series": series,
         }
     return {
         "mode": "campaigns",
-        "defaultMetric": "spend",
         "metricOrder": metric_order,
-        "defaultSeries": list(campaign_series.keys()),
+        "defaultSeries": [],
         "labels": labels,
         "metrics": metrics,
         "windowLabel": f"{start_label} — {end_label}",
@@ -283,6 +336,17 @@ def _build_campaign_series_points(*, product: Product, stock_dates: list[date]) 
         return {}
 
     labels = [stock_date.strftime("%d.%m") for stock_date in stock_dates]
+    prefetched_context = _build_prefetched_product_report_context(product=product, stock_dates=stock_dates)
+    product_reports = {
+        stock_date: build_product_report(
+            product=product,
+            stats_date=stock_date,
+            stock_date=stock_date,
+            create_note=False,
+            **prefetched_context,
+        )
+        for stock_date in stock_dates
+    }
     rows = list(
         DailyCampaignProductStat.objects.filter(
             product=product,
@@ -331,22 +395,66 @@ def _build_campaign_series_points(*, product: Product, stock_dates: list[date]) 
             "color": meta["color"],
             "labels": labels,
             "metrics": {
+                "stock": [],
                 "spend": [],
                 "impressions": [],
+                "ctr": [],
+                "cpm": [],
+                "cpc": [],
                 "clicks": [],
                 "carts": [],
+                "conversion_cart": [],
                 "orders": [],
+                "conversion_order": [],
                 "order_sum": [],
+                "buyouts": [],
+                "cost_per_order": [],
+                "cost_per_cart": [],
+                "drr_orders": [],
+                "drr_sales": [],
+                "profit": [],
             },
         }
         for stock_date in stock_dates:
             totals = daily_totals[(campaign_id, stock_date)]
-            series[meta["key"]]["metrics"]["spend"].append(_float(totals["spend"]))
-            series[meta["key"]]["metrics"]["impressions"].append(int(totals["impressions"]))
-            series[meta["key"]]["metrics"]["clicks"].append(int(totals["clicks"]))
-            series[meta["key"]]["metrics"]["carts"].append(int(totals["carts"]))
-            series[meta["key"]]["metrics"]["orders"].append(int(totals["orders"]))
-            series[meta["key"]]["metrics"]["order_sum"].append(_float(totals["order_sum"]))
+            report = product_reports[stock_date]
+            economics = report["economics"]
+            note = report["note"]
+            stock = report["stock"]
+            spend = decimalize(totals["spend"])
+            impressions = int(totals["impressions"])
+            clicks = int(totals["clicks"])
+            carts = int(totals["carts"])
+            orders = int(totals["orders"])
+            order_sum = decimalize(totals["order_sum"])
+            buyouts = estimate_buyout_sum(economics, order_sum)
+            drr_sales_ratio = safe_divide(spend, buyouts)
+            profit = estimate_monitoring_profit(
+                seller_price=getattr(note, "seller_price", None),
+                unit_cost=economics.unit_cost,
+                logistics_cost=economics.logistics_cost,
+                buyout_percent=economics.buyout_percent,
+                drr_sales_percent=drr_sales_ratio,
+                total_orders=orders,
+            )
+            series[meta["key"]]["metrics"]["stock"].append(_int(stock.total_stock if stock else 0))
+            series[meta["key"]]["metrics"]["spend"].append(_float(spend))
+            series[meta["key"]]["metrics"]["impressions"].append(impressions)
+            series[meta["key"]]["metrics"]["ctr"].append(_float(safe_divide(clicks * 100, impressions)))
+            series[meta["key"]]["metrics"]["cpm"].append(_float(safe_divide(spend * 1000, impressions)))
+            series[meta["key"]]["metrics"]["cpc"].append(_float(safe_divide(spend, clicks)))
+            series[meta["key"]]["metrics"]["clicks"].append(clicks)
+            series[meta["key"]]["metrics"]["carts"].append(carts)
+            series[meta["key"]]["metrics"]["conversion_cart"].append(_float(safe_divide(carts * 100, clicks)))
+            series[meta["key"]]["metrics"]["orders"].append(orders)
+            series[meta["key"]]["metrics"]["conversion_order"].append(_float(safe_divide(orders * 100, carts)))
+            series[meta["key"]]["metrics"]["order_sum"].append(_float(order_sum))
+            series[meta["key"]]["metrics"]["buyouts"].append(_float(buyouts))
+            series[meta["key"]]["metrics"]["cost_per_order"].append(_float(safe_divide(spend, orders)))
+            series[meta["key"]]["metrics"]["cost_per_cart"].append(_float(safe_divide(spend, carts)))
+            series[meta["key"]]["metrics"]["drr_orders"].append(_float(safe_divide(spend * 100, order_sum)))
+            series[meta["key"]]["metrics"]["drr_sales"].append(_float(safe_divide(spend * 100, buyouts)))
+            series[meta["key"]]["metrics"]["profit"].append(_float(profit))
 
     return series
 

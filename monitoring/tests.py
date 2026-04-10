@@ -41,6 +41,7 @@ from monitoring.services.monitoring_table import (
 )
 from monitoring.services.reporting_hub import build_reports_context
 from monitoring.services.reports import build_dashboard_context, build_product_report
+from monitoring.services.table_charts import build_table_timeline_context
 from monitoring.services.sync import (
     aggregate_offices_from_sizes,
     build_product_stock_payload_from_sizes,
@@ -1705,6 +1706,32 @@ class ReportingHubTests(TestCase):
         self.assertIn("drr", context["product_chart"]["series"])
 
 
+class TableTimelineChartTests(TestCase):
+    def test_product_table_timeline_starts_with_inactive_series(self) -> None:
+        seed_demo_dataset()
+        product = Product.objects.filter(is_active=True).first()
+        self.assertIsNotNone(product)
+
+        context = build_table_timeline_context(
+            active_sheet={
+                "kind": "product",
+                "product_id": product.pk,
+                "block_dates": [date(2026, 3, day) for day in range(6, 19)],
+            },
+            reference_date=date(2026, 3, 18),
+            history_days=14,
+        )
+
+        self.assertIsNotNone(context)
+        chart = context["chart"]
+        self.assertEqual(chart["views"]["standard"]["defaultSeries"], [])
+        self.assertEqual(chart["views"]["campaigns"]["defaultSeries"], [])
+        self.assertIn("stock", chart["views"]["campaigns"]["metricOrder"])
+        self.assertIn("ctr", chart["views"]["campaigns"]["metricOrder"])
+        self.assertIn("conversion_order", chart["views"]["campaigns"]["metricOrder"])
+        self.assertIn("profit", chart["views"]["campaigns"]["metricOrder"])
+
+
 class StockPopupPayloadTests(TestCase):
     def test_stock_popup_builds_size_matrix_when_raw_sizes_exist(self) -> None:
         product = Product.objects.create(
@@ -1810,6 +1837,7 @@ class PageRenderTests(TestCase):
         self.assertContains(response, "Динамика SKU")
         self.assertContains(response, 'data-chart-view="standard"')
         self.assertContains(response, 'data-chart-view="campaigns"')
+        self.assertContains(response, '"defaultSeries": []')
         self.assertContains(response, 'data-default-density="compact"')
         self.assertContains(response, 'data-default-fullscreen="normal"')
 

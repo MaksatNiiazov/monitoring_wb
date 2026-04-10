@@ -282,6 +282,14 @@
             return null;
         }
 
+        getMetricOrder(viewData) {
+            if (this.resolveMode(viewData) === "campaigns") {
+                const metricMap = this.getAvailableMetricMap(viewData);
+                return viewData.metricOrder || Object.keys(metricMap || {});
+            }
+            return viewData.seriesOrder || Object.keys(viewData.series || {});
+        }
+
         getAvailableSeries(viewData, metric) {
             if (this.resolveMode(viewData) === "campaigns") {
                 return viewData.metrics?.[metric]?.series || {};
@@ -301,11 +309,12 @@
                 return this.viewStates[viewKey];
             }
             const viewData = this.getViewData(viewKey);
-            const metricMap = this.getAvailableMetricMap(viewData);
-            const metricOrder = viewData.metricOrder || Object.keys(metricMap || {});
+            const metricOrder = this.getMetricOrder(viewData);
             const initialMetric = viewData.defaultMetric || metricOrder[0] || this.metricButtons[0]?.dataset.chartMetric || "orders";
-            const seriesOrder = this.getSeriesOrder(viewData, initialMetric);
-            const defaultSeries = Array.isArray(viewData.defaultSeries) && viewData.defaultSeries.length
+            const seriesOrder = this.resolveMode(viewData) === "campaigns"
+                ? metricOrder
+                : this.getSeriesOrder(viewData, initialMetric);
+            const defaultSeries = Array.isArray(viewData.defaultSeries)
                 ? viewData.defaultSeries
                 : seriesOrder;
             this.viewStates[viewKey] = {
@@ -313,7 +322,11 @@
                 type: this.resolveMode(viewData) === "multi" || this.resolveMode(viewData) === "campaigns"
                     ? "line"
                     : this.normalizeType(viewData.defaultType || "line"),
-                activeSeries: new Set(defaultSeries.filter((key) => this.getAvailableSeries(viewData, initialMetric)?.[key])),
+                activeSeries: new Set(defaultSeries.filter((key) =>
+                    this.resolveMode(viewData) === "campaigns"
+                        ? Boolean(this.getAvailableMetricMap(viewData)?.[key])
+                        : Boolean(this.getAvailableSeries(viewData, initialMetric)?.[key])
+                )),
             };
             return this.viewStates[viewKey];
         }
@@ -344,47 +357,8 @@
             if (!this.dynamicMetricGroup) {
                 return;
             }
-            if (this.mode !== "campaigns") {
-                this.dynamicMetricGroup.hidden = true;
-                this.dynamicMetricGroup.innerHTML = "";
-                return;
-            }
-
-            const metricMap = this.getAvailableMetricMap(this.data);
-            const metricOrder = this.data.metricOrder || Object.keys(metricMap);
-            this.dynamicMetricGroup.hidden = false;
-            this.dynamicMetricGroup.innerHTML = metricOrder
-                .filter((key) => metricMap[key])
-                .map((key) => {
-                    const metric = metricMap[key];
-                    const isActive = this.metric === key;
-                    return `
-                        <button
-                            type="button"
-                            class="segmented-button${isActive ? " is-active" : ""}"
-                            data-chart-dynamic-metric="${key}"
-                            aria-pressed="${isActive ? "true" : "false"}"
-                        >
-                            ${metric.label || key}
-                        </button>
-                    `;
-                })
-                .join("");
-
-            this.dynamicMetricGroup.querySelectorAll("[data-chart-dynamic-metric]").forEach((button) => {
-                button.addEventListener("click", () => {
-                    const state = this.ensureViewState(this.activeViewKey);
-                    state.metric = button.dataset.chartDynamicMetric;
-                    const nextSeriesOrder = this.getSeriesOrder(this.data, state.metric);
-                    if (!nextSeriesOrder.some((key) => state.activeSeries.has(key))) {
-                        state.activeSeries = new Set(nextSeriesOrder);
-                    }
-                    this.metric = state.metric;
-                    this.syncDynamicMetricButtons();
-                    this.buildSeriesToggles();
-                    this.render();
-                });
-            });
+            this.dynamicMetricGroup.hidden = true;
+            this.dynamicMetricGroup.innerHTML = "";
         }
 
         buildSeriesToggles() {
@@ -392,6 +366,70 @@
                 return;
             }
             const state = this.ensureViewState(this.activeViewKey);
+            if (this.mode === "campaigns") {
+                const metricMap = this.getAvailableMetricMap(this.data);
+                const metricOrder = this.getMetricOrder(this.data);
+
+                if (!metricOrder.length) {
+                    this.seriesToggles.innerHTML = "";
+                    return;
+                }
+
+                this.seriesToggles.innerHTML = metricOrder
+                    .filter((key) => metricMap[key])
+                    .map((key, index) => {
+                        const metric = metricMap[key];
+                        const isActive = state.activeSeries.has(key);
+                        const campaignOrder = metric.seriesOrder || Object.keys(metric.series || {});
+                        const totals = Array.from({ length: (this.data.labels || []).length }, (_value, labelIndex) =>
+                            campaignOrder.reduce((sum, campaignKey) => {
+                                const campaignSeries = metric.series?.[campaignKey];
+                                return sum + Number(campaignSeries?.values?.[labelIndex] || 0);
+                            }, 0)
+                        );
+                        return `
+                            <button
+                                type="button"
+                                class="chart-series-toggle${isActive ? " is-active" : ""}"
+                                data-chart-series-toggle="${key}"
+                                data-chart-series-key="${key}"
+                                aria-pressed="${isActive ? "true" : "false"}"
+                            >
+                                <span class="chart-series-toggle-head">
+                                    <span class="chart-series-swatch" style="--series-color:${metric.color || this.resolveSeriesColor(metric, index)}"></span>
+                                    <span class="chart-series-toggle-label">${metric.label || key}</span>
+                                </span>
+                                <strong class="chart-series-toggle-value">${formatValue(average(totals), metric.format || "int")}</strong>
+                            </button>
+                        `;
+                    })
+                    .join("");
+
+                this.seriesToggles.querySelectorAll("[data-chart-series-toggle]").forEach((button) => {
+                    button.addEventListener("click", () => {
+                        const key = button.dataset.chartSeriesToggle;
+                        const nextState = this.ensureViewState(this.activeViewKey);
+                        if (nextState.activeSeries.has(key) && nextState.activeSeries.size === 1) {
+                            return;
+                        }
+                        if (nextState.activeSeries.has(key)) {
+                            nextState.activeSeries.delete(key);
+                        } else {
+                            nextState.activeSeries.add(key);
+                        }
+                        this.syncSeriesToggles();
+                        this.render();
+                    });
+                });
+
+                this.bindSeriesHover(
+                    Array.from(this.seriesToggles.querySelectorAll("[data-chart-series-toggle]")),
+                    (button) => button.dataset.chartSeriesKey
+                );
+
+                this.syncSeriesToggles();
+                return;
+            }
             const seriesMap = this.getAvailableSeries(this.data, state.metric);
             const seriesOrder = this.getSeriesOrder(this.data, state.metric);
 
@@ -469,11 +507,28 @@
             });
         }
 
-        renderEmpty() {
+        renderEmpty(options = {}) {
+            const originalEmptyText = this.data.emptyText;
+            const originalEmptyCaption = this.data.emptyCaption;
+            if (Object.prototype.hasOwnProperty.call(options, "text")) {
+                this.data.emptyText = options.text;
+            }
+            if (Object.prototype.hasOwnProperty.call(options, "caption")) {
+                this.data.emptyCaption = options.caption;
+            }
             this.stage.innerHTML = `<div class="chart-empty">${this.data.emptyText || "Данных пока недостаточно для построения графика."}</div>`;
             this.caption.textContent = this.data.emptyCaption || "Сначала выполните синхронизацию и сформируйте срез за выбранный период.";
             this.legend.innerHTML = "";
             this.syncButtons();
+            this.data.emptyText = originalEmptyText;
+            this.data.emptyCaption = originalEmptyCaption;
+        }
+
+        renderSeriesSelectionEmpty() {
+            this.renderEmpty({
+                text: "Выберите показатели выше, чтобы построить график.",
+                caption: "График появится после выбора хотя бы одного показателя.",
+            });
         }
 
         syncButtons() {
@@ -810,8 +865,51 @@
             this.applySeriesHoverState();
         }
 
+        resolveCampaignEntryColor(metric, campaignSeries, metricIndex, campaignIndex, selectedMetricCount) {
+            if (selectedMetricCount <= 1 && campaignSeries?.color) {
+                return campaignSeries.color;
+            }
+            const baseColor = String(metric?.color || this.resolveSeriesColor(metric, metricIndex)).replace("#", "");
+            if (!/^[0-9a-f]{6}$/i.test(baseColor)) {
+                return this.resolveSeriesColor(campaignSeries, metricIndex * 10 + campaignIndex);
+            }
+            const shift = ((campaignIndex % 5) - 2) * 18;
+            const channels = [0, 2, 4].map((offset) => {
+                const channel = Number.parseInt(baseColor.slice(offset, offset + 2), 16);
+                return Math.max(0, Math.min(255, channel + shift));
+            });
+            return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+        }
+
         buildSeriesEntriesFromCurrentView(formatOverride = null) {
             const state = this.ensureViewState(this.activeViewKey);
+            if (this.mode === "campaigns") {
+                const metricMap = this.getAvailableMetricMap(this.data);
+                const metricOrder = this.getMetricOrder(this.data);
+                const activeMetricKeys = metricOrder.filter((key) => state.activeSeries.has(key) && metricMap[key]);
+                const selectedMetricCount = activeMetricKeys.length;
+                return activeMetricKeys.flatMap((metricKey, metricIndex) => {
+                    const metric = metricMap[metricKey];
+                    const campaignOrder = metric.seriesOrder || Object.keys(metric.series || {});
+                    return campaignOrder
+                        .filter((campaignKey) => metric.series?.[campaignKey])
+                        .map((campaignKey, campaignIndex) => {
+                            const campaignSeries = metric.series[campaignKey];
+                            const values = (campaignSeries.values || []).map((value) => Number(value || 0));
+                            return {
+                                key: selectedMetricCount > 1 ? metricKey : campaignKey,
+                                label: selectedMetricCount > 1
+                                    ? `${metric.label || metricKey} · ${campaignSeries.label || campaignKey}`
+                                    : (campaignSeries.label || campaignKey),
+                                format: metric.format || formatOverride || "int",
+                                values,
+                                color: this.resolveCampaignEntryColor(metric, campaignSeries, metricIndex, campaignIndex, selectedMetricCount),
+                                minValue: Math.min(...values),
+                                maxValue: Math.max(...values),
+                            };
+                        });
+                });
+            }
             const seriesMap = this.getAvailableSeries(this.data, state.metric);
             const seriesOrder = this.getSeriesOrder(this.data, state.metric);
             return seriesOrder
@@ -856,6 +954,15 @@
             const seriesEntries = this.buildSeriesEntriesFromCurrentView();
             const windowLabel = this.getWindowLabel(labels);
 
+            if (!labels.length) {
+                this.renderEmpty();
+                return;
+            }
+            if (!seriesEntries.length) {
+                this.renderSeriesSelectionEmpty();
+                return;
+            }
+
             this.renderMultiSeries(
                 labels,
                 seriesEntries,
@@ -875,9 +982,24 @@
         renderCampaigns() {
             const labels = Array.isArray(this.data.labels) ? this.data.labels : [];
             const state = this.ensureViewState(this.activeViewKey);
-            const metricData = this.data.metrics?.[state.metric];
-            const seriesEntries = this.buildSeriesEntriesFromCurrentView(metricData?.format || null);
+            const seriesEntries = this.buildSeriesEntriesFromCurrentView();
             const windowLabel = this.getWindowLabel(labels);
+            const metricMap = this.getAvailableMetricMap(this.data);
+            const selectedMetricLabels = this.getMetricOrder(this.data)
+                .filter((key) => state.activeSeries.has(key) && metricMap[key])
+                .map((key) => metricMap[key].label || key);
+            const metricData = {
+                label: selectedMetricLabels.length ? selectedMetricLabels.join(", ") : "метрики",
+            };
+
+            if (!labels.length) {
+                this.renderEmpty();
+                return;
+            }
+            if (!seriesEntries.length) {
+                this.renderSeriesSelectionEmpty();
+                return;
+            }
 
             this.renderMultiSeries(
                 labels,
