@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import timedelta
 import re
 from types import SimpleNamespace
 
@@ -454,80 +453,6 @@ class MonitoringWorkbookForm(StyledFormMixin, forms.Form):
             }
         ),
     )
-
-
-class ReportsFilterForm(StyledFormMixin, forms.Form):
-    RANGE_CHOICES = (
-        (7, "7 дней"),
-        (14, "14 дней"),
-        (30, "30 дней"),
-        (60, "60 дней"),
-    )
-
-    help_texts = {
-        "date_from": "Начало периода аналитики (включительно).",
-        "date_to": "Конец периода аналитики (включительно).",
-        "range_days": "На такую глубину строятся графики и сравнительные отчёты.",
-    }
-
-    date_from = forms.DateField(
-        required=False,
-        label="Период с",
-        widget=forms.DateInput(attrs={"type": "date"}),
-    )
-    date_to = forms.DateField(
-        required=False,
-        label="Период по",
-        widget=forms.DateInput(attrs={"type": "date"}),
-    )
-    range_days = forms.TypedChoiceField(
-        required=False,
-        label="Окно аналитики",
-        choices=RANGE_CHOICES,
-        initial=14,
-        coerce=int,
-    )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.order_fields(["date_from", "date_to", "range_days"])
-
-    def clean(self):
-        cleaned_data = super().clean()
-        reference_date = timezone.localdate()
-        range_days = cleaned_data.get("range_days") or 14
-        date_from = cleaned_data.get("date_from")
-        date_to = cleaned_data.get("date_to")
-
-        normalized_window = max(1, min(int(range_days), 60))
-        if date_from and not date_to:
-            date_to = date_from + timedelta(days=normalized_window - 1)
-        elif date_to and not date_from:
-            date_from = date_to - timedelta(days=normalized_window - 1)
-
-        if date_from and date_to:
-            if date_from > date_to:
-                self.add_error("date_to", "Дата окончания периода должна быть не раньше даты начала.")
-                return cleaned_data
-            selected_days = (date_to - date_from).days + 1
-            if selected_days > 60:
-                self.add_error("date_to", "Период аналитики не должен превышать 60 дней.")
-                return cleaned_data
-            reference_date = date_to
-            range_days = selected_days
-        else:
-            range_days = normalized_window
-            date_to = reference_date
-            date_from = reference_date - timedelta(days=range_days - 1)
-
-        cleaned_data["date_from"] = date_from
-        cleaned_data["date_to"] = date_to
-        # Сохраняем вычисленную опорную дату для обратной совместимости
-        # с существующим кодом контекста и шаблонов.
-        reference_date = date_to or reference_date
-        cleaned_data["reference_date"] = reference_date
-        cleaned_data["range_days"] = range_days
-        return cleaned_data
 
 
 class MonitoringSettingsForm(StyledFormMixin, forms.ModelForm):

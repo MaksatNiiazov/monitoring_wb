@@ -1,5 +1,4 @@
 (function () {
-    const REPORTS_TAB_STORAGE_KEY = "wb-reports-active-tab";
     const INT_FORMATTER = new Intl.NumberFormat("ru-RU");
     const MONEY_FORMATTER = new Intl.NumberFormat("ru-RU", {
         minimumFractionDigits: 2,
@@ -32,6 +31,20 @@
         "#dc2626",
         "#475569",
         "#6b7280",
+    ];
+    const CAMPAIGN_SERIES_PALETTE = [
+        "#0f766e",
+        "#dc2626",
+        "#2563eb",
+        "#d97706",
+        "#7c3aed",
+        "#0891b2",
+        "#65a30d",
+        "#db2777",
+        "#ea580c",
+        "#0284c7",
+        "#9333ea",
+        "#16a34a",
     ];
 
     function formatValue(value, format) {
@@ -185,14 +198,30 @@
             this.applySeriesHoverState();
         }
 
+        matchesHoverTarget(target) {
+            if (!this.hoverSeriesKey || !target) {
+                return false;
+            }
+            const hoveredKey = String(this.hoverSeriesKey);
+            if (hoveredKey.startsWith("metric:")) {
+                return target.dataset.chartMetricKey === hoveredKey.slice("metric:".length);
+            }
+            if (hoveredKey.startsWith("campaign:")) {
+                return target.dataset.chartCampaignKey === hoveredKey.slice("campaign:".length);
+            }
+            if (hoveredKey.startsWith("series:")) {
+                return target.dataset.chartSeriesKey === hoveredKey.slice("series:".length);
+            }
+            return target.dataset.chartSeriesKey === hoveredKey;
+        }
+
         syncLegendHover() {
             if (!this.legend) {
                 return;
             }
             const hasHover = Boolean(this.hoverSeriesKey);
             this.legend.querySelectorAll("[data-chart-legend-series]").forEach((chip) => {
-                const key = chip.dataset.chartLegendSeries;
-                const isHovered = hasHover && key === this.hoverSeriesKey;
+                const isHovered = hasHover && this.matchesHoverTarget(chip);
                 const isDimmed = hasHover && !isHovered;
                 chip.classList.toggle("is-hovered", isHovered);
                 chip.classList.toggle("is-dimmed", isDimmed);
@@ -205,8 +234,7 @@
             }
             const hasHover = Boolean(this.hoverSeriesKey);
             this.stage.querySelectorAll("[data-chart-series-key]").forEach((group) => {
-                const key = group.dataset.chartSeriesKey;
-                const isHovered = hasHover && key === this.hoverSeriesKey;
+                const isHovered = hasHover && this.matchesHoverTarget(group);
                 const isDimmed = hasHover && !isHovered;
 
                 group.classList.toggle("is-hovered", isHovered);
@@ -304,6 +332,20 @@
             return viewData.seriesOrder || Object.keys(this.getAvailableSeries(viewData, metric));
         }
 
+        getCampaignOrder(viewData) {
+            if (this.resolveMode(viewData) !== "campaigns") {
+                return [];
+            }
+            const metricOrder = this.getMetricOrder(viewData);
+            for (const metricKey of metricOrder) {
+                const order = this.getSeriesOrder(viewData, metricKey);
+                if (order.length) {
+                    return order;
+                }
+            }
+            return [];
+        }
+
         ensureViewState(viewKey) {
             if (this.viewStates[viewKey]) {
                 return this.viewStates[viewKey];
@@ -327,6 +369,11 @@
                         ? Boolean(this.getAvailableMetricMap(viewData)?.[key])
                         : Boolean(this.getAvailableSeries(viewData, initialMetric)?.[key])
                 )),
+                activeCampaigns: new Set(
+                    this.resolveMode(viewData) === "campaigns"
+                        ? this.getCampaignOrder(viewData)
+                        : []
+                ),
             };
             return this.viewStates[viewKey];
         }
@@ -336,6 +383,7 @@
             this.activeViewKey = viewKey;
             this.data = this.getViewData(viewKey);
             this.mode = this.resolveMode(this.data);
+            this.root.dataset.chartActiveMode = this.mode;
             const state = this.ensureViewState(viewKey);
             this.metric = state.metric;
             this.type = state.type;
@@ -357,8 +405,62 @@
             if (!this.dynamicMetricGroup) {
                 return;
             }
-            this.dynamicMetricGroup.hidden = true;
-            this.dynamicMetricGroup.innerHTML = "";
+            if (this.mode !== "campaigns") {
+                this.dynamicMetricGroup.hidden = true;
+                this.dynamicMetricGroup.innerHTML = "";
+                return;
+            }
+            const state = this.ensureViewState(this.activeViewKey);
+            const metricMap = this.getAvailableMetricMap(this.data);
+            const metricOrder = this.getMetricOrder(this.data);
+            this.dynamicMetricGroup.hidden = false;
+            this.dynamicMetricGroup.innerHTML = metricOrder
+                .filter((key) => metricMap[key])
+                .map((key, index) => {
+                    const metric = metricMap[key];
+                    const isActive = state.activeSeries.has(key);
+                    const campaignOrder = metric.seriesOrder || Object.keys(metric.series || {});
+                    const values = campaignOrder.flatMap((campaignKey) =>
+                        (metric.series?.[campaignKey]?.values || []).map((value) => Number(value || 0))
+                    );
+                    const avgValue = average(values);
+                    const color = metric.color || this.resolveSeriesColor(metric, index);
+                    return `
+                        <button
+                            type="button"
+                            class="chart-series-toggle${isActive ? " is-active" : ""}"
+                            data-chart-dynamic-metric="${key}"
+                            aria-pressed="${isActive ? "true" : "false"}"
+                        >
+                            <span class="chart-series-toggle-head">
+                                <span class="chart-series-swatch" style="--series-color:${color}"></span>
+                                <span class="chart-series-toggle-label">${metric.label || key}</span>
+                            </span>
+                            <strong class="chart-series-toggle-value">${formatValue(avgValue, metric.format || "int")}</strong>
+                        </button>
+                    `;
+                })
+                .join("");
+            this.bindSeriesHover(
+                Array.from(this.dynamicMetricGroup.querySelectorAll("[data-chart-dynamic-metric]")),
+                (button) => `metric:${button.dataset.chartDynamicMetric}`
+            );
+            this.dynamicMetricGroup.querySelectorAll("[data-chart-dynamic-metric]").forEach((button) => {
+                button.addEventListener("click", () => {
+                    const key = button.dataset.chartDynamicMetric;
+                    const nextState = this.ensureViewState(this.activeViewKey);
+                    if (nextState.activeSeries.has(key) && nextState.activeSeries.size === 1) {
+                        return;
+                    }
+                    if (nextState.activeSeries.has(key)) {
+                        nextState.activeSeries.delete(key);
+                    } else {
+                        nextState.activeSeries.add(key);
+                    }
+                    this.syncDynamicMetricButtons();
+                    this.render();
+                });
+            });
         }
 
         buildSeriesToggles() {
@@ -368,22 +470,24 @@
             const state = this.ensureViewState(this.activeViewKey);
             if (this.mode === "campaigns") {
                 const metricMap = this.getAvailableMetricMap(this.data);
-                const metricOrder = this.getMetricOrder(this.data);
+                const campaignOrder = this.getCampaignOrder(this.data);
+                const activeMetricKeys = this.getMetricOrder(this.data).filter((key) => state.activeSeries.has(key) && metricMap[key]);
 
-                if (!metricOrder.length) {
+                if (!campaignOrder.length) {
                     this.seriesToggles.innerHTML = "";
                     return;
                 }
 
-                this.seriesToggles.innerHTML = metricOrder
-                    .filter((key) => metricMap[key])
-                    .map((key, index) => {
-                        const metric = metricMap[key];
-                        const isActive = state.activeSeries.has(key);
-                        const campaignOrder = metric.seriesOrder || Object.keys(metric.series || {});
+                this.seriesToggles.innerHTML = campaignOrder
+                    .map((campaignKey, index) => {
+                        const sampleMetric = activeMetricKeys[0] ? metricMap[activeMetricKeys[0]] : metricMap[this.getMetricOrder(this.data)[0]];
+                        const sampleSeries = sampleMetric?.series?.[campaignKey];
+                        const isActive = state.activeCampaigns.has(campaignKey);
+                        const sampleColor = this.resolveCampaignEntryColor(sampleMetric, sampleSeries, 0, index, 1);
                         const totals = Array.from({ length: (this.data.labels || []).length }, (_value, labelIndex) =>
-                            campaignOrder.reduce((sum, campaignKey) => {
-                                const campaignSeries = metric.series?.[campaignKey];
+                            activeMetricKeys.reduce((sum, metricKey) => {
+                                const metric = metricMap[metricKey];
+                                const campaignSeries = metric?.series?.[campaignKey];
                                 return sum + Number(campaignSeries?.values?.[labelIndex] || 0);
                             }, 0)
                         );
@@ -391,15 +495,15 @@
                             <button
                                 type="button"
                                 class="chart-series-toggle${isActive ? " is-active" : ""}"
-                                data-chart-series-toggle="${key}"
-                                data-chart-series-key="${key}"
+                                data-chart-series-toggle="${campaignKey}"
+                                data-chart-series-key="${campaignKey}"
                                 aria-pressed="${isActive ? "true" : "false"}"
                             >
                                 <span class="chart-series-toggle-head">
-                                    <span class="chart-series-swatch" style="--series-color:${metric.color || this.resolveSeriesColor(metric, index)}"></span>
-                                    <span class="chart-series-toggle-label">${metric.label || key}</span>
+                                    <span class="chart-series-swatch" style="--series-color:${sampleColor}"></span>
+                                    <span class="chart-series-toggle-label">${sampleSeries?.label || campaignKey}</span>
                                 </span>
-                                <strong class="chart-series-toggle-value">${formatValue(average(totals), metric.format || "int")}</strong>
+                                <strong class="chart-series-toggle-value">${activeMetricKeys.length ? activeMetricKeys.length : 0}</strong>
                             </button>
                         `;
                     })
@@ -409,13 +513,13 @@
                     button.addEventListener("click", () => {
                         const key = button.dataset.chartSeriesToggle;
                         const nextState = this.ensureViewState(this.activeViewKey);
-                        if (nextState.activeSeries.has(key) && nextState.activeSeries.size === 1) {
+                        if (nextState.activeCampaigns.has(key) && nextState.activeCampaigns.size === 1) {
                             return;
                         }
-                        if (nextState.activeSeries.has(key)) {
-                            nextState.activeSeries.delete(key);
+                        if (nextState.activeCampaigns.has(key)) {
+                            nextState.activeCampaigns.delete(key);
                         } else {
-                            nextState.activeSeries.add(key);
+                            nextState.activeCampaigns.add(key);
                         }
                         this.syncSeriesToggles();
                         this.render();
@@ -424,7 +528,7 @@
 
                 this.bindSeriesHover(
                     Array.from(this.seriesToggles.querySelectorAll("[data-chart-series-toggle]")),
-                    (button) => button.dataset.chartSeriesKey
+                    (button) => `campaign:${button.dataset.chartSeriesKey}`
                 );
 
                 this.syncSeriesToggles();
@@ -484,7 +588,7 @@
 
             this.bindSeriesHover(
                 Array.from(this.seriesToggles.querySelectorAll("[data-chart-series-toggle]")),
-                (button) => button.dataset.chartSeriesKey
+                (button) => `series:${button.dataset.chartSeriesKey}`
             );
 
             this.syncSeriesToggles();
@@ -497,8 +601,11 @@
             const state = this.ensureViewState(this.activeViewKey);
             this.seriesToggles.querySelectorAll("[data-chart-series-toggle]").forEach((button) => {
                 const key = button.dataset.chartSeriesToggle;
-                const isActive = state.activeSeries.has(key);
-                const isHovered = Boolean(this.hoverSeriesKey) && this.hoverSeriesKey === key;
+                const isActive = this.mode === "campaigns"
+                    ? state.activeCampaigns.has(key)
+                    : state.activeSeries.has(key);
+                const hoverKey = this.mode === "campaigns" ? `campaign:${key}` : `series:${key}`;
+                const isHovered = Boolean(this.hoverSeriesKey) && this.hoverSeriesKey === hoverKey;
                 const isDimmed = Boolean(this.hoverSeriesKey) && !isHovered;
                 button.classList.toggle("is-active", isActive);
                 button.classList.toggle("is-hovered", isHovered);
@@ -822,6 +929,8 @@
                         "g",
                         {
                             "data-chart-series-key": series.key,
+                            "data-chart-metric-key": series.metricKey || "",
+                            "data-chart-campaign-key": series.campaignKey || "",
                         },
                         [
                             svgEl("path", {
@@ -866,19 +975,10 @@
         }
 
         resolveCampaignEntryColor(metric, campaignSeries, metricIndex, campaignIndex, selectedMetricCount) {
-            if (selectedMetricCount <= 1 && campaignSeries?.color) {
-                return campaignSeries.color;
+            if (selectedMetricCount <= 1) {
+                return CAMPAIGN_SERIES_PALETTE[campaignIndex % CAMPAIGN_SERIES_PALETTE.length];
             }
-            const baseColor = String(metric?.color || this.resolveSeriesColor(metric, metricIndex)).replace("#", "");
-            if (!/^[0-9a-f]{6}$/i.test(baseColor)) {
-                return this.resolveSeriesColor(campaignSeries, metricIndex * 10 + campaignIndex);
-            }
-            const shift = ((campaignIndex % 5) - 2) * 18;
-            const channels = [0, 2, 4].map((offset) => {
-                const channel = Number.parseInt(baseColor.slice(offset, offset + 2), 16);
-                return Math.max(0, Math.min(255, channel + shift));
-            });
-            return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+            return CAMPAIGN_SERIES_PALETTE[(metricIndex * 5 + campaignIndex) % CAMPAIGN_SERIES_PALETTE.length];
         }
 
         buildSeriesEntriesFromCurrentView(formatOverride = null) {
@@ -892,12 +992,14 @@
                     const metric = metricMap[metricKey];
                     const campaignOrder = metric.seriesOrder || Object.keys(metric.series || {});
                     return campaignOrder
-                        .filter((campaignKey) => metric.series?.[campaignKey])
+                        .filter((campaignKey) => state.activeCampaigns.has(campaignKey) && metric.series?.[campaignKey])
                         .map((campaignKey, campaignIndex) => {
                             const campaignSeries = metric.series[campaignKey];
                             const values = (campaignSeries.values || []).map((value) => Number(value || 0));
                             return {
-                                key: selectedMetricCount > 1 ? metricKey : campaignKey,
+                                key: `${metricKey}::${campaignKey}`,
+                                metricKey,
+                                campaignKey,
                                 label: selectedMetricCount > 1
                                     ? `${metric.label || metricKey} · ${campaignSeries.label || campaignKey}`
                                     : (campaignSeries.label || campaignKey),
@@ -932,7 +1034,14 @@
         renderAverageLegend(seriesEntries) {
             this.legend.innerHTML = seriesEntries
                 .map((series) => `
-                    <div class="legend-chip legend-chip-series legend-chip-average" data-chart-legend-series="${series.key}" tabindex="0">
+                    <div
+                        class="legend-chip legend-chip-series legend-chip-average"
+                        data-chart-legend-series="${series.key}"
+                        data-chart-series-key="${series.key}"
+                        data-chart-metric-key="${series.metricKey || ""}"
+                        data-chart-campaign-key="${series.campaignKey || ""}"
+                        tabindex="0"
+                    >
                         <span class="legend-series-label">
                             <span class="chart-series-swatch" style="--series-color:${series.color}"></span>
                             <span>${series.label}</span>
@@ -944,7 +1053,7 @@
 
             this.bindSeriesHover(
                 Array.from(this.legend.querySelectorAll("[data-chart-legend-series]")),
-                (chip) => chip.dataset.chartLegendSeries
+                (chip) => `series:${chip.dataset.chartLegendSeries}`
             );
             this.syncLegendHover();
         }
@@ -1020,6 +1129,7 @@
         render() {
             this.data = this.getViewData(this.activeViewKey);
             this.mode = this.resolveMode(this.data);
+            this.root.dataset.chartActiveMode = this.mode;
             if (this.mode === "multi") {
                 this.renderMulti();
                 return;
@@ -1032,73 +1142,6 @@
         }
     }
 
-    function resolveSafeReportsTab(root, requestedTab) {
-        const availableTabs = Array.from(root.querySelectorAll("[data-reports-tab-trigger]")).map(
-            (node) => node.dataset.reportsTabTrigger
-        );
-        const normalized = String(requestedTab || "").trim();
-        if (normalized && availableTabs.includes(normalized)) {
-            return normalized;
-        }
-        return availableTabs[0] || "overview";
-    }
-
-    function syncReportsTab(root, nextTab) {
-        const activeTab = resolveSafeReportsTab(root, nextTab);
-        root.dataset.activeTab = activeTab;
-
-        root.querySelectorAll("[data-reports-tab-trigger]").forEach((trigger) => {
-            const isActive = trigger.dataset.reportsTabTrigger === activeTab;
-            trigger.classList.toggle("is-active", isActive);
-            trigger.setAttribute("aria-selected", isActive ? "true" : "false");
-            trigger.setAttribute("tabindex", isActive ? "0" : "-1");
-        });
-
-        root.querySelectorAll("[data-reports-panel]").forEach((panel) => {
-            panel.hidden = panel.dataset.reportsPanel !== activeTab;
-        });
-
-        try {
-            sessionStorage.setItem(REPORTS_TAB_STORAGE_KEY, activeTab);
-        } catch (_error) {
-            // Session storage can be unavailable.
-        }
-    }
-
-    function initReportsTabs() {
-        document.querySelectorAll("[data-reports-tabs-shell]").forEach((root) => {
-            if (root.dataset.reportsTabsBound === "1") {
-                return;
-            }
-            root.dataset.reportsTabsBound = "1";
-
-            const triggers = Array.from(root.querySelectorAll("[data-reports-tab-trigger]"));
-            triggers.forEach((trigger, index) => {
-                trigger.addEventListener("click", () => {
-                    syncReportsTab(root, trigger.dataset.reportsTabTrigger);
-                    trigger.focus();
-                });
-                trigger.addEventListener("keydown", (event) => {
-                    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") {
-                        return;
-                    }
-                    event.preventDefault();
-                    const direction = event.key === "ArrowRight" ? 1 : -1;
-                    const nextIndex = (index + direction + triggers.length) % triggers.length;
-                    triggers[nextIndex].click();
-                });
-            });
-
-            let preferredTab = root.dataset.activeTab || "overview";
-            try {
-                preferredTab = sessionStorage.getItem(REPORTS_TAB_STORAGE_KEY) || preferredTab;
-            } catch (_error) {
-                // Session storage can be unavailable.
-            }
-            syncReportsTab(root, preferredTab);
-        });
-    }
-
     function initCharts() {
         document.querySelectorAll(".chart-widget").forEach((node) => {
             if (!node.dataset.chartBound) {
@@ -1109,7 +1152,6 @@
     }
 
     function bootstrap() {
-        initReportsTabs();
         initCharts();
     }
 

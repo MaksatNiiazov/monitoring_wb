@@ -22,7 +22,6 @@ from .forms import (
     MonitoringSettingsForm,
     ProductCreateForm,
     ProductSettingsForm,
-    ReportsFilterForm,
     SyncForm,
 )
 from .models import (
@@ -53,7 +52,6 @@ from .services.monitoring_table import (
     export_monitoring_workbook_bytes,
 )
 from .services.campaigns import build_campaign_detail_context
-from .services.reporting_hub import build_reports_context
 from .services.table_charts import build_table_timeline_context
 from .services.reports import (
     build_product_metrics_chart,
@@ -784,46 +782,6 @@ def table_stock_popup_payload(request: HttpRequest) -> JsonResponse:
             ),
         }
     )
-
-
-def reports(request: HttpRequest) -> HttpResponse:
-    default_reference_date = DailyProductStock.objects.aggregate(latest=Max("stats_date"))["latest"] or timezone.localdate()
-    default_range_days = 14
-    default_date_from = default_reference_date - timedelta(days=default_range_days - 1)
-    form_data = request.GET.copy() if request.GET else None
-    if form_data is not None and not form_data.get("date_from") and not form_data.get("date_to"):
-        fallback_reference = _selected_date(form_data.get("reference_date"), default_reference_date)
-        fallback_range_days = _selected_history_days(form_data.get("range_days"), default_range_days)
-        form_data["date_to"] = fallback_reference.isoformat()
-        form_data["date_from"] = (fallback_reference - timedelta(days=max(1, fallback_range_days) - 1)).isoformat()
-    form = ReportsFilterForm(
-        form_data or None,
-        initial={
-            "date_from": default_date_from,
-            "date_to": default_reference_date,
-            "range_days": default_range_days,
-        },
-    )
-    if form.is_valid():
-        date_from = form.cleaned_data["date_from"] or default_date_from
-        date_to = form.cleaned_data["date_to"] or default_reference_date
-    else:
-        date_from = default_date_from
-        date_to = default_reference_date
-
-    range_days = max(1, (date_to - date_from).days + 1)
-    context = build_reports_context(reference_date=date_to, range_days=range_days)
-    context.update(
-        {
-            "filters_form": form,
-            "workspace_overview": build_workspace_overview(),
-            "date_from": date_from,
-            "date_to": date_to,
-        }
-    )
-    return render(request, "monitoring/reports.html", context)
-
-
 def products_workspace(request: HttpRequest) -> HttpResponse:
     settings_obj = get_monitoring_settings()
     today = timezone.localdate()

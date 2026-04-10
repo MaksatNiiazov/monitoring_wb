@@ -13,7 +13,6 @@
         <div class="table-action-group table-action-group-links table-action-group-right">
             <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:products' %}">Товары</a>
             <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:campaigns' %}">РК</a>
-            <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:reports' %}?reference_date={{ reference_date|date:'Y-m-d' }}&range_days={{ workspace_settings.monitoring_history_days|default:14 }}">Аналитика</a>
             <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:download_monitoring_workbook' %}?reference_date={{ reference_date|date:'Y-m-d' }}&history_days={{ history_days }}">Скачать .xlsx</a>
             <a class="secondary-button table-head-action table-head-action-link" href="{% url 'monitoring:workspace_settings' %}">Настройки</a>
         </div>

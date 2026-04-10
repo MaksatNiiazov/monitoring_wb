@@ -1,6 +1,5 @@
 from io import BytesIO
 import json
-import re
 from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import patch
@@ -29,7 +28,7 @@ from monitoring.models import (
     SyncStatus,
     Warehouse,
 )
-from monitoring.forms import ProductSettingsForm, ReportsFilterForm, SyncForm
+from monitoring.forms import ProductSettingsForm, SyncForm
 from monitoring.services.config import build_workspace_overview
 from monitoring.services.demo import seed_demo_dataset
 from monitoring.services.exporters import exporter_rows
@@ -1811,19 +1810,14 @@ class PageRenderTests(TestCase):
         dashboard = self.client.get("/")
         products_page = self.client.get("/products/")
         detail = self.client.get(f"/products/{product.pk}/")
-        reports = self.client.get("/reports/")
         self.assertEqual(dashboard.status_code, 302)
         self.assertEqual(dashboard["Location"], "/table/")
         self.assertEqual(products_page.status_code, 200)
         self.assertEqual(detail.status_code, 200)
-        self.assertEqual(reports.status_code, 200)
         self.assertContains(products_page, "Список товаров")
         self.assertContains(detail, 'data-detail-tab-trigger="overview"')
         self.assertContains(detail, 'data-chart-mode="multi"')
         self.assertContains(detail, "product-metrics-chart")
-        self.assertContains(reports, 'data-reports-tab-trigger="overview"')
-        self.assertNotContains(reports, 'data-reports-tab-trigger="analytics"')
-        self.assertNotContains(reports, 'data-reports-panel="analytics"')
 
     def test_table_page_renders_monitoring_grid(self) -> None:
         seed_demo_dataset()
@@ -1840,6 +1834,11 @@ class PageRenderTests(TestCase):
         self.assertContains(response, '"defaultSeries": []')
         self.assertContains(response, 'data-default-density="compact"')
         self.assertContains(response, 'data-default-fullscreen="normal"')
+        self.assertNotContains(response, "/reports/")
+
+    def test_reports_page_is_not_available(self) -> None:
+        response = self.client.get("/reports/")
+        self.assertEqual(response.status_code, 404)
 
     def test_campaigns_page_renders_management_workspace(self) -> None:
         seed_demo_dataset()
@@ -1895,41 +1894,12 @@ class PageRenderTests(TestCase):
     def test_core_pages_render_utf8_without_mojibake(self) -> None:
         seed_demo_dataset()
         campaign = Campaign.objects.order_by("id").first()
-        for url in ("/table/", "/products/", "/campaigns/", f"/campaigns/{campaign.pk}/", "/reports/", "/settings/"):
+        for url in ("/table/", "/products/", "/campaigns/", f"/campaigns/{campaign.pk}/", "/settings/"):
             response = self.client.get(url)
             self.assertEqual(response.status_code, 200)
             self.assertIn("charset=utf-8", response["Content-Type"].lower())
             html = response.content.decode("utf-8")
             self.assertNotIn("Р СњР ", html)
-
-    def test_reports_bar_width_styles_use_dot_separator(self) -> None:
-        seed_demo_dataset()
-        response = self.client.get("/reports/")
-        self.assertEqual(response.status_code, 200)
-        html = response.content.decode("utf-8")
-        self.assertIsNone(re.search(r'bar-fill (?:accent|warm)" style="width:\\s*\\d+,\\d+%;"', html))
-
-    def test_reports_page_accepts_explicit_date_range(self) -> None:
-        seed_demo_dataset()
-        response = self.client.get("/reports/?date_from=2026-03-12&date_to=2026-03-18")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["date_from"], date(2026, 3, 12))
-        self.assertEqual(response.context["date_to"], date(2026, 3, 18))
-        self.assertEqual(response.context["range_days"], 7)
-        self.assertContains(response, "Период анализа")
-        self.assertContains(response, "12.03.2026")
-        self.assertContains(response, "18.03.2026")
-
-    def test_reports_page_prefills_range_fields_from_reference_and_window_query(self) -> None:
-        seed_demo_dataset()
-        response = self.client.get("/reports/?reference_date=2026-03-18&range_days=14")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["date_from"], date(2026, 3, 5))
-        self.assertEqual(response.context["date_to"], date(2026, 3, 18))
-        self.assertContains(response, 'name="date_from"')
-        self.assertContains(response, 'value="2026-03-05"')
-        self.assertContains(response, 'name="date_to"')
-        self.assertContains(response, 'value="2026-03-18"')
 
     def test_products_page_uses_modals_for_add_and_edit(self) -> None:
         seed_demo_dataset()
@@ -2039,34 +2009,6 @@ class CampaignViewTests(TestCase):
         self.assertEqual(response["Location"], "/campaigns/")
         campaign.refresh_from_db()
         self.assertFalse(campaign.is_active)
-
-
-class ReportsFilterFormTests(TestCase):
-    def test_reports_filter_form_accepts_explicit_date_range(self) -> None:
-        form = ReportsFilterForm(
-            data={
-                "date_from": "2026-03-11",
-                "date_to": "2026-03-18",
-                "reference_date": "2026-03-18",
-                "range_days": "14",
-            }
-        )
-        self.assertTrue(form.is_valid(), form.errors)
-        self.assertEqual(form.cleaned_data["date_from"], date(2026, 3, 11))
-        self.assertEqual(form.cleaned_data["date_to"], date(2026, 3, 18))
-        self.assertEqual(form.cleaned_data["reference_date"], date(2026, 3, 18))
-        self.assertEqual(form.cleaned_data["range_days"], 8)
-
-    def test_reports_filter_form_builds_period_from_date_to_and_window(self) -> None:
-        form = ReportsFilterForm(
-            data={
-                "date_to": "2026-03-18",
-                "range_days": "14",
-            }
-        )
-        self.assertTrue(form.is_valid(), form.errors)
-        self.assertEqual(form.cleaned_data["date_to"], date(2026, 3, 18))
-        self.assertEqual(form.cleaned_data["date_from"], date(2026, 3, 5))
 
 
 class SyncViewsTests(TestCase):

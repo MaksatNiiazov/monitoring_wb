@@ -3283,37 +3283,6 @@ th {
     max-width: 62ch;
 }
 
-.reports-tabs-shell {
-    display: grid;
-    gap: 16px;
-}
-
-.reports-tabs-nav {
-    width: fit-content;
-    max-width: 100%;
-}
-
-[data-reports-panel][hidden] {
-    display: none !important;
-}
-
-.reports-layout {
-    align-items: start;
-    grid-template-columns: 1fr;
-    gap: 20px;
-}
-
-.reports-main-stack,
-.reports-side-stack {
-    display: grid;
-    gap: 24px;
-    align-content: start;
-}
-
-.reports-side-stack {
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-}
-
 .report-filter-panel {
     position: static;
 }
@@ -3528,6 +3497,99 @@ th {
 
 .chart-dynamic-metrics[hidden] {
     display: none;
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-topbar {
+    display: contents;
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-topbar [data-chart-group="view"] {
+    grid-column: 1 / -1;
+    grid-row: 1;
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-series-toggles {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: flex;
+    flex-wrap: wrap;
+    max-height: none;
+    overflow: visible;
+    padding: 8px;
+    border: 1px solid rgba(20, 33, 42, 0.08);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.7);
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-stage-multi {
+    grid-column: 1;
+    grid-row: 3;
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-dynamic-metrics {
+    display: grid;
+    grid-column: 2;
+    grid-row: 3;
+    gap: 8px;
+    align-content: start;
+    max-height: 480px;
+    overflow-y: auto;
+    padding-right: 4px;
+    border: 1px solid rgba(20, 33, 42, 0.1);
+    border-radius: 14px;
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-series-toggles .chart-series-toggle {
+    min-height: 38px;
+    margin: 0;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--muted);
+    box-shadow: none;
+    font-size: 0.92rem;
+    justify-content: flex-start;
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-series-toggles .chart-series-toggle:hover {
+    transform: none;
+    border-color: transparent;
+    background: rgba(20, 33, 42, 0.05);
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-series-toggles .chart-series-toggle.is-active {
+    background: var(--accent);
+    color: #ffffff;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-series-toggles .chart-series-toggle.is-hovered {
+    border-color: transparent;
+    background: rgba(20, 33, 42, 0.05);
+    box-shadow: none;
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-series-toggles .chart-series-toggle.is-active.is-hovered {
+    background: var(--accent);
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-series-toggles .chart-series-toggle.is-dimmed {
+    opacity: 1;
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-series-toggles .chart-series-toggle-label {
+    color: inherit;
+    font-size: 0.82rem;
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-series-toggles .chart-series-toggle-value {
+    display: none;
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-caption,
+.chart-widget[data-chart-active-mode="campaigns"] .chart-legend {
+    grid-column: 1 / -1;
 }
 
 .chart-series-toggle {
@@ -3864,14 +3926,6 @@ th {
         grid-template-columns: 1fr;
     }
 
-    .reports-layout {
-        grid-template-columns: 1fr;
-    }
-
-    .reports-side-stack {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
     .report-filter-form {
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
@@ -3902,6 +3956,11 @@ th {
         max-height: none;
         overflow: visible;
         padding-right: 0;
+    }
+
+    .chart-widget[data-chart-active-mode="campaigns"] .chart-dynamic-metrics {
+        grid-column: 1;
+        grid-row: auto;
     }
 
     .segmented-control {
@@ -3957,14 +4016,6 @@ th {
 
     .report-summary-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .reports-side-stack {
-        grid-template-columns: 1fr;
-    }
-
-    .reports-tabs-nav {
-        width: 100%;
     }
 
     .report-analytics-grid {
