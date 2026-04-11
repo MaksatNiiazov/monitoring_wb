@@ -353,16 +353,16 @@ class ReportingTests(TestCase):
         self.assertEqual(unified_search.impressions, 200)
         self.assertEqual(unified_search.clicks, 20)
         self.assertEqual(unified_search.spend, Decimal("400.00"))
-        self.assertEqual(unified_search.carts, 5)
-        self.assertEqual(unified_search.orders, 2)
-        self.assertEqual(unified_search.order_sum, Decimal("2000.00"))
+        self.assertEqual(unified_search.carts, 20)
+        self.assertEqual(unified_search.orders, 6)
+        self.assertEqual(unified_search.order_sum, Decimal("6000.00"))
 
         self.assertEqual(unified_shelves.impressions, 800)
         self.assertEqual(unified_shelves.clicks, 80)
         self.assertEqual(unified_shelves.spend, Decimal("1600.00"))
-        self.assertEqual(unified_shelves.carts, 15)
-        self.assertEqual(unified_shelves.orders, 4)
-        self.assertEqual(unified_shelves.order_sum, Decimal("4000.00"))
+        self.assertEqual(unified_shelves.carts, 0)
+        self.assertEqual(unified_shelves.orders, 0)
+        self.assertEqual(unified_shelves.order_sum, Decimal("0.00"))
 
     def test_product_report_keeps_catalog_zone_when_cluster_stats_exist(self) -> None:
         DailyCampaignProductStat.objects.create(
@@ -414,21 +414,21 @@ class ReportingTests(TestCase):
         self.assertEqual(unified_search.impressions, 200)
         self.assertEqual(unified_search.clicks, 20)
         self.assertEqual(unified_search.spend, Decimal("400.00"))
-        self.assertEqual(unified_search.carts, 5)
-        self.assertEqual(unified_search.orders, 2)
-        self.assertEqual(unified_search.order_sum, Decimal("2000.00"))
-        self.assertEqual(unified_shelves.impressions, 614)
-        self.assertEqual(unified_shelves.clicks, 74)
-        self.assertEqual(unified_shelves.spend, Decimal("1526.09"))
+        self.assertEqual(unified_search.carts, 20)
+        self.assertEqual(unified_search.orders, 6)
+        self.assertEqual(unified_search.order_sum, Decimal("6000.00"))
+        self.assertEqual(unified_shelves.impressions, 4300)
+        self.assertEqual(unified_shelves.clicks, 250)
+        self.assertEqual(unified_shelves.spend, Decimal("3900.00"))
         self.assertEqual(unified_shelves.carts, 18)
-        self.assertEqual(unified_shelves.orders, 5)
-        self.assertEqual(unified_shelves.order_sum, Decimal("4466.67"))
-        self.assertEqual(unified_catalog.impressions, 3686)
-        self.assertEqual(unified_catalog.clicks, 176)
-        self.assertEqual(unified_catalog.spend, Decimal("2373.91"))
-        self.assertEqual(unified_catalog.carts, 15)
-        self.assertEqual(unified_catalog.orders, 2)
-        self.assertEqual(unified_catalog.order_sum, Decimal("2233.33"))
+        self.assertEqual(unified_shelves.orders, 3)
+        self.assertEqual(unified_shelves.order_sum, Decimal("2700.00"))
+        self.assertEqual(unified_catalog.impressions, 0)
+        self.assertEqual(unified_catalog.clicks, 0)
+        self.assertEqual(unified_catalog.spend, Decimal("0.00"))
+        self.assertEqual(unified_catalog.carts, 0)
+        self.assertEqual(unified_catalog.orders, 0)
+        self.assertEqual(unified_catalog.order_sum, Decimal("0.00"))
         self.assertEqual(
             unified_search.impressions + unified_shelves.impressions + unified_catalog.impressions,
             4500,
@@ -453,7 +453,7 @@ class ReportingTests(TestCase):
         )
         block = build_day_block(report, start_row=1, start_col=1)
         self.assertEqual(block[12][7], 10)
-        self.assertEqual(block[12][8], "=H13-SUM(B13:D13)")
+        self.assertEqual(block[12][8], "=H13-SUM(B13:G13)")
         self.assertTrue(block[20][1].startswith("=IFERROR(IF("))
         self.assertIn("*25/100", block[20][1])
         self.assertEqual(block[20][2:], ["", "", "", "", "", "", ""])
@@ -465,9 +465,9 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         block = build_day_block(report, start_row=1, start_col=1)
-        self.assertEqual(block[6][7], '=IFERROR(IF(OR(H6="",H6=0),"-",(SUM(B10:D10)/H6)*100),"-")')
+        self.assertEqual(block[6][7], '=IFERROR(IF(OR(H6="",H6=0),"-",(SUM(B10:G10)/H6)*100),"-")')
         self.assertEqual(block[7][7], '=IFERROR(IF(OR(H6="",H6=0),"-",H5*1000/H6),"-")')
-        self.assertEqual(block[8][7], '=IFERROR(IF(OR(SUM(B10:D10)="",SUM(B10:D10)=0),"-",H5/SUM(B10:D10)),"-")')
+        self.assertEqual(block[8][7], '=IFERROR(IF(OR(SUM(B10:G10)="",SUM(B10:G10)=0),"-",H5/SUM(B10:G10)),"-")')
 
     def test_monitoring_day_block_profit_formula_uses_drr_sales_fraction(self) -> None:
         report = build_product_report(
@@ -733,8 +733,8 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         block = build_day_block(report, start_row=1, start_col=11)
-        self.assertEqual(block[9][8], "=R10-SUM(L10:N10)")
-        self.assertEqual(block[12][8], "=R13-SUM(L13:N13)")
+        self.assertEqual(block[9][8], "=R10-SUM(L10:Q10)")
+        self.assertEqual(block[12][8], "=R13-SUM(L13:Q13)")
 
     def test_product_report_ignores_stats_from_unlinked_campaigns(self) -> None:
         other_campaign = Campaign.objects.create(

@@ -203,6 +203,25 @@ def derive_order_sum_from_orders(source: MetricCell, target_orders: int) -> Deci
     return quantize_money(average_order_sum * Decimal(target_orders))
 
 
+def apply_search_cluster_override(source: MetricCell, cluster_rows: list[DailyCampaignSearchClusterStat]) -> MetricCell:
+    cell = clone_metric_cell(source)
+    cluster = metric_cell_from_search_clusters(cluster_rows)
+    cell.impressions = cluster.impressions
+    cell.clicks = cluster.clicks
+    cell.spend = cluster.spend
+    # Search-cluster rows are reliable for traffic, but can lag behind on
+    # conversion metrics. Keep the legacy zone values as a floor so we do not
+    # erase carts/orders/order_sum from the product-stat slice.
+    cell.carts = max(cell.carts, cluster.carts)
+    cell.orders = max(cell.orders, cluster.orders)
+    cell.units = max(cell.units, cluster.units)
+    cell.order_sum = max(
+        decimalize(cell.order_sum),
+        derive_order_sum_from_orders(source, cluster.orders),
+    )
+    return cell
+
+
 def subtract_metric_cells(total: MetricCell, part: MetricCell) -> MetricCell:
     return MetricCell(
         impressions=max(total.impressions - part.impressions, 0),
@@ -757,22 +776,12 @@ def build_product_report(
         legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
         legacy_shelves = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
         legacy_catalog = legacy_cells.get((group, CampaignZone.CATALOG), MetricCell())
-        search = clone_metric_cell(legacy_search)
-        search_cluster = metric_cell_from_search_clusters(cluster_rows)
-        search.impressions = search_cluster.impressions
-        search.clicks = search_cluster.clicks
-        search.spend = search_cluster.spend
-        search.carts = search_cluster.carts
-        search.orders = search_cluster.orders
-        search.units = search_cluster.units
-        search.order_sum = derive_order_sum_from_orders(legacy_search, search_cluster.orders)
+        search = apply_search_cluster_override(legacy_search, cluster_rows)
         search = clamp_metric_cell_to_total(search, total)
-        # In the reference sheet the standard-bid block is effectively split into
-        # search vs. the remaining non-search traffic, without surfacing a
-        # separate unified "catalog" slice. Keeping the whole remainder in
-        # shelves makes the matrix much closer to the business expectation and
-        # avoids unstable re-splitting based on legacy appType buckets.
         non_search_total = subtract_metric_cells(total, search)
+        # The business matrix keeps the whole non-search unified remainder inside
+        # the "Полки" column. This matches the reference sheet much better than a
+        # second split between shelves and catalog.
         return search, non_search_total, MetricCell()
 
     def resolve_search_catalog_group_cells(group: str) -> tuple[MetricCell, MetricCell]:
@@ -781,15 +790,7 @@ def build_product_report(
         legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
         legacy_recommendation = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
         if cluster_rows:
-            search = clone_metric_cell(legacy_search)
-            search_cluster = metric_cell_from_search_clusters(cluster_rows)
-            search.impressions = search_cluster.impressions
-            search.clicks = search_cluster.clicks
-            search.spend = search_cluster.spend
-            search.carts = search_cluster.carts
-            search.orders = search_cluster.orders
-            search.units = search_cluster.units
-            search.order_sum = derive_order_sum_from_orders(legacy_search, search_cluster.orders)
+            search = apply_search_cluster_override(legacy_search, cluster_rows)
         else:
             search = clone_metric_cell(legacy_search)
         # Manual-search campaigns have only Search/Catalog columns in the matrix.
