@@ -248,8 +248,9 @@
                     node.setAttribute("opacity", isDimmed ? "0.3" : "1");
                 });
                 group.querySelectorAll("[data-chart-series-label]").forEach((node) => {
-                    node.setAttribute("opacity", isDimmed ? "0.34" : "1");
-                    node.setAttribute("font-size", isHovered ? "11" : "10");
+                    const labelOpacity = hasHover ? (isHovered ? "1" : "0.45") : "0.88";
+                    node.setAttribute("opacity", labelOpacity);
+                    node.setAttribute("font-size", isHovered ? "14" : "12");
                 });
             });
         }
@@ -913,9 +914,13 @@
                                             y: textY,
                                             "text-anchor": "middle",
                                             fill: series.color,
-                                            "font-size": 10,
-                                            "font-weight": 700,
+                                            "font-size": 12,
+                                            "font-weight": 800,
                                             "font-family": "Aptos, Bahnschrift, Segoe UI, sans-serif",
+                                            stroke: "rgba(255,255,255,0.96)",
+                                            "stroke-width": 4,
+                                            "paint-order": "stroke",
+                                            opacity: 0.88,
                                             "data-chart-series-label": "",
                                         },
                                         formatInlineValue(series.values[index], series.format)

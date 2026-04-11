@@ -1601,6 +1601,76 @@ class ProductOperationsTests(TestCase):
         self.assertTrue(any(card["label"] == "Р СѓС‡. РєР°С‚Р°Р»РѕРі" for card in report["traffic_cards"]))
         self.assertTrue(any(alert["tone"] == "info" for alert in report["alerts"]))
 
+    def test_table_and_export_organic_rows_subtract_manual_campaign_metrics(self) -> None:
+        product = Product.objects.create(
+            nm_id=456790,
+            title="Manual organic check",
+            vendor_code="MAN-ORG",
+            buyout_percent=Decimal("24.00"),
+            unit_cost=Decimal("1500.00"),
+            logistics_cost=Decimal("336.00"),
+        )
+        ProductEconomicsVersion.objects.create(
+            product=product,
+            effective_from=date(2026, 3, 1),
+            buyout_percent=Decimal("24.00"),
+            unit_cost=Decimal("1500.00"),
+            logistics_cost=Decimal("336.00"),
+        )
+        DailyProductMetrics.objects.create(
+            product=product,
+            stats_date=date(2026, 3, 16),
+            open_count=40,
+            add_to_cart_count=10,
+            order_count=4,
+            order_sum=Decimal("8000.00"),
+        )
+        DailyProductStock.objects.create(
+            product=product,
+            stats_date=date(2026, 3, 16),
+            total_stock=50,
+        )
+        campaign = Campaign.objects.create(
+            external_id=99887767,
+            name="Manual catalog organic",
+            monitoring_group=CampaignMonitoringGroup.MANUAL_CATALOG,
+        )
+        campaign.products.add(product)
+        DailyCampaignProductStat.objects.create(
+            campaign=campaign,
+            product=product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.CATALOG,
+            impressions=350,
+            clicks=30,
+            spend=Decimal("450.00"),
+            add_to_cart_count=6,
+            order_count=2,
+            order_sum=Decimal("2100.00"),
+        )
+
+        report = build_product_report(
+            product=product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 16),
+            create_note=False,
+        )
+        table_rows = build_day_block(report, start_row=1, start_col=1)
+        export_rows_data = exporter_rows(report)
+
+        table_rows_by_label = {row[0]: row for row in table_rows if row and row[0]}
+        export_rows_by_label = {row[0]: row for row in export_rows_data if row and row[0]}
+
+        self.assertEqual(table_rows_by_label["Клики"][8], "=H10-SUM(B10:G10)")
+        self.assertEqual(table_rows_by_label["Корзины"][8], "=H11-SUM(B11:G11)")
+        self.assertEqual(table_rows_by_label["Заказы"][8], "=H13-SUM(B13:G13)")
+        self.assertEqual(table_rows_by_label["Заказы (руб.)"][8], "=H15-SUM(B15:G15)")
+
+        self.assertEqual(export_rows_by_label["Клики"][8], "10")
+        self.assertEqual(export_rows_by_label["Корзины"][8], "4")
+        self.assertEqual(export_rows_by_label["Заказы"][8], "2")
+        self.assertEqual(export_rows_by_label["Заказы (руб.)"][8], "5900")
+
     def test_add_product_redirects_to_next_when_provided(self) -> None:
         with patch("monitoring.views.refresh_product_metadata"):
             response = self.client.post(

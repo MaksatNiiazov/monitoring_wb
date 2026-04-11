@@ -167,6 +167,8 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
     total_ad_spend = decimalize(total_ad.spend)
     total_ad_impressions = total_ad.impressions
     total_ad_clicks = total_ad.clicks
+    total_ad_carts = total_ad.carts
+    total_ad_orders = total_ad.orders
     total_ad_order_sum = decimalize(total_ad.order_sum)
 
     def pick(metric_name: str) -> list[str]:
@@ -270,10 +272,10 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
     overall_carts = metrics.add_to_cart_count if metrics else 0
     overall_orders = metrics.order_count if metrics else 0
     overall_order_sum = decimalize(metrics.order_sum if metrics else 0)
-    organic_clicks = max(overall_clicks - unified_clicks, 0)
-    organic_carts = max(overall_carts - unified_carts, 0)
-    organic_orders = max(overall_orders - unified_orders, 0)
-    organic_order_sum = max(overall_order_sum - unified_order_sum, Decimal("0.00"))
+    organic_clicks = max(overall_clicks - total_ad_clicks, 0)
+    organic_carts = max(overall_carts - total_ad_carts, 0)
+    organic_orders = max(overall_orders - total_ad_orders, 0)
+    organic_order_sum = max(overall_order_sum - total_ad_order_sum, Decimal("0.00"))
     conversion_cart = safe_divide(decimalize(overall_carts) * 100, overall_clicks)
     conversion_order = safe_divide(decimalize(overall_orders) * 100, overall_carts)
     estimated_buyout_overall = estimate_buyout_sum(economics, overall_order_sum)
