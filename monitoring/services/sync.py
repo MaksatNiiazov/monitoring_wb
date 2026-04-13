@@ -412,45 +412,65 @@ def refresh_campaigns_metadata(
             _apply_campaign_metadata_payload(campaign, payload)
 
 
-def upsert_product_metrics(*, product: Product, stats_date: date, history_entry: dict[str, Any], currency: str, overwrite: bool) -> None:
-    defaults = {
-        "open_count": history_entry.get("openCount", 0),
-        "add_to_cart_count": history_entry.get("cartCount", 0),
-        "order_count": history_entry.get("orderCount", 0),
-        "order_sum": quantize_money(decimalize(history_entry.get("orderSum"))),
-        "buyout_count": history_entry.get("buyoutCount", 0),
-        "buyout_sum": quantize_money(decimalize(history_entry.get("buyoutSum"))),
-        "add_to_wishlist_count": history_entry.get("addToWishlistCount", 0),
-        "currency": currency,
-        "raw_payload": history_entry,
-    }
+def _upsert(
+    model,
+    *,
+    lookup: dict,
+    defaults: dict,
+    overwrite: bool,
+    bulk_create: bool = False,
+) -> Any | None:
+    """Универсальный upsert: update_or_create при overwrite, иначе get_or_create."""
     if overwrite:
-        DailyProductMetrics.objects.update_or_create(product=product, stats_date=stats_date, defaults=defaults)
-    else:
-        DailyProductMetrics.objects.get_or_create(product=product, stats_date=stats_date, defaults=defaults)
+        if bulk_create:
+            return None  # caller сам делает bulk_create
+        obj, _ = model.objects.update_or_create(**lookup, defaults=defaults)
+        return obj
+    obj, _ = model.objects.get_or_create(**lookup, defaults=defaults)
+    return obj
+
+
+def upsert_product_metrics(*, product: Product, stats_date: date, history_entry: dict[str, Any], currency: str, overwrite: bool) -> None:
+    _upsert(
+        DailyProductMetrics,
+        lookup={"product": product, "stats_date": stats_date},
+        defaults={
+            "open_count": history_entry.get("openCount", 0),
+            "add_to_cart_count": history_entry.get("cartCount", 0),
+            "order_count": history_entry.get("orderCount", 0),
+            "order_sum": quantize_money(decimalize(history_entry.get("orderSum"))),
+            "buyout_count": history_entry.get("buyoutCount", 0),
+            "buyout_sum": quantize_money(decimalize(history_entry.get("buyoutSum"))),
+            "add_to_wishlist_count": history_entry.get("addToWishlistCount", 0),
+            "currency": currency,
+            "raw_payload": history_entry,
+        },
+        overwrite=overwrite,
+    )
 
 
 def upsert_product_stock(*, product: Product, stats_date: date, item_payload: dict[str, Any], overwrite: bool) -> None:
     metrics = item_payload.get("metrics") or {}
     avg_orders_per_day = extract_avg_orders(item_payload)
-    defaults = {
-        "total_stock": metrics.get("stockCount", 0),
-        "in_way_to_client": metrics.get("toClientCount", 0),
-        "in_way_from_client": metrics.get("fromClientCount", 0),
-        "avg_orders_per_day": quantize_money(avg_orders_per_day),
-        "days_until_zero": quantize_money(
-            compute_days_until_zero(
-                total_stock=int(metrics.get("stockCount") or 0),
-                avg_orders_per_day=avg_orders_per_day,
-            )
-        ),
-        "currency": item_payload.get("currency", "RUB"),
-        "raw_payload": item_payload,
-    }
-    if overwrite:
-        DailyProductStock.objects.update_or_create(product=product, stats_date=stats_date, defaults=defaults)
-    else:
-        DailyProductStock.objects.get_or_create(product=product, stats_date=stats_date, defaults=defaults)
+    _upsert(
+        DailyProductStock,
+        lookup={"product": product, "stats_date": stats_date},
+        defaults={
+            "total_stock": metrics.get("stockCount", 0),
+            "in_way_to_client": metrics.get("toClientCount", 0),
+            "in_way_from_client": metrics.get("fromClientCount", 0),
+            "avg_orders_per_day": quantize_money(avg_orders_per_day),
+            "days_until_zero": quantize_money(
+                compute_days_until_zero(
+                    total_stock=int(metrics.get("stockCount") or 0),
+                    avg_orders_per_day=avg_orders_per_day,
+                )
+            ),
+            "currency": item_payload.get("currency", "RUB"),
+            "raw_payload": item_payload,
+        },
+        overwrite=overwrite,
+    )
 
 
 def iter_size_payloads(sizes_payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -545,6 +565,29 @@ def aggregate_offices_from_sizes(sizes_payload: dict[str, Any]) -> list[dict[str
     return list(aggregated.values())
 
 
+def _get_or_create_warehouse(
+    office_id: int,
+    office_name: str,
+    region_name: str,
+    warehouse_cache: dict[int, Warehouse] | None,
+) -> Warehouse:
+    """Получить или создать склад с кэшированием."""
+    if warehouse_cache and office_id in warehouse_cache:
+        wh = warehouse_cache[office_id]
+        if wh.name != office_name or wh.region_name != region_name:
+            wh.name = office_name
+            wh.region_name = region_name
+            wh.save(update_fields=["name", "region_name", "updated_at"])
+        return wh
+    wh, _ = Warehouse.objects.update_or_create(
+        office_id=office_id,
+        defaults={"name": office_name, "region_name": region_name},
+    )
+    if warehouse_cache is not None:
+        warehouse_cache[office_id] = wh
+    return wh
+
+
 def upsert_warehouse_stocks(
     *,
     product: Product,
@@ -556,29 +599,19 @@ def upsert_warehouse_stocks(
     offices = aggregate_offices_from_sizes(sizes_payload)
     if overwrite:
         DailyWarehouseStock.objects.filter(product=product, stats_date=stats_date).delete()
+
     rows_to_create: list[DailyWarehouseStock] = []
     for office in offices:
-        metrics = office.get("metrics") or {}
         office_id = int(office.get("officeID") or 0)
         if office_id <= 0:
             continue
-        office_name = office.get("officeName") or "Маркетплейс"
-        region_name = office.get("regionName") or ""
-        warehouse = warehouse_cache.get(office_id) if warehouse_cache is not None else None
-        if warehouse is None:
-            warehouse, _ = Warehouse.objects.update_or_create(
-                office_id=office_id,
-                defaults={
-                    "name": office_name,
-                    "region_name": region_name,
-                },
-            )
-            if warehouse_cache is not None:
-                warehouse_cache[office_id] = warehouse
-        elif warehouse.name != office_name or warehouse.region_name != region_name:
-            warehouse.name = office_name
-            warehouse.region_name = region_name
-            warehouse.save(update_fields=["name", "region_name", "updated_at"])
+        metrics = office.get("metrics") or {}
+        warehouse = _get_or_create_warehouse(
+            office_id,
+            office.get("officeName") or "Маркетплейс",
+            office.get("regionName") or "",
+            warehouse_cache,
+        )
         defaults = {
             "stock_count": metrics.get("stockCount", 0),
             "in_way_to_client": metrics.get("toClientCount", 0),
@@ -606,6 +639,97 @@ def upsert_warehouse_stocks(
         DailyWarehouseStock.objects.bulk_create(rows_to_create, batch_size=500)
 
 
+def _aggregate_campaign_day_stats(
+    day_payload: dict[str, Any],
+    *,
+    product_map: dict[int, Product],
+    linked_product_ids: set[int],
+) -> dict[tuple[int, str], dict[str, Any]]:
+    """Агрегирует статистику кампании за день по продуктам и зонам."""
+    aggregated: dict[tuple[int, str], dict[str, Any]] = {}
+    for app_payload in day_payload.get("apps", []):
+        app_type = app_payload.get("appType")
+        zone = map_app_type_to_zone(app_type)
+        for item in app_payload.get("nms", []):
+            product = product_map.get(item.get("nmId"))
+            if not product:
+                continue
+            if linked_product_ids and product.id not in linked_product_ids:
+                continue
+            key = (product.id, zone)
+            row = aggregated.setdefault(
+                key,
+                {
+                    "impressions": 0,
+                    "clicks": 0,
+                    "spend": Decimal("0"),
+                    "add_to_cart_count": 0,
+                    "order_count": 0,
+                    "units_ordered": 0,
+                    "order_sum": Decimal("0"),
+                    "raw_payload": [],
+                },
+            )
+            row["impressions"] += int(item.get("views") or 0)
+            row["clicks"] += int(item.get("clicks") or 0)
+            row["spend"] += decimalize(item.get("sum"))
+            row["add_to_cart_count"] += int(item.get("atbs") or 0)
+            row["order_count"] += int(item.get("orders") or 0)
+            row["units_ordered"] += int(item.get("shks") or 0)
+            row["order_sum"] += decimalize(item.get("sum_price"))
+            row["raw_payload"].append({"appType": app_type, "item": item})
+    return aggregated
+
+
+def _save_campaign_stats(
+    aggregated: dict[tuple[int, str], dict[str, Any]],
+    *,
+    campaign: Campaign,
+    stats_date: date,
+    overwrite: bool,
+) -> None:
+    """Сохраняет агрегированную статистику кампании."""
+    if overwrite:
+        rows_to_create = [
+            DailyCampaignProductStat(
+                campaign=campaign,
+                product_id=product_id,
+                stats_date=stats_date,
+                zone=zone,
+                impressions=row["impressions"],
+                clicks=row["clicks"],
+                spend=quantize_money(row["spend"]),
+                add_to_cart_count=row["add_to_cart_count"],
+                order_count=row["order_count"],
+                units_ordered=row["units_ordered"],
+                order_sum=quantize_money(row["order_sum"]),
+                raw_payload={"items": row["raw_payload"]},
+            )
+            for (product_id, zone), row in aggregated.items()
+        ]
+        if rows_to_create:
+            DailyCampaignProductStat.objects.bulk_create(rows_to_create, batch_size=500)
+        return
+
+    for (product_id, zone), row in aggregated.items():
+        DailyCampaignProductStat.objects.get_or_create(
+            campaign=campaign,
+            product_id=product_id,
+            stats_date=stats_date,
+            zone=zone,
+            defaults={
+                "impressions": row["impressions"],
+                "clicks": row["clicks"],
+                "spend": quantize_money(row["spend"]),
+                "add_to_cart_count": row["add_to_cart_count"],
+                "order_count": row["order_count"],
+                "units_ordered": row["units_ordered"],
+                "order_sum": quantize_money(row["order_sum"]),
+                "raw_payload": {"items": row["raw_payload"]},
+            },
+        )
+
+
 def upsert_campaign_stats(
     *,
     product_map: dict[int, Product],
@@ -619,99 +743,28 @@ def upsert_campaign_stats(
     campaign = campaign_map.get(stat_payload.get("advertId"))
     if not campaign:
         return
+
     linked_product_ids = (
-        linked_products_by_campaign_id.get(campaign.id, set()) if linked_products_by_campaign_id is not None else set()
+        linked_products_by_campaign_id.get(campaign.id, set())
+        if linked_products_by_campaign_id is not None
+        else set(campaign.products.values_list("id", flat=True))
     )
-    if linked_products_by_campaign_id is None:
-        linked_product_ids = set(campaign.products.values_list("id", flat=True))
-    tracked_ids = tracked_product_ids if tracked_product_ids is not None else [product.id for product in product_map.values()]
+    tracked_ids = tracked_product_ids if tracked_product_ids is not None else [p.id for p in product_map.values()]
+
     for day_payload in stat_payload.get("days", []):
         stats_date = datetime.fromisoformat(day_payload.get("date", "").replace("Z", "+00:00")).date()
         if allowed_dates is not None and stats_date not in allowed_dates:
             continue
+
         if overwrite and tracked_ids:
             DailyCampaignProductStat.objects.filter(
-                campaign=campaign,
-                stats_date=stats_date,
-                product_id__in=tracked_ids,
+                campaign=campaign, stats_date=stats_date, product_id__in=tracked_ids
             ).delete()
-        aggregated_rows: dict[tuple[int, str], dict[str, Any]] = {}
-        for app_payload in day_payload.get("apps", []):
-            app_type = app_payload.get("appType")
-            zone = map_app_type_to_zone(app_type)
-            for item in app_payload.get("nms", []):
-                product = product_map.get(item.get("nmId"))
-                if not product:
-                    continue
-                if linked_product_ids and product.id not in linked_product_ids:
-                    continue
-                key = (product.id, zone)
-                row = aggregated_rows.setdefault(
-                    key,
-                    {
-                        "impressions": 0,
-                        "clicks": 0,
-                        "spend": Decimal("0"),
-                        "add_to_cart_count": 0,
-                        "order_count": 0,
-                        "units_ordered": 0,
-                        "order_sum": Decimal("0"),
-                        "raw_payload": [],
-                    },
-                )
-                row["impressions"] += int(item.get("views") or 0)
-                row["clicks"] += int(item.get("clicks") or 0)
-                row["spend"] += decimalize(item.get("sum"))
-                row["add_to_cart_count"] += int(item.get("atbs") or 0)
-                row["order_count"] += int(item.get("orders") or 0)
-                row["units_ordered"] += int(item.get("shks") or 0)
-                row["order_sum"] += decimalize(item.get("sum_price"))
-                row["raw_payload"].append(
-                    {
-                        "appType": app_type,
-                        "item": item,
-                    }
-                )
 
-        if overwrite:
-            rows_to_create: list[DailyCampaignProductStat] = []
-            for (product_id, zone), row in aggregated_rows.items():
-                rows_to_create.append(
-                    DailyCampaignProductStat(
-                        campaign=campaign,
-                        product_id=product_id,
-                        stats_date=stats_date,
-                        zone=zone,
-                        impressions=row["impressions"],
-                        clicks=row["clicks"],
-                        spend=quantize_money(row["spend"]),
-                        add_to_cart_count=row["add_to_cart_count"],
-                        order_count=row["order_count"],
-                        units_ordered=row["units_ordered"],
-                        order_sum=quantize_money(row["order_sum"]),
-                        raw_payload={"items": row["raw_payload"]},
-                    )
-                )
-            if rows_to_create:
-                DailyCampaignProductStat.objects.bulk_create(rows_to_create, batch_size=500)
-        else:
-            for (product_id, zone), row in aggregated_rows.items():
-                DailyCampaignProductStat.objects.get_or_create(
-                    campaign=campaign,
-                    product_id=product_id,
-                    stats_date=stats_date,
-                    zone=zone,
-                    defaults={
-                        "impressions": row["impressions"],
-                        "clicks": row["clicks"],
-                        "spend": quantize_money(row["spend"]),
-                        "add_to_cart_count": row["add_to_cart_count"],
-                        "order_count": row["order_count"],
-                        "units_ordered": row["units_ordered"],
-                        "order_sum": quantize_money(row["order_sum"]),
-                        "raw_payload": {"items": row["raw_payload"]},
-                    },
-                )
+        aggregated = _aggregate_campaign_day_stats(
+            day_payload, product_map=product_map, linked_product_ids=linked_product_ids
+        )
+        _save_campaign_stats(aggregated, campaign=campaign, stats_date=stats_date, overwrite=overwrite)
 
 
 def fetch_negative_feedback_count(*, feedback_client: FeedbacksWBClient, product: Product, stats_date: date) -> int:

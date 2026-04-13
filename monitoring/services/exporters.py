@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from decimal import Decimal
 
@@ -157,13 +157,9 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
     )
     unified_impressions = unified_search.impressions + unified_shelves.impressions + unified_catalog.impressions
     unified_clicks = unified_search.clicks + unified_shelves.clicks + unified_catalog.clicks
-    unified_carts = unified_search.carts + unified_shelves.carts + unified_catalog.carts
-    unified_orders = unified_search.orders + unified_shelves.orders + unified_catalog.orders
-    unified_order_sum = (
-        decimalize(unified_search.order_sum)
-        + decimalize(unified_shelves.order_sum)
-        + decimalize(unified_catalog.order_sum)
-    )
+    unified_carts = total_ad.carts  # Используем сумму всех рекламных кампаний
+    unified_orders = total_ad.orders
+    unified_order_sum = decimalize(total_ad.order_sum)
     total_ad_spend = decimalize(total_ad.spend)
     total_ad_impressions = total_ad.impressions
     total_ad_clicks = total_ad.clicks
@@ -174,7 +170,8 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
     def pick(metric_name: str) -> list[str]:
         values: list[str] = []
         for index, cell in enumerate(columns):
-            if not active_columns[index]:
+            # Проверяем и группу, и конкретную ячейку (чтобы пустые колонки не показывались)
+            if not active_columns[index] or not has_metric_cell_data(cell):
                 values.append("")
                 continue
             value = getattr(cell, metric_name)
@@ -185,7 +182,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
         return values
 
     def unified_traffic_value(cell) -> str:
-        if unified_impressions <= 0:
+        if not has_metric_cell_data(cell) or unified_impressions <= 0:
             return ""
         return format_percent(cell.traffic_share(unified_impressions))
 
@@ -342,12 +339,12 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             format_ratio(total_ad_spend, total_ad_clicks),
             "-",
         ],
-        ["Клики", *pick("clicks"), format_int(overall_clicks), format_int(organic_clicks)],
-        ["Корзины", *pick("carts"), format_int(overall_carts), format_int(organic_carts)],
-        ["Конверсия в корзину (%)", "", "", "", "", "", "", format_percent_ratio(overall_carts, overall_clicks), ""],
-        ["Заказы", *pick("orders"), format_int(overall_orders), format_int(organic_orders)],
-        ["Конверсия в заказ (%)", "", "", "", "", "", "", format_percent_ratio(overall_orders, overall_carts), ""],
-        ["Заказы (руб.)", *pick("order_sum"), format_decimal(overall_order_sum), format_decimal(organic_order_sum)],
+        ["Клики", *pick("clicks"), format_int(total_ad_clicks), format_int(overall_clicks)],
+        ["Корзины", *pick("carts"), format_int(total_ad_carts), format_int(overall_carts)],
+        ["Конверсия в корзину (%)", "", "", "", "", "", "", format_percent_ratio(total_ad_carts, total_ad_clicks), format_percent_ratio(overall_carts, overall_clicks)],
+        ["Заказы", *pick("orders"), format_int(total_ad_orders), format_int(overall_orders)],
+        ["Конверсия в заказ (%)", "", "", "", "", "", "", format_percent_ratio(total_ad_orders, total_ad_carts), format_percent_ratio(overall_orders, overall_carts)],
+        ["Заказы (руб.)", *pick("order_sum"), format_decimal(total_ad_order_sum), format_decimal(overall_order_sum)],
         [
             "Выкупы ≈ (руб.)",
             derived_decimal(unified_search, estimate_buyout_sum(economics, unified_search.order_sum)),

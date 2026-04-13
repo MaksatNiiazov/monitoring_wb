@@ -80,55 +80,35 @@ def monitoring_sheet_title(product: Product) -> str:
     return normalize_title(base)
 
 
-def _money(value: Decimal | int | float | str | None) -> float:
-    return float(decimalize(value).quantize(Decimal("0.01")))
-
-
-def _percent_points(value: Decimal | int | float | str | None) -> Decimal:
+def _money(value: Decimal | int | float | str | None, optional: bool = False) -> float | str:
+    """Форматирование денежного значения. optional=True возвращает '' для нуля."""
     number = decimalize(value)
-    if number == 0:
-        return number
-    if Decimal("-1") <= number <= Decimal("1"):
-        return number * Decimal("100")
-    return number
+    if optional and number == 0:
+        return ""
+    return float(number.quantize(Decimal("0.01")))
 
 
-def _fraction(value: Decimal | int | float | str | None) -> float:
-    return float((_percent_points(value) / Decimal("100")).quantize(Decimal("0.0001")))
+def _int(value: Decimal | int | float | str | None, optional: bool = False) -> int | str:
+    """Форматирование целого. optional=True возвращает '' для нуля."""
+    number = decimalize(value)
+    if optional and number == 0:
+        return ""
+    return int(number)
 
 
-def _int(value: Decimal | int | float | str | None) -> int:
-    return int(decimalize(value))
+def _fraction(value: Decimal | int | float | str | None, optional: bool = False) -> float | str:
+    """Форматирование доли (0-1 → 0-100%). optional=True возвращает '' для нуля."""
+    number = decimalize(value)
+    # Нормализуем: если значение между -1 и 1 (не включая 0), умножаем на 100
+    if Decimal("-1") < number < Decimal("1") and number != 0:
+        number = number * Decimal("100")
+    if optional and number == 0:
+        return ""
+    return float((number / Decimal("100")).quantize(Decimal("0.0001")))
 
 
-def _bool_label(value: bool) -> str:
+def _bool(value: bool) -> str:
     return "Да" if value else "Нет"
-
-
-def _optional_money(value: Decimal | int | float | str | None) -> float | str:
-    number = decimalize(value)
-    if number == 0:
-        return ""
-    return _money(number)
-
-
-def _optional_fraction(value: Decimal | int | float | str | None) -> float | str:
-    number = decimalize(value)
-    if number == 0:
-        return ""
-    return _fraction(number)
-
-
-def _keyword_int(value: int | None, *, has_data: bool) -> int | str:
-    if value is None and not has_data:
-        return ""
-    return _int(value or 0)
-
-
-def _keyword_money(value: Decimal | int | float | str | None, *, has_data: bool) -> float | str:
-    if value is None and not has_data:
-        return ""
-    return _money(value or 0)
 
 
 def _keyword_offset(keyword_rows: list[dict[str, Any]]) -> int:
@@ -201,7 +181,7 @@ def _spp_delta_parts(
     if delta == 0:
         return ("Без изменений", "")
     label = "Вырос на" if delta > 0 else "Упал на"
-    return (label, _optional_fraction(delta.copy_abs()))
+    return (label, _fraction(delta.copy_abs(), optional=True))
 
 
 def build_day_block(
@@ -219,6 +199,7 @@ def build_day_block(
     negative_feedback_value = (note.negative_feedback or "").strip() or "Без изменений"
 
     blocks = report["blocks"]
+    total_ad = report["total_ad"]
     unified_search = blocks["unified_search"]
     unified_shelves = blocks["unified_shelves"]
     unified_catalog = blocks["unified_catalog"]
@@ -252,18 +233,15 @@ def build_day_block(
     )
     unified_impressions = unified_search.impressions + unified_shelves.impressions + unified_catalog.impressions
     unified_clicks = unified_search.clicks + unified_shelves.clicks + unified_catalog.clicks
-    unified_carts = unified_search.carts + unified_shelves.carts + unified_catalog.carts
-    unified_orders = unified_search.orders + unified_shelves.orders + unified_catalog.orders
-    unified_order_sum = (
-        decimalize(unified_search.order_sum)
-        + decimalize(unified_shelves.order_sum)
-        + decimalize(unified_catalog.order_sum)
-    )
+    unified_carts = total_ad.carts  # Используем сумму всех рекламных кампаний
+    unified_orders = total_ad.orders
+    unified_order_sum = decimalize(total_ad.order_sum)
 
     def pick_numbers(metric_name: str) -> list[int | float | str]:
         values: list[int | float | str] = []
         for index, cell in enumerate(columns):
-            if not active_columns[index]:
+            # Проверяем и группу, и конкретную ячейку (чтобы пустые колонки не показывались)
+            if not active_columns[index] or not has_metric_cell_data(cell):
                 values.append("")
                 continue
             value = getattr(cell, metric_name)
@@ -275,7 +253,7 @@ def build_day_block(
 
     def unified_traffic_value(relative_col: int) -> float | str:
         cell = columns[relative_col - 2]
-        if unified_impressions <= 0:
+        if not has_metric_cell_data(cell) or unified_impressions <= 0:
             return ""
         return _fraction(decimalize(cell.impressions) * Decimal("100") / decimalize(unified_impressions))
 
@@ -384,10 +362,10 @@ def build_day_block(
         return f"=(({'+'.join(refs)})/{len(refs)})"
 
     def average_stock_drop_value() -> float | str:
-        return _optional_money(report["avg_stock_drop_per_day"])
+        return _money(report["avg_stock_drop_per_day"], optional=True)
 
     def days_until_zero_value() -> float | str:
-        return _optional_money(report["days_until_zero_from_stock_drop"])
+        return _money(report["days_until_zero_from_stock_drop"], optional=True)
 
     spp_delta_label, spp_delta_value = _spp_delta_parts(report, previous_report)
     spp_delta_text = spp_delta_value or spp_delta_label
@@ -442,12 +420,12 @@ def build_day_block(
             safe_divide_formula(row_value_ref(5, 8), f"SUM({row_value_ref(10, 2)}:{row_value_ref(10, 7)})"),
             "-",
         ],
-        ["Клики", *pick_numbers("clicks"), _int(metrics.open_count if metrics else 0), f'={row_value_ref(10, 8)}-SUM({row_value_ref(10, 2)}:{row_value_ref(10, 7)})'],
-        ["Корзины", *pick_numbers("carts"), _int(metrics.add_to_cart_count if metrics else 0), f'={row_value_ref(11, 8)}-SUM({row_value_ref(11, 2)}:{row_value_ref(11, 7)})'],
-        ["Конверсия в корзину (%)", "", "", "", "", "", "", safe_divide_formula(row_value_ref(11, 8), row_value_ref(10, 8), scale=100), ""],
-        ["Заказы", *pick_numbers("orders"), _int(metrics.order_count if metrics else 0), f'={row_value_ref(13, 8)}-SUM({row_value_ref(13, 2)}:{row_value_ref(13, 7)})'],
-        ["Конверсия в заказ (%)", "", "", "", "", "", "", safe_divide_formula(row_value_ref(13, 8), row_value_ref(11, 8), scale=100), ""],
-        ["Заказы (руб.)", *pick_numbers("order_sum"), _money(metrics.order_sum if metrics else 0), f'={row_value_ref(15, 8)}-SUM({row_value_ref(15, 2)}:{row_value_ref(15, 7)})'],
+        ["Клики", *pick_numbers("clicks"), f'=SUM({row_value_ref(10, 2)}:{row_value_ref(10, 7)})', _int(metrics.open_count if metrics else 0)],
+        ["Корзины", *pick_numbers("carts"), f'=SUM({row_value_ref(11, 2)}:{row_value_ref(11, 7)})', _int(metrics.add_to_cart_count if metrics else 0)],
+        ["Конверсия в корзину (%)", "", "", "", "", "", "", safe_divide_formula(row_value_ref(11, 8), row_value_ref(10, 8), scale=100), safe_divide_formula(row_value_ref(11, 9), row_value_ref(10, 9), scale=100)],
+        ["Заказы", *pick_numbers("orders"), f'=SUM({row_value_ref(13, 2)}:{row_value_ref(13, 7)})', _int(metrics.order_count if metrics else 0)],
+        ["Конверсия в заказ (%)", "", "", "", "", "", "", safe_divide_formula(row_value_ref(13, 8), row_value_ref(11, 8), scale=100), safe_divide_formula(row_value_ref(13, 9), row_value_ref(11, 9), scale=100)],
+        ["Заказы (руб.)", *pick_numbers("order_sum"), f'=SUM({row_value_ref(15, 2)}:{row_value_ref(15, 7)})', _money(metrics.order_sum if metrics else 0)],
         ["Выкупы ≈ (руб.)", maybe_formula(2, buyout_formula(2)), maybe_formula(3, buyout_formula(3)), maybe_formula(4, buyout_formula(4)), maybe_formula(5, buyout_formula(5)), maybe_formula(6, buyout_formula(6)), maybe_formula(7, buyout_formula(7)), buyout_formula(8), "-"],
         ["Стоимость заказа", maybe_formula(2, cost_per_order_formula(2)), maybe_formula(3, cost_per_order_formula(3)), maybe_formula(4, cost_per_order_formula(4)), maybe_formula(5, cost_per_order_formula(5)), maybe_formula(6, cost_per_order_formula(6)), maybe_formula(7, cost_per_order_formula(7)), cost_per_order_formula(8), "-"],
         ["Стоимость корзины", maybe_formula(2, cost_per_cart_formula(2)), maybe_formula(3, cost_per_cart_formula(3)), maybe_formula(4, cost_per_cart_formula(4)), maybe_formula(5, cost_per_cart_formula(5)), maybe_formula(6, cost_per_cart_formula(6)), maybe_formula(7, cost_per_cart_formula(7)), cost_per_cart_formula(8), "-"],
@@ -470,14 +448,14 @@ def build_day_block(
     rows.extend(
         [
             ["", "Обзор:", "", "", "", "", "", "", ""],
-            ["", "СПП", "", "", "", "", "", _optional_fraction(note.spp_percent), spp_delta_text],
-            ["", "Цена WBSELLER (наша)", "", "", "", "", "", "", _optional_money(note.seller_price)],
-            ["", "Цена WB (на сайте)", "", "", "", "", "", "", _optional_money(note.wb_price)],
+            ["", "СПП", "", "", "", "", "", _fraction(note.spp_percent, optional=True), spp_delta_text],
+            ["", "Цена WBSELLER (наша)", "", "", "", "", "", "", _money(note.seller_price, optional=True)],
+            ["", "Цена WB (на сайте)", "", "", "", "", "", "", _money(note.wb_price, optional=True)],
             ["", "Акция", "", "", "", "", "", "", promo_status_value],
             ["", "Негативные отзывы", "", "", "", "", "", "", negative_feedback_value],
             ["", "Действия:", "", "", "", "", "", "", ""],
-            ["", "Включили рекламу?", "", "", "", "", "", _bool_label(note.unified_enabled or note.manual_search_enabled or note.manual_shelves_enabled or getattr(note, "manual_catalog_enabled", False)), ""],
-            ["", "Меняли цену?(WBSeller)", "", "", "", "", "", _bool_label(note.price_changed), ""],
+            ["", "Включили рекламу?", "", "", "", "", "", _bool(note.unified_enabled or note.manual_search_enabled or note.manual_shelves_enabled or getattr(note, "manual_catalog_enabled", False)), ""],
+            ["", "Меняли цену?(WBSeller)", "", "", "", "", "", _bool(note.price_changed), ""],
             ["Комментарий:", note.comment, "", "", "", "", "", "", ""],
         ]
     )
