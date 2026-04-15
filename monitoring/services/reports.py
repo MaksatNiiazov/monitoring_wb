@@ -836,31 +836,15 @@ def build_product_report(
             catalog = subtract_metric_cells(total, search)
             return search, catalog
         
-        # Есть кластеры - гибрид: структура из кластеров, значения из legacy
+        # Есть кластеры - гибрид:
+        # Трафик (impressions, clicks, spend) - из кластеров через apply_search_cluster_override
+        # Конверсии (carts, orders) - пропорциональное распределение
         cluster = metric_cell_from_search_clusters(cluster_rows)
         
-        # Определяем пропорцию поиска из кластеров
-        cluster_search_clicks = cluster.clicks
-        cluster_total = cluster_search_clicks + legacy_catalog.clicks + legacy_recommendation.clicks
+        # Базовый search: трафик из кластеров + конверсии из legacy max
+        search = apply_search_cluster_override(legacy_search, cluster_rows)
         
-        if cluster_total > 0:
-            # Пропорция поиска из кластеров
-            search_ratio = Decimal(cluster_search_clicks) / Decimal(cluster_total)
-            # Применяем к общему трафику
-            search_clicks = int(Decimal(total.clicks) * search_ratio)
-            search_impr = int(Decimal(total.impressions) * search_ratio)
-            search_spend = decimalize(total.spend) * search_ratio
-        else:
-            search_clicks = legacy_search.clicks
-            search_impr = legacy_search.impressions
-            search_spend = decimalize(legacy_search.spend)
-        
-        # Создаем search с корректированным трафиком
-        search = clone_metric_cell(legacy_search)
-        search.clicks = search_clicks
-        search.impressions = search_impr
-        search.spend = search_spend
-        # Конверсии из пропорционального распределения
+        # Заменяем конверсии на пропорциональное распределение от total
         total_clicks = max(total.clicks, 1)
         if cluster.clicks > 0:
             ratio = Decimal(cluster.clicks) / Decimal(total_clicks)
@@ -871,6 +855,7 @@ def build_product_report(
         
         # Добавляем recommendation
         search = add_metric_cells(search, legacy_recommendation)
+        search = clamp_metric_cell_to_total(search, total)
         
         # Каталог = все остальное
         catalog = subtract_metric_cells(total, search)
