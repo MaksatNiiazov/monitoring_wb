@@ -222,6 +222,40 @@ def apply_search_cluster_override(source: MetricCell, cluster_rows: list[DailyCa
     return cell
 
 
+def apply_search_cluster_proportional(
+    source: MetricCell, cluster_rows: list[DailyCampaignSearchClusterStat], total: MetricCell
+) -> MetricCell:
+    """Вариант 1: Распределяет корзины/заказы пропорционально кликам кластеров.
+    
+    Берет impressions/clicks из кластеров, но carts/orders распределяет
+    пропорционально доле кликов кластера от общего трафика.
+    """
+    cell = clone_metric_cell(source)
+    cluster = metric_cell_from_search_clusters(cluster_rows)
+    
+    # Трафик из кластеров
+    cell.impressions = cluster.impressions
+    cell.clicks = cluster.clicks
+    cell.spend = cluster.spend
+    
+    # Распределяем конверсию пропорционально кликам
+    total_clicks = max(total.clicks, 1)  # защита от деления на 0
+    if cluster.clicks > 0:
+        ratio = Decimal(cluster.clicks) / Decimal(total_clicks)
+        cell.carts = int(Decimal(total.carts) * ratio)
+        cell.orders = int(Decimal(total.orders) * ratio)
+        cell.units = int(Decimal(total.units) * ratio)
+        cell.order_sum = decimalize(total.order_sum) * ratio
+    else:
+        # Если кластеров нет кликов, берем из source
+        cell.carts = source.carts
+        cell.orders = source.orders
+        cell.units = source.units
+        cell.order_sum = decimalize(source.order_sum)
+    
+    return cell
+
+
 def subtract_metric_cells(total: MetricCell, part: MetricCell) -> MetricCell:
     return MetricCell(
         impressions=max(total.impressions - part.impressions, 0),
@@ -767,21 +801,25 @@ def build_product_report(
         group = CampaignMonitoringGroup.UNIFIED
         cluster_rows = search_clusters_by_group.get(group, [])
         if not cluster_rows:
-            return (
-                legacy_cells.get((group, CampaignZone.SEARCH), MetricCell()),
-                legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell()),
-                legacy_cells.get((group, CampaignZone.CATALOG), MetricCell()),
-            )
+            # Если кластеров нет - используем legacy
+            legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
+            legacy_recommendation = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
+            legacy_catalog = legacy_cells.get((group, CampaignZone.CATALOG), MetricCell())
+            shelves = add_metric_cells(legacy_recommendation, legacy_catalog)
+            return legacy_search, shelves, MetricCell()
+        
+        # Есть кластеры - используем пропорциональное распределение (Вариант 1)
         total = group_totals.get(group, MetricCell())
         legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
-        legacy_shelves = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
+        legacy_recommendation = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
         legacy_catalog = legacy_cells.get((group, CampaignZone.CATALOG), MetricCell())
-        search = apply_search_cluster_override(legacy_search, cluster_rows)
+        
+        # Пропорциональное распределение корзин/заказов по кликам кластера
+        search = apply_search_cluster_proportional(legacy_search, cluster_rows, total)
         search = clamp_metric_cell_to_total(search, total)
+        
+        # Полки = все остальное (total - search)
         non_search_total = subtract_metric_cells(total, search)
-        # The business matrix keeps the whole non-search unified remainder inside
-        # the "Полки" column. This matches the reference sheet much better than a
-        # second split between shelves and catalog.
         return search, non_search_total, MetricCell()
 
     def resolve_search_catalog_group_cells(group: str) -> tuple[MetricCell, MetricCell]:
@@ -789,16 +827,22 @@ def build_product_report(
         total = group_totals.get(group, MetricCell())
         legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
         legacy_recommendation = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
-        if cluster_rows:
-            search = apply_search_cluster_override(legacy_search, cluster_rows)
-        else:
-            search = clone_metric_cell(legacy_search)
-        # Manual-search campaigns have only Search/Catalog columns in the matrix.
-        # Any recommendation spill fits the search side better than catalog, so we
-        # append it to the extracted search cluster part and put the remaining
-        # balance into catalog.
+        
+        if not cluster_rows:
+            # Если кластеров нет - используем legacy (поиск + recommendation)
+            search = add_metric_cells(legacy_search, legacy_recommendation)
+            search = clamp_metric_cell_to_total(search, total)
+            catalog = subtract_metric_cells(total, search)
+            return search, catalog
+        
+        # Есть кластеры - используем оригинальную логику для РС
+        # Берем трафик из кластеров, корзины/заказы из max(legacy, cluster)
+        search = apply_search_cluster_override(legacy_search, cluster_rows)
+        # Добавляем recommendation к поиску (как в старой логике для РС)
         search = add_metric_cells(search, legacy_recommendation)
         search = clamp_metric_cell_to_total(search, total)
+        
+        # Каталог = все остальное (total - search)
         catalog = subtract_metric_cells(total, search)
         return search, catalog
 

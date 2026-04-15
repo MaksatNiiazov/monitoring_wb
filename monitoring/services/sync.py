@@ -645,39 +645,60 @@ def _aggregate_campaign_day_stats(
     product_map: dict[int, Product],
     linked_product_ids: set[int],
 ) -> dict[tuple[int, str], dict[str, Any]]:
-    """Агрегирует статистику кампании за день по продуктам и зонам."""
+    """Агрегирует статистику кампании за день по продуктам и зонам.
+    
+    СУММИРУЕТ ВСЕ товары в зоне (как cmp.wildberries.ru), а не только известные продукты.
+    Это даёт правильные данные по Корзинам, Заказам и Заказам (руб.) для Единой Ставки.
+    """
     aggregated: dict[tuple[int, str], dict[str, Any]] = {}
+    zone_totals: dict[str, dict[str, Any]] = {}
+    
+    # Сначала суммируем ВСЕ товары по зонам (все nmId в кампании)
     for app_payload in day_payload.get("apps", []):
         app_type = app_payload.get("appType")
         zone = map_app_type_to_zone(app_type)
+        
+        if zone not in zone_totals:
+            zone_totals[zone] = {
+                "impressions": 0,
+                "clicks": 0,
+                "spend": Decimal("0"),
+                "add_to_cart_count": 0,
+                "order_count": 0,
+                "units_ordered": 0,
+                "order_sum": Decimal("0"),
+                "raw_payload": [],
+            }
+        
         for item in app_payload.get("nms", []):
-            product = product_map.get(item.get("nmId"))
-            if not product:
-                continue
-            if linked_product_ids and product.id not in linked_product_ids:
-                continue
+            zone_totals[zone]["impressions"] += int(item.get("views") or 0)
+            zone_totals[zone]["clicks"] += int(item.get("clicks") or 0)
+            zone_totals[zone]["spend"] += decimalize(item.get("sum"))
+            zone_totals[zone]["add_to_cart_count"] += int(item.get("atbs") or 0)
+            zone_totals[zone]["order_count"] += int(item.get("orders") or 0)
+            zone_totals[zone]["units_ordered"] += int(item.get("shks") or 0)
+            zone_totals[zone]["order_sum"] += decimalize(item.get("sum_price"))
+            zone_totals[zone]["raw_payload"].append({"appType": app_type, "item": item})
+    
+    # Теперь присваиваем суммы зон каждому известному продукту
+    for nm_id, product in product_map.items():
+        # Проверяем linked_product_ids если они есть
+        if linked_product_ids and product.id not in linked_product_ids:
+            continue
+            
+        for zone, totals in zone_totals.items():
             key = (product.id, zone)
-            row = aggregated.setdefault(
-                key,
-                {
-                    "impressions": 0,
-                    "clicks": 0,
-                    "spend": Decimal("0"),
-                    "add_to_cart_count": 0,
-                    "order_count": 0,
-                    "units_ordered": 0,
-                    "order_sum": Decimal("0"),
-                    "raw_payload": [],
-                },
-            )
-            row["impressions"] += int(item.get("views") or 0)
-            row["clicks"] += int(item.get("clicks") or 0)
-            row["spend"] += decimalize(item.get("sum"))
-            row["add_to_cart_count"] += int(item.get("atbs") or 0)
-            row["order_count"] += int(item.get("orders") or 0)
-            row["units_ordered"] += int(item.get("shks") or 0)
-            row["order_sum"] += decimalize(item.get("sum_price"))
-            row["raw_payload"].append({"appType": app_type, "item": item})
+            aggregated[key] = {
+                "impressions": totals["impressions"],
+                "clicks": totals["clicks"],
+                "spend": totals["spend"],
+                "add_to_cart_count": totals["add_to_cart_count"],
+                "order_count": totals["order_count"],
+                "units_ordered": totals["units_ordered"],
+                "order_sum": totals["order_sum"],
+                "raw_payload": totals["raw_payload"],
+            }
+    
     return aggregated
 
 

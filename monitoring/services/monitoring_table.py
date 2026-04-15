@@ -236,6 +236,10 @@ def build_day_block(
     unified_carts = total_ad.carts  # Используем сумму всех рекламных кампаний
     unified_orders = total_ad.orders
     unified_order_sum = decimalize(total_ad.order_sum)
+    
+    # Органические (чистые) метрики = всего - реклама
+    organic_carts = max((metrics.add_to_cart_count if metrics else 0) - total_ad.carts, 0)
+    organic_orders = max((metrics.order_count if metrics else 0) - total_ad.orders, 0)
 
     def pick_numbers(metric_name: str) -> list[int | float | str]:
         values: list[int | float | str] = []
@@ -332,9 +336,9 @@ def build_day_block(
         buyout_fraction = f"IF({buyout_percent_ref}>1,{buyout_percent_ref}/100,{buyout_percent_ref})"
         return (
             f"=IFERROR(IF({seller_price_ref}=0,0,"
-            f"(({seller_price_ref}-{unit_cost_ref}-({seller_price_ref}*{row_value_ref(20, 8)}))-"
+            f"(({seller_price_ref}-{unit_cost_ref}-({seller_price_ref}*{row_value_ref(20, 9)}))-"
             f"({seller_price_ref}*25/100)-(({logistics_ref}/{buyout_fraction})-50))*"
-            f"({row_value_ref(13, 8)}*{buyout_fraction})),0)"
+            f"({row_value_ref(13, 9)}*{buyout_fraction})),0)"
         )
 
     def maybe_formula(relative_col: int, formula: str) -> str:
@@ -385,8 +389,8 @@ def build_day_block(
             1 if ad_group_visible else "",
             "-",
         ],
-        ["Затраты (руб)", *pick_numbers("spend"), f"=SUM({row_value_ref(5, 2)}:{row_value_ref(5, 7)})", "-"],
-        ["Показы", *pick_numbers("impressions"), f"=SUM({row_value_ref(6, 2)}:{row_value_ref(6, 7)})", "-"],
+        ["Затраты (руб)", *pick_numbers("spend"), "-", f"=SUM({row_value_ref(5, 2)}:{row_value_ref(5, 7)})"],
+        ["Показы", *pick_numbers("impressions"), "-", f"=SUM({row_value_ref(6, 2)}:{row_value_ref(6, 7)})"],
         [
             "CTR",
             maybe_formula(2, safe_divide_formula(row_value_ref(10, 2), row_value_ref(6, 2), scale=100)),
@@ -395,7 +399,7 @@ def build_day_block(
             maybe_formula(5, safe_divide_formula(row_value_ref(10, 5), row_value_ref(6, 5), scale=100)),
             maybe_formula(6, safe_divide_formula(row_value_ref(10, 6), row_value_ref(6, 6), scale=100)),
             maybe_formula(7, safe_divide_formula(row_value_ref(10, 7), row_value_ref(6, 7), scale=100)),
-            safe_divide_formula(f"SUM({row_value_ref(10, 2)}:{row_value_ref(10, 7)})", row_value_ref(6, 8), scale=100),
+            safe_divide_formula(f"SUM({row_value_ref(10, 2)}:{row_value_ref(10, 7)})", row_value_ref(6, 9), scale=100),
             "-",
         ],
         [
@@ -406,7 +410,7 @@ def build_day_block(
             maybe_formula(5, safe_divide_formula(f"{row_value_ref(5, 5)}*1000", row_value_ref(6, 5))),
             maybe_formula(6, safe_divide_formula(f"{row_value_ref(5, 6)}*1000", row_value_ref(6, 6))),
             maybe_formula(7, safe_divide_formula(f"{row_value_ref(5, 7)}*1000", row_value_ref(6, 7))),
-            safe_divide_formula(f"{row_value_ref(5, 8)}*1000", row_value_ref(6, 8)),
+            safe_divide_formula(f"{row_value_ref(5, 9)}*1000", row_value_ref(6, 9)),
             "-",
         ],
         [
@@ -417,20 +421,20 @@ def build_day_block(
             maybe_formula(5, safe_divide_formula(row_value_ref(5, 5), row_value_ref(10, 5))),
             maybe_formula(6, safe_divide_formula(row_value_ref(5, 6), row_value_ref(10, 6))),
             maybe_formula(7, safe_divide_formula(row_value_ref(5, 7), row_value_ref(10, 7))),
-            safe_divide_formula(row_value_ref(5, 8), f"SUM({row_value_ref(10, 2)}:{row_value_ref(10, 7)})"),
+            safe_divide_formula(row_value_ref(5, 9), f"SUM({row_value_ref(10, 2)}:{row_value_ref(10, 7)})"),
             "-",
         ],
         ["Клики", *pick_numbers("clicks"), f'=SUM({row_value_ref(10, 2)}:{row_value_ref(10, 7)})', _int(metrics.open_count if metrics else 0)],
-        ["Корзины", *pick_numbers("carts"), f'=SUM({row_value_ref(11, 2)}:{row_value_ref(11, 7)})', _int(metrics.add_to_cart_count if metrics else 0)],
+        ["Корзины", *pick_numbers("carts"), f'=SUM({row_value_ref(11, 2)}:{row_value_ref(11, 7)})', _int(organic_carts)],
         ["Конверсия в корзину (%)", "", "", "", "", "", "", safe_divide_formula(row_value_ref(11, 8), row_value_ref(10, 8), scale=100), safe_divide_formula(row_value_ref(11, 9), row_value_ref(10, 9), scale=100)],
-        ["Заказы", *pick_numbers("orders"), f'=SUM({row_value_ref(13, 2)}:{row_value_ref(13, 7)})', _int(metrics.order_count if metrics else 0)],
+        ["Заказы", *pick_numbers("orders"), f'=SUM({row_value_ref(13, 2)}:{row_value_ref(13, 7)})', _int(organic_orders)],
         ["Конверсия в заказ (%)", "", "", "", "", "", "", safe_divide_formula(row_value_ref(13, 8), row_value_ref(11, 8), scale=100), safe_divide_formula(row_value_ref(13, 9), row_value_ref(11, 9), scale=100)],
         ["Заказы (руб.)", *pick_numbers("order_sum"), f'=SUM({row_value_ref(15, 2)}:{row_value_ref(15, 7)})', _money(metrics.order_sum if metrics else 0)],
-        ["Выкупы ≈ (руб.)", maybe_formula(2, buyout_formula(2)), maybe_formula(3, buyout_formula(3)), maybe_formula(4, buyout_formula(4)), maybe_formula(5, buyout_formula(5)), maybe_formula(6, buyout_formula(6)), maybe_formula(7, buyout_formula(7)), buyout_formula(8), "-"],
-        ["Стоимость заказа", maybe_formula(2, cost_per_order_formula(2)), maybe_formula(3, cost_per_order_formula(3)), maybe_formula(4, cost_per_order_formula(4)), maybe_formula(5, cost_per_order_formula(5)), maybe_formula(6, cost_per_order_formula(6)), maybe_formula(7, cost_per_order_formula(7)), cost_per_order_formula(8), "-"],
-        ["Стоимость корзины", maybe_formula(2, cost_per_cart_formula(2)), maybe_formula(3, cost_per_cart_formula(3)), maybe_formula(4, cost_per_cart_formula(4)), maybe_formula(5, cost_per_cart_formula(5)), maybe_formula(6, cost_per_cart_formula(6)), maybe_formula(7, cost_per_cart_formula(7)), cost_per_cart_formula(8), "-"],
-        ["ДРР от заказов (%)", maybe_formula(2, ratio_formula(2, 15)), maybe_formula(3, ratio_formula(3, 15)), maybe_formula(4, ratio_formula(4, 15)), maybe_formula(5, ratio_formula(5, 15)), maybe_formula(6, ratio_formula(6, 15)), maybe_formula(7, ratio_formula(7, 15)), ratio_formula(8, 15), "-"],
-        ["ДРР от продаж ≈ (%)", maybe_formula(2, ratio_formula(2, 16)), maybe_formula(3, ratio_formula(3, 16)), maybe_formula(4, ratio_formula(4, 16)), maybe_formula(5, ratio_formula(5, 16)), maybe_formula(6, ratio_formula(6, 16)), maybe_formula(7, ratio_formula(7, 16)), ratio_formula(8, 16), "-"],
+        ["Выкупы ≈ (руб.)", maybe_formula(2, buyout_formula(2)), maybe_formula(3, buyout_formula(3)), maybe_formula(4, buyout_formula(4)), maybe_formula(5, buyout_formula(5)), maybe_formula(6, buyout_formula(6)), maybe_formula(7, buyout_formula(7)), "-", buyout_formula(9)],
+        ["Стоимость заказа", maybe_formula(2, cost_per_order_formula(2)), maybe_formula(3, cost_per_order_formula(3)), maybe_formula(4, cost_per_order_formula(4)), maybe_formula(5, cost_per_order_formula(5)), maybe_formula(6, cost_per_order_formula(6)), maybe_formula(7, cost_per_order_formula(7)), "-", cost_per_order_formula(9)],
+        ["Стоимость корзины", maybe_formula(2, cost_per_cart_formula(2)), maybe_formula(3, cost_per_cart_formula(3)), maybe_formula(4, cost_per_cart_formula(4)), maybe_formula(5, cost_per_cart_formula(5)), maybe_formula(6, cost_per_cart_formula(6)), maybe_formula(7, cost_per_cart_formula(7)), "-", cost_per_cart_formula(9)],
+        ["ДРР от заказов (%)", maybe_formula(2, ratio_formula(2, 15)), maybe_formula(3, ratio_formula(3, 15)), maybe_formula(4, ratio_formula(4, 15)), maybe_formula(5, ratio_formula(5, 15)), maybe_formula(6, ratio_formula(6, 15)), maybe_formula(7, ratio_formula(7, 15)), "-", ratio_formula(9, 15)],
+        ["ДРР от продаж ≈ (%)", maybe_formula(2, ratio_formula(2, 16)), maybe_formula(3, ratio_formula(3, 16)), maybe_formula(4, ratio_formula(4, 16)), maybe_formula(5, ratio_formula(5, 16)), maybe_formula(6, ratio_formula(6, 16)), maybe_formula(7, ratio_formula(7, 16)), "-", ratio_formula(9, 16)],
         ["Прибыль", overall_profit_formula(), "", "", "", "", "", "", ""],
         ["Процент выкупа %", _fraction(economics.buyout_percent), "", "", "", "", "", "", ""],
         ["Себестоимость", _money(economics.unit_cost), "", "", "", "", "", "", ""],
