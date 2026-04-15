@@ -826,6 +826,7 @@ def build_product_report(
         cluster_rows = search_clusters_by_group.get(group, [])
         total = group_totals.get(group, MetricCell())
         legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
+        legacy_catalog = legacy_cells.get((group, CampaignZone.CATALOG), MetricCell())
         legacy_recommendation = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
         
         if not cluster_rows:
@@ -835,14 +836,43 @@ def build_product_report(
             catalog = subtract_metric_cells(total, search)
             return search, catalog
         
-        # Есть кластеры - используем оригинальную логику для РС
-        # Берем трафик из кластеров, корзины/заказы из max(legacy, cluster)
-        search = apply_search_cluster_override(legacy_search, cluster_rows)
-        # Добавляем recommendation к поиску (как в старой логике для РС)
-        search = add_metric_cells(search, legacy_recommendation)
-        search = clamp_metric_cell_to_total(search, total)
+        # Есть кластеры - гибрид: структура из кластеров, значения из legacy
+        cluster = metric_cell_from_search_clusters(cluster_rows)
         
-        # Каталог = все остальное (total - search)
+        # Определяем пропорцию поиска из кластеров
+        cluster_search_clicks = cluster.clicks
+        cluster_total = cluster_search_clicks + legacy_catalog.clicks + legacy_recommendation.clicks
+        
+        if cluster_total > 0:
+            # Пропорция поиска из кластеров
+            search_ratio = Decimal(cluster_search_clicks) / Decimal(cluster_total)
+            # Применяем к общему трафику
+            search_clicks = int(Decimal(total.clicks) * search_ratio)
+            search_impr = int(Decimal(total.impressions) * search_ratio)
+            search_spend = decimalize(total.spend) * search_ratio
+        else:
+            search_clicks = legacy_search.clicks
+            search_impr = legacy_search.impressions
+            search_spend = decimalize(legacy_search.spend)
+        
+        # Создаем search с корректированным трафиком
+        search = clone_metric_cell(legacy_search)
+        search.clicks = search_clicks
+        search.impressions = search_impr
+        search.spend = search_spend
+        # Конверсии из пропорционального распределения
+        total_clicks = max(total.clicks, 1)
+        if cluster.clicks > 0:
+            ratio = Decimal(cluster.clicks) / Decimal(total_clicks)
+            search.carts = int(Decimal(total.carts) * ratio)
+            search.orders = int(Decimal(total.orders) * ratio)
+            search.units = int(Decimal(total.units) * ratio)
+            search.order_sum = decimalize(total.order_sum) * ratio
+        
+        # Добавляем recommendation
+        search = add_metric_cells(search, legacy_recommendation)
+        
+        # Каталог = все остальное
         catalog = subtract_metric_cells(total, search)
         return search, catalog
 
