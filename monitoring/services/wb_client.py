@@ -16,22 +16,32 @@ class WBApiError(Exception):
 class BaseWBClient:
     base_url: str = ""
     token: str = ""
-    min_interval_seconds: float = 1.0
-    max_retries: int = 12
-    max_retry_delay_seconds: float = 90.0
+    # Согласно документации WB: 300 запросов/мин = интервал 200ms, burst 20
+    min_interval_seconds: float = 0.25  # 250ms между запросами (с запасом от 200ms)
+    burst_limit: int = 20  # Можно сделать 20 запросов без задержки (burst)
+    max_retries: int = 3
+    max_retry_delay_seconds: float = 30.0  # Для кода 461 WB требует ждать дольше
 
     def __init__(self, token: str | None = None) -> None:
         self.token = token or self.token
         self._last_request_at = 0.0
         self._next_request_at = 0.0
+        self._burst_remaining: int = self.burst_limit  # Счётчик burst-запросов
         if not self.token:
             raise WBApiError("Не задан API-токен Wildberries.")
+        if len(self.token) < 20:
+            raise WBApiError(f"API-токен Wildberries выглядит невалидным (длина {len(self.token)}). Проверьте настройки.")
 
     def _wait_for_rate_window(self) -> None:
         now = time.monotonic()
+        # Если есть burst-запросы, не ждём (делаем запрос сразу)
+        if self._burst_remaining > 0:
+            self._burst_remaining -= 1
+            return
+        # Burst исчерпан — ждём согласно лимитам
         base_delay = self.min_interval_seconds - (now - self._last_request_at)
         rate_delay = self._next_request_at - now
-        delay = max(base_delay, rate_delay)
+        delay = max(base_delay, rate_delay, 0)
         if delay > 0:
             time.sleep(delay)
 
@@ -50,22 +60,66 @@ class BaseWBClient:
 
     def _update_rate_window(self, response: requests.Response) -> None:
         now = time.monotonic()
-        retry_after = self._header_float(response, "X-Ratelimit-Retry", "X-Ratelimit-Reset", "Retry-After")
-        if retry_after:
-            self._next_request_at = max(self._next_request_at, now + min(self.max_retry_delay_seconds, retry_after))
-            return
+        
+        # Проверяем global limiter (461) — отдельный жёсткий лимит
+        if response.status_code == 429:
+            detail = self._response_detail(response)
+            if detail and ("global limiter" in detail.lower() or "461" in detail):
+                # Global limiter — ждём 30 секунд
+                self._next_request_at = max(self._next_request_at, now + 30.0)
+                self._burst_remaining = 0
+                return
+        
+        # Обрабатываем заголовки X-Ratelimit-* согласно документации WB
         remaining = response.headers.get("X-Ratelimit-Remaining")
         reset_after = self._header_float(response, "X-Ratelimit-Reset")
+        retry_after = self._header_float(response, "X-Ratelimit-Retry")
+        
+        # Если WB говорит подождать — ждём
+        if retry_after and retry_after > 0:
+            self._next_request_at = max(self._next_request_at, now + retry_after)
+            self._burst_remaining = 0  # Сбрасываем burst
+            return
+        
+        # Если remaining = 0, ждём reset
         if remaining == "0" and reset_after:
             self._next_request_at = max(self._next_request_at, now + min(self.max_retry_delay_seconds, reset_after))
+            self._burst_remaining = 0
             return
+        
+        # Обновляем burst из заголовка или восстанавливаем постепенно
+        if remaining is not None:
+            try:
+                self._burst_remaining = max(0, int(remaining))
+            except (ValueError, TypeError):
+                pass
+        
+        # Стандартная задержка между запросами
         self._next_request_at = max(self._next_request_at, now + self.min_interval_seconds)
 
     def _retry_delay(self, response: requests.Response, attempt: int) -> float:
-        retry_hint = self._header_float(response, "X-Ratelimit-Retry", "X-Ratelimit-Reset", "Retry-After")
-        if retry_hint:
-            return min(self.max_retry_delay_seconds, max(self.min_interval_seconds, retry_hint))
-        return min(self.max_retry_delay_seconds, max(self.min_interval_seconds, 2 ** attempt))
+        # При 429 используем заголовки X-Ratelimit-* согласно документации
+        if response.status_code == 429:
+            # Сначала пробуем X-Ratelimit-Retry (через сколько можно повторить)
+            retry_after = self._header_float(response, "X-Ratelimit-Retry")
+            if retry_after and retry_after > 0:
+                return min(self.max_retry_delay_seconds, retry_after)
+            # Затем X-Ratelimit-Reset (через сколько восстановится burst)
+            reset_after = self._header_float(response, "X-Ratelimit-Reset")
+            if reset_after and reset_after > 0:
+                return min(self.max_retry_delay_seconds, reset_after)
+            # Fallback на Retry-After (стандартный HTTP заголовок)
+            retry_after_std = self._header_float(response, "Retry-After")
+            if retry_after_std and retry_after_std > 0:
+                return min(self.max_retry_delay_seconds, retry_after_std)
+        
+        # Для global limiter (461) используем фиксированную задержку
+        detail = self._response_detail(response)
+        if detail and ("global limiter" in detail.lower() or "461" in detail):
+            return 30.0  # WB требует 30+ секунд для global limiter
+        
+        # Экспоненциальный backoff для остальных ошибок
+        return min(self.max_retry_delay_seconds, self.min_interval_seconds * (2 ** attempt))
 
     def _response_detail(self, response: requests.Response) -> str:
         try:
@@ -82,12 +136,15 @@ class BaseWBClient:
     def _format_error(self, response: requests.Response) -> str:
         detail = self._response_detail(response)
         if response.status_code == 429:
-            suffix = f" Деталь WB: {detail}" if detail else ""
-            return (
-                "Wildberries временно ограничил запросы по кабинету. "
-                "Клиент автоматически ждал окно лимита, но оно не освободилось вовремя."
-                f"{suffix}"
-            )
+            # WB возвращает 429 с code 461 для global limiter
+            is_global_limit = detail and ("global limiter" in detail.lower() or "461" in detail)
+            if is_global_limit:
+                return f"WB API 429/461 (Global Rate Limit): {detail}. Нужно подождать 30-60 секунд между синхронизациями."
+            if detail:
+                return f"WB API 429 (Rate Limit): {detail}"
+            return f"WB API 429: Rate Limit"
+        if response.status_code == 401:
+            return f"WB API 401: Неавторизован. Проверьте API-токен (длина {len(self.token) if self.token else 0})."
         if detail:
             return f"WB API {response.status_code}: {detail}"
         return f"WB API {response.status_code}: request failed."
@@ -100,20 +157,32 @@ class BaseWBClient:
         params: dict[str, Any] | None = None,
         payload: dict[str, Any] | None = None,
     ) -> Any:
+        import sys
         last_error = ""
         for attempt in range(self.max_retries):
             self._wait_for_rate_window()
-            response = requests.request(
-                method=method,
-                url=f"{self.base_url}{path}",
-                headers={
-                    "Authorization": self.token,
-                    "Content-Type": "application/json",
-                },
-                params=params,
-                json=payload,
-                timeout=45,
-            )
+            url = f"{self.base_url}{path}"
+            print(f"[WB API] {method} {url} (attempt {attempt + 1}/{self.max_retries})", flush=True, file=sys.stderr)
+            start_time = time.monotonic()
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    headers={
+                        "Authorization": self.token,
+                        "Content-Type": "application/json",
+                    },
+                    params=params,
+                    json=payload,
+                    timeout=30,  # Уменьшили для быстрой отработки зависаний
+                )
+                elapsed = time.monotonic() - start_time
+                body_preview = (response.text or "")[:200]
+                print(f"[WB API] {method} {path} -> {response.status_code} in {elapsed:.1f}s | body: {body_preview}", flush=True, file=sys.stderr)
+            except Exception as exc:
+                elapsed = time.monotonic() - start_time
+                print(f"[WB API] {method} {path} -> EXCEPTION after {elapsed:.1f}s: {exc}", flush=True, file=sys.stderr)
+                raise
             self._last_request_at = time.monotonic()
             self._update_rate_window(response)
             if response.status_code < 400:
@@ -123,8 +192,14 @@ class BaseWBClient:
 
             last_error = self._format_error(response)
             if response.status_code in {429, 500, 502, 503, 504} and attempt < self.max_retries - 1:
-                time.sleep(self._retry_delay(response, attempt))
+                # При 429 сбрасываем burst (документация WB)
+                if response.status_code == 429:
+                    self._burst_remaining = 0
+                retry_delay = self._retry_delay(response, attempt)
+                print(f"[WB API] Retry after {retry_delay:.1f}s: {last_error[:100]}", flush=True, file=sys.stderr)
+                time.sleep(retry_delay)
                 continue
+            print(f"[WB API] ERROR: {last_error[:100]}", flush=True, file=sys.stderr)
             raise WBApiError(last_error)
 
         raise WBApiError(last_error or "WB API request failed.")

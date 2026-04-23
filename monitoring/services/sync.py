@@ -1342,11 +1342,47 @@ def _run_sync_single_day(
         # это провоцирует "database is locked" в веб-запросах.
         with nullcontext():
             _assert_not_cancelled(log)
-            funnel_rows = analytics_client.get_sales_funnel_history(
-                nm_ids=list(product_map.keys()),
-                start_date=dates.stats_date,
-                end_date=dates.stats_date,
-            )
+            # Разбиваем запросы на chunks, чтобы избежать зависания WB API
+            funnel_rows: list[dict[str, Any]] = []
+            nm_ids_list = list(product_map.keys())
+            funnel_chunk_size = 100  # Уменьшили с 200 до 100 для стабильности
+            total_funnel_chunks = max(1, (len(nm_ids_list) + funnel_chunk_size - 1) // funnel_chunk_size)
+            _sync_console(f"Начинаем сбор воронки: {len(nm_ids_list)} товаров, {total_funnel_chunks} чанков по {funnel_chunk_size}")
+            for chunk_index, nm_chunk in enumerate(batched(nm_ids_list, funnel_chunk_size), start=1):
+                _assert_not_cancelled(log)
+                if nm_chunk:
+                    _sync_console(f"Запрос воронки: чанк {chunk_index}/{total_funnel_chunks} ({len(nm_chunk)} товаров)")
+                    import time
+                    start_time = time.monotonic()
+                    try:
+                        chunk_rows = analytics_client.get_sales_funnel_history(
+                            nm_ids=list(nm_chunk),
+                            start_date=dates.stats_date,
+                            end_date=dates.stats_date,
+                        )
+                        elapsed = time.monotonic() - start_time
+                        _sync_console(f"Воронка чанк {chunk_index}/{total_funnel_chunks} получено {len(chunk_rows)} строк за {elapsed:.1f}с")
+                        funnel_rows.extend(chunk_rows)
+                    except WBApiError as exc:
+                        elapsed = time.monotonic() - start_time
+                        err_str = str(exc).lower()
+                        # При 429/461 (rate limit / global limiter) продолжаем без данных воронки, чтобы не зависать
+                        is_rate_limit = any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"])
+                        if is_rate_limit:
+                            _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на воронке после {elapsed:.1f}с. Пропускаем.")
+                            _sync_console(f"Подождите 30-60 секунд и запустите синхронизацию снова (global limiter WB).")
+                            optional_errors.append(f"sales_funnel_history rate limit after {elapsed:.1f}s: {str(exc)[:80]}")
+                            break  # Выходим из цикла чанков, продолжаем без воронки
+                        _sync_console(f"ОШИБКА воронки чанк {chunk_index}/{total_funnel_chunks} после {elapsed:.1f}с: {exc}")
+                        raise
+                    # Обновляем прогресс внутри этапа "Воронка" (12% -> 28%)
+                    sub_percent = 12 + int((chunk_index / total_funnel_chunks) * 15)
+                    _update_sync_progress(
+                        log,
+                        percent=sub_percent,
+                        stage="Воронка",
+                        detail=f"Сбор воронки: chunk {chunk_index}/{total_funnel_chunks} ({len(nm_chunk)} товаров).",
+                    )
             for row in funnel_rows:
                 _assert_not_cancelled(log)
                 product_data = row.get("product") or {}
@@ -1376,17 +1412,27 @@ def _run_sync_single_day(
             _assert_not_cancelled(log)
             stock_items_by_nm_id: dict[int, dict[str, Any]] = {}
             try:
-                stock_response = analytics_client.get_product_stocks(
-                    nm_ids=list(product_map.keys()),
-                    snapshot_date=dates.stock_date,
-                )
-                stock_items_by_nm_id = {
-                    item.get("nmID"): item
-                    for item in stock_response.get("data", {}).get("items", [])
-                    if item.get("nmID")
-                }
+                # Разбиваем запросы остатков на chunks для стабильности
+                stock_chunk_size = 200
+                for nm_chunk in batched(list(product_map.keys()), stock_chunk_size):
+                    _assert_not_cancelled(log)
+                    if not nm_chunk:
+                        continue
+                    stock_response = analytics_client.get_product_stocks(
+                        nm_ids=list(nm_chunk),
+                        snapshot_date=dates.stock_date,
+                    )
+                    for item in stock_response.get("data", {}).get("items", []) or []:
+                        nm_id = item.get("nmID")
+                        if nm_id:
+                            stock_items_by_nm_id[nm_id] = item
             except WBApiError as exc:
-                if "WB API 500" not in str(exc):
+                err_str = str(exc).lower()
+                # При 429/461 продолжаем без остатков, при 500 тоже продолжаем (было раньше)
+                if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
+                    _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на остатках. Пропускаем.")
+                    optional_errors.append(f"product_stocks rate limit: {str(exc)[:80]}")
+                elif "wb api 500" not in err_str:
                     raise
 
             _assert_not_cancelled(log)
@@ -1403,35 +1449,54 @@ def _run_sync_single_day(
                         detail=f"Loading stock sizes: {done}/{total} SKU.",
                     )
 
-            sizes_payload_by_nm_id = fetch_product_sizes_payloads(
-                nm_ids=[product.nm_id for product in products],
-                snapshot_date=dates.stock_date,
-                max_workers=4,
-                on_item_done=_on_sizes_item_done,
-            )
+            sizes_payload_by_nm_id: dict[int, dict[str, Any]] = {}
+            try:
+                sizes_payload_by_nm_id = fetch_product_sizes_payloads(
+                    nm_ids=[product.nm_id for product in products],
+                    snapshot_date=dates.stock_date,
+                    max_workers=4,
+                    on_item_done=_on_sizes_item_done,
+                )
+            except WBApiError as exc:
+                err_str = str(exc).lower()
+                if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
+                    _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на размерах. Пропускаем.")
+                    optional_errors.append(f"product_sizes rate limit: {str(exc)[:80]}")
+                else:
+                    raise
 
             for product in products:
                 _assert_not_cancelled(log)
                 sizes_payload = sizes_payload_by_nm_id.get(product.nm_id)
+                # Если нет sizes_payload (rate limit или нет данных), используем минимальный payload
                 if sizes_payload is None:
-                    sizes_payload = analytics_client.get_product_sizes(nm_id=product.nm_id, snapshot_date=dates.stock_date)
-                derived_stock_payload = build_product_stock_payload_from_sizes(sizes_payload)
+                    try:
+                        sizes_payload = analytics_client.get_product_sizes(nm_id=product.nm_id, snapshot_date=dates.stock_date)
+                    except WBApiError as exc:
+                        err_str = str(exc).lower()
+                        if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
+                            _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: Пропуск размеров для nm_id={product.nm_id} из-за rate limit")
+                            sizes_payload = {}
+                        else:
+                            raise
+                derived_stock_payload = build_product_stock_payload_from_sizes(sizes_payload) if sizes_payload else {"metrics": {}}
                 stock_item = stock_items_by_nm_id.get(product.nm_id)
                 if stock_item:
                     update_product_from_payload(product, stock_item)
-                upsert_product_stock(
-                    product=product,
-                    stats_date=dates.stock_date,
-                    item_payload=derived_stock_payload,
-                    overwrite=overwrite,
-                )
-                upsert_warehouse_stocks(
-                    product=product,
-                    stats_date=dates.stock_date,
-                    sizes_payload=sizes_payload,
-                    overwrite=overwrite,
-                    warehouse_cache=warehouse_cache,
-                )
+                if sizes_payload:
+                    upsert_product_stock(
+                        product=product,
+                        stats_date=dates.stock_date,
+                        item_payload=derived_stock_payload,
+                        overwrite=overwrite,
+                    )
+                    upsert_warehouse_stocks(
+                        product=product,
+                        stats_date=dates.stock_date,
+                        sizes_payload=sizes_payload,
+                        overwrite=overwrite,
+                        warehouse_cache=warehouse_cache,
+                    )
 
             _update_sync_progress(
                 log,
@@ -1441,23 +1506,31 @@ def _run_sync_single_day(
             )
             _assert_not_cancelled(log)
             if campaigns:
-                refresh_campaigns_metadata(campaigns, promotion_client=promotion_client)
-                stats_payload = promotion_client.get_campaign_stats(
-                    ids=[campaign.external_id for campaign in campaigns],
-                    start_date=dates.stats_date,
-                    end_date=dates.stats_date,
-                )
-                for item in stats_payload:
-                    _assert_not_cancelled(log)
-                    upsert_campaign_stats(
-                        product_map=product_map,
-                        campaign_map=campaign_map,
-                        stat_payload=item,
-                        overwrite=overwrite,
-                        allowed_dates={dates.stats_date},
-                        linked_products_by_campaign_id=linked_products_by_campaign_id,
-                        tracked_product_ids=tracked_product_ids,
+                try:
+                    refresh_campaigns_metadata(campaigns, promotion_client=promotion_client)
+                    stats_payload = promotion_client.get_campaign_stats(
+                        ids=[campaign.external_id for campaign in campaigns],
+                        start_date=dates.stats_date,
+                        end_date=dates.stats_date,
                     )
+                    for item in stats_payload:
+                        _assert_not_cancelled(log)
+                        upsert_campaign_stats(
+                            product_map=product_map,
+                            campaign_map=campaign_map,
+                            stat_payload=item,
+                            overwrite=overwrite,
+                            allowed_dates={dates.stats_date},
+                            linked_products_by_campaign_id=linked_products_by_campaign_id,
+                            tracked_product_ids=tracked_product_ids,
+                        )
+                except WBApiError as exc:
+                    err_str = str(exc).lower()
+                    if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
+                        _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на рекламе. Пропускаем.")
+                        optional_errors.append(f"campaign_stats rate limit: {str(exc)[:80]}")
+                    else:
+                        raise
 
             _update_sync_progress(
                 log,
@@ -1591,7 +1664,12 @@ def _run_sync_single_day(
                                 entry["clicks"] += clicks
                                 entry["raw_payload"].append(stat)
                 except WBApiError as exc:
-                    optional_errors.append(f"boosted_keywords: {exc}")
+                    err_str = str(exc).lower()
+                    if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
+                        _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на ключевых словах. Пропускаем.")
+                        optional_errors.append(f"boosted_keywords rate limit: {str(exc)[:80]}")
+                    else:
+                        optional_errors.append(f"boosted_keywords: {exc}")
 
                 if overwrite:
                     DailyCampaignSearchClusterStat.objects.filter(
@@ -1669,14 +1747,24 @@ def _run_sync_single_day(
                 detail="Заполнение заметок и итоговых полей по карточкам товаров.",
             )
             _assert_not_cancelled(log)
-            product_enrichment_by_id, enrichment_warnings = fetch_product_enrichment_payloads(
-                products=products,
-                stats_date=dates.stats_date,
-                max_workers=4,
-                analytics_client=analytics_client,
-                feedbacks_client=feedbacks_client,
-            )
-            optional_errors.extend(enrichment_warnings)
+            product_enrichment_by_id: dict[int, dict[str, Any]] = {}
+            enrichment_warnings: list[str] = []
+            try:
+                product_enrichment_by_id, enrichment_warnings = fetch_product_enrichment_payloads(
+                    products=products,
+                    stats_date=dates.stats_date,
+                    max_workers=4,
+                    analytics_client=analytics_client,
+                    feedbacks_client=feedbacks_client,
+                )
+                optional_errors.extend(enrichment_warnings)
+            except WBApiError as exc:
+                err_str = str(exc).lower()
+                if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
+                    _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на обзоре по товарам. Пропускаем.")
+                    optional_errors.append(f"product_enrichment rate limit: {str(exc)[:80]}")
+                else:
+                    raise
             for product in products:
                 _assert_not_cancelled(log)
                 enrichment_payload = product_enrichment_by_id.get(product.id) or {}
