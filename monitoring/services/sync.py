@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Any, Callable
 import logging
 import threading
+import time
 import zlib
 
 from django.db import close_old_connections
@@ -1345,7 +1346,7 @@ def _run_sync_single_day(
             # Разбиваем запросы на chunks, чтобы избежать зависания WB API
             funnel_rows: list[dict[str, Any]] = []
             nm_ids_list = list(product_map.keys())
-            funnel_chunk_size = 100  # Уменьшили с 200 до 100 для стабильности
+            funnel_chunk_size = 50  # БЕЗОПАСНЫЙ РЕЖИМ: уменьшили с 100 до 50
             total_funnel_chunks = max(1, (len(nm_ids_list) + funnel_chunk_size - 1) // funnel_chunk_size)
             _sync_console(f"Начинаем сбор воронки: {len(nm_ids_list)} товаров, {total_funnel_chunks} чанков по {funnel_chunk_size}")
             for chunk_index, nm_chunk in enumerate(batched(nm_ids_list, funnel_chunk_size), start=1):
@@ -1403,6 +1404,8 @@ def _run_sync_single_day(
                         overwrite=overwrite,
                     )
 
+            # БЕЗОПАСНЫЙ РЕЖИМ: пауза между этапами для "отдыха" API
+            time.sleep(1.0)
             _update_sync_progress(
                 log,
                 percent=28,
@@ -1413,7 +1416,7 @@ def _run_sync_single_day(
             stock_items_by_nm_id: dict[int, dict[str, Any]] = {}
             try:
                 # Разбиваем запросы остатков на chunks для стабильности
-                stock_chunk_size = 200
+                stock_chunk_size = 50  # БЕЗОПАСНЫЙ РЕЖИМ: уменьшили с 200 до 50
                 for nm_chunk in batched(list(product_map.keys()), stock_chunk_size):
                     _assert_not_cancelled(log)
                     if not nm_chunk:
@@ -1498,6 +1501,8 @@ def _run_sync_single_day(
                         warehouse_cache=warehouse_cache,
                     )
 
+            # БЕЗОПАСНЫЙ РЕЖИМ: пауза перед рекламой (чувствительный API)
+            time.sleep(2.0)
             _update_sync_progress(
                 log,
                 percent=45,

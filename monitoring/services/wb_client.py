@@ -16,17 +16,24 @@ class WBApiError(Exception):
 class BaseWBClient:
     base_url: str = ""
     token: str = ""
-    # Согласно документации WB: 300 запросов/мин = интервал 200ms, burst 20
-    min_interval_seconds: float = 0.25  # 250ms между запросами (с запасом от 200ms)
-    burst_limit: int = 20  # Можно сделать 20 запросов без задержки (burst)
+    # БЕЗОПАСНЫЙ РЕЖИМ: консервативные лимиты для снижения риска global limiter
+    # Документация WB: 300 запросов/мин = интервал 200ms, burst 20
+    # Безопасный режим: burst 5 (вместо 20), интервал 0.5с (вместо 0.25с)
+    min_interval_seconds: float = 0.5  # 500ms между запросами для безопасности
+    burst_limit: int = 5  # Максимум 5 запросов подряд без задержки
     max_retries: int = 3
     max_retry_delay_seconds: float = 30.0  # Для кода 461 WB требует ждать дольше
+    # Адаптивная задержка при частых ошибках 429
+    _consecutive_429_count: int = 0
+    _adaptive_delay_seconds: float = 0.0
 
     def __init__(self, token: str | None = None) -> None:
         self.token = token or self.token
         self._last_request_at = 0.0
         self._next_request_at = 0.0
-        self._burst_remaining: int = self.burst_limit  # Счётчик burst-запросов
+        self._burst_remaining: int = self.burst_limit
+        self._consecutive_429_count = 0
+        self._adaptive_delay_seconds = 0.0
         if not self.token:
             raise WBApiError("Не задан API-токен Wildberries.")
         if len(self.token) < 20:
@@ -38,10 +45,12 @@ class BaseWBClient:
         if self._burst_remaining > 0:
             self._burst_remaining -= 1
             return
-        # Burst исчерпан — ждём согласно лимитам
+        # Burst исчерпан — ждём согласно лимитам + адаптивная задержка
         base_delay = self.min_interval_seconds - (now - self._last_request_at)
         rate_delay = self._next_request_at - now
-        delay = max(base_delay, rate_delay, 0)
+        # Добавляем адаптивную задержку при частых 429 (экспоненциальный рост)
+        adaptive_delay = self._adaptive_delay_seconds
+        delay = max(base_delay, rate_delay, adaptive_delay, 0)
         if delay > 0:
             time.sleep(delay)
 
@@ -61,14 +70,23 @@ class BaseWBClient:
     def _update_rate_window(self, response: requests.Response) -> None:
         now = time.monotonic()
         
-        # Проверяем global limiter (461) — отдельный жёсткий лимит
+        # При 429 увеличиваем счётчик и адаптивную задержку
         if response.status_code == 429:
+            self._consecutive_429_count += 1
+            # Адаптивная задержка: 1с, 2с, 4с, 8с... максимум 10с между запросами
+            self._adaptive_delay_seconds = min(10.0, 2 ** (self._consecutive_429_count - 1))
+            
             detail = self._response_detail(response)
             if detail and ("global limiter" in detail.lower() or "461" in detail):
-                # Global limiter — ждём 30 секунд
+                # Global limiter — ждём 30 секунд и сбрасываем burst
                 self._next_request_at = max(self._next_request_at, now + 30.0)
                 self._burst_remaining = 0
                 return
+        else:
+            # Успешный запрос — постепенно снижаем адаптивную задержку
+            if self._consecutive_429_count > 0:
+                self._consecutive_429_count = max(0, self._consecutive_429_count - 1)
+                self._adaptive_delay_seconds = max(0.0, self._adaptive_delay_seconds * 0.5)
         
         # Обрабатываем заголовки X-Ratelimit-* согласно документации WB
         remaining = response.headers.get("X-Ratelimit-Remaining")
@@ -186,6 +204,8 @@ class BaseWBClient:
             self._last_request_at = time.monotonic()
             self._update_rate_window(response)
             if response.status_code < 400:
+                # БЕЗОПАСНЫЙ РЕЖИМ: микро-пауза после успешного запроса для "дыхания" API
+                time.sleep(0.1)
                 if not response.text.strip():
                     return None
                 return response.json()
