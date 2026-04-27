@@ -183,6 +183,10 @@ def metric_cell_from_search_clusters(cluster_rows: list[DailyCampaignSearchClust
     return cell
 
 
+def has_metric_cell_traffic(cell: MetricCell) -> bool:
+    return cell.impressions > 0 or cell.clicks > 0 or decimalize(cell.spend) > ZERO
+
+
 def clamp_metric_cell_to_total(cell: MetricCell, total: MetricCell) -> MetricCell:
     clamped = clone_metric_cell(cell)
     clamped.impressions = max(0, min(clamped.impressions, total.impressions))
@@ -801,20 +805,20 @@ def build_product_report(
     def resolve_unified_group_cells() -> tuple[MetricCell, MetricCell, MetricCell]:
         group = CampaignMonitoringGroup.UNIFIED
         cluster_rows = search_clusters_by_group.get(group, [])
-        if not cluster_rows:
-            # Если кластеров нет - используем legacy
-            legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
-            legacy_recommendation = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
-            legacy_catalog = legacy_cells.get((group, CampaignZone.CATALOG), MetricCell())
-            shelves = add_metric_cells(legacy_recommendation, legacy_catalog)
-            return legacy_search, shelves, MetricCell()
-        
-        # Есть кластеры - используем пропорциональное распределение (Вариант 1)
         total = group_totals.get(group, MetricCell())
         legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
         legacy_recommendation = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
         legacy_catalog = legacy_cells.get((group, CampaignZone.CATALOG), MetricCell())
+        if not cluster_rows:
+            # Если кластеров нет - используем legacy
+            shelves = add_metric_cells(legacy_recommendation, legacy_catalog)
+            return legacy_search, shelves, MetricCell()
+
+        cluster = metric_cell_from_search_clusters(cluster_rows)
+        if not has_metric_cell_traffic(cluster):
+            return MetricCell(), clone_metric_cell(total), MetricCell()
         
+        # Есть кластеры - используем пропорциональное распределение (Вариант 1)
         # Пропорциональное распределение корзин/заказов по кликам кластера
         search = apply_search_cluster_proportional(legacy_search, cluster_rows, total)
         search = clamp_metric_cell_to_total(search, total)
