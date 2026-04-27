@@ -1186,6 +1186,7 @@ def sync_status(request: HttpRequest) -> JsonResponse:
                 or ("Отмена запрошена" if is_running and cancel_requested else ("Выполняется" if is_running else "Завершено")),
                 "detail": progress.get("detail") or "",
                 "updated_at": progress.get("updated_at") or (log.updated_at.isoformat() if log.updated_at else None),
+                "retry_until": progress.get("retry_until"),
             },
         }
     )

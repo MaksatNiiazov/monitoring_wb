@@ -36,6 +36,7 @@ class BaseWBClient:
     burst_limit: int = 1
     max_retries: int = 5
     max_retry_delay_seconds: float = 300.0
+    update_shared_rate_limit_on_429: bool = True
     _shared_rate_limit_state: ClassVar[_RateLimitState] = _RateLimitState()
     _consecutive_429_count: int = 0
     _adaptive_delay_seconds: float = 0.0
@@ -90,6 +91,9 @@ class BaseWBClient:
             CIRCUIT_BREAKER_COOLDOWN = 300.0  # 5 минут
 
             if response.status_code == 429:
+                if not self.update_shared_rate_limit_on_429:
+                    state.next_request_at = max(state.next_request_at, now + self.min_interval_seconds)
+                    return
                 state.consecutive_429_count += 1
                 state.circuit_failure_count += 1
                 state.adaptive_delay_seconds = min(
@@ -459,11 +463,11 @@ class PricesWBClient(BaseWBClient):
 
 class FeedbacksWBClient(BaseWBClient):
     base_url = "https://feedbacks-api.wildberries.ru"
-    # Консервативные настройки из-за массового global limiter с 21 апреля 2026
-    # https://seller.wildberries.ru/forum/threads/429-feedbacks-api-global-rate-limit.12345/
-    min_interval_seconds = 5.0  # Было 2.0 — сейчас 5 сек между запросами
-    max_retries = 7  # Было 5 — увеличили для глобального лимитера
-    max_retry_delay_seconds = 300.0  # Было 180 — до 5 минут ожидания
+    # Отзывы не критичны для цифр таблицы: при 429/461 пропускаем их быстро.
+    min_interval_seconds = 5.0
+    max_retries = 1
+    max_retry_delay_seconds = 30.0
+    update_shared_rate_limit_on_429 = False
 
     def __init__(self, token: str | None = None) -> None:
         super().__init__(token or settings.WB_ANALYTICS_API_TOKEN)

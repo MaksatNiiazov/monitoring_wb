@@ -67,6 +67,7 @@
             this.isRunning = false;
             this.countdownTimer = null;
             this.retryUntil = null;
+            this.countdownMessage = "";
 
             this.syncButtons.forEach((button) => {
                 if (!button.dataset.defaultLabel) {
@@ -91,32 +92,52 @@
             this.timer = window.setTimeout(() => this.poll(), nextMs);
         }
 
-        startCountdown(retryUntil) {
-            this.stopCountdown();
-            this.retryUntil = retryUntil ? new Date(retryUntil).getTime() : null;
-            if (!this.retryUntil || Number.isNaN(this.retryUntil)) {
+        renderCountdownMessage(remaining) {
+            if (!this.messageNode || !this.countdownMessage) {
                 return;
             }
+            this.messageNode.textContent = this.countdownMessage.replace(
+                /Жд[её]м\s+\d+\s+сек/i,
+                `Ждём ${remaining} сек`
+            );
+        }
 
-            const updateCountdown = () => {
-                if (!this.retryUntil) return;
-                const remaining = Math.max(0, Math.floor((this.retryUntil - Date.now()) / 1000));
-                if (remaining <= 0) {
-                    this.stopCountdown();
-                    return;
-                }
-                // Обновляем текст сообщения если он содержит "Ждём" или "сек"
-                if (this.messageNode && this.messageNode.textContent) {
-                    const text = this.messageNode.textContent;
-                    if (text.includes("Ждём") && text.includes("сек")) {
-                        // Заменяем число секунд в тексте
-                        this.messageNode.textContent = text.replace(/Ждём \d+ сек/, `Ждём ${remaining} сек`);
-                    }
-                }
-            };
+        normalizeCountdownMessage(message) {
+            const source = message || this.countdownMessage || (this.messageNode ? this.messageNode.textContent : "");
+            if (!source) {
+                return "";
+            }
+            if (/Жд[её]м\s+\d+\s+сек/i.test(source)) {
+                return source;
+            }
+            return `${source} Ждём 0 сек.`;
+        }
 
-            updateCountdown(); // Сразу обновляем
-            this.countdownTimer = window.setInterval(updateCountdown, 1000); // Каждую секунду
+        updateCountdown() {
+            if (!this.retryUntil) {
+                return;
+            }
+            const remaining = Math.max(0, Math.ceil((this.retryUntil - Date.now()) / 1000));
+            this.renderCountdownMessage(remaining);
+            if (remaining <= 0) {
+                window.clearInterval(this.countdownTimer);
+                this.countdownTimer = null;
+            }
+        }
+
+        startCountdown(retryUntil, message) {
+            const parsedRetryUntil = retryUntil ? new Date(retryUntil).getTime() : null;
+            if (!parsedRetryUntil || Number.isNaN(parsedRetryUntil)) {
+                this.stopCountdown();
+                return;
+            }
+            this.retryUntil = parsedRetryUntil;
+            this.countdownMessage = this.normalizeCountdownMessage(message);
+
+            this.updateCountdown();
+            if (!this.countdownTimer) {
+                this.countdownTimer = window.setInterval(() => this.updateCountdown(), 1000);
+            }
         }
 
         stopCountdown() {
@@ -125,6 +146,7 @@
                 this.countdownTimer = null;
             }
             this.retryUntil = null;
+            this.countdownMessage = "";
         }
 
         nextInterval() {
@@ -234,14 +256,8 @@
             const stage = progress.stage || (data.is_running ? "Выполняется" : "Завершено");
             const detail = progress.detail || "";
             const message = data.message || detail || "";
+            const hasRetryCountdown = Boolean(progress.retry_until && data.is_running);
             this.isRunning = Boolean(data.is_running);
-
-            // Запускаем или останавливаем countdown для retry
-            if (progress.retry_until && data.is_running) {
-                this.startCountdown(progress.retry_until);
-            } else {
-                this.stopCountdown();
-            }
 
             if (this.titleNode) {
                 this.titleNode.textContent = `${data.kind_display}: ${data.status_display}`;
@@ -254,8 +270,13 @@
                 canCancel: Boolean(data.can_cancel),
                 cancelRequested: Boolean(data.cancel_requested),
             });
-            if (this.messageNode) {
+            if (this.messageNode && !hasRetryCountdown) {
                 this.messageNode.textContent = message || "Статус обновлён.";
+            }
+            if (hasRetryCountdown) {
+                this.startCountdown(progress.retry_until, message);
+            } else {
+                this.stopCountdown();
             }
 
             if (data.is_running || Number(progress.percent || 0) > 0) {

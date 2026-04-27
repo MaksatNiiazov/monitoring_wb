@@ -1321,6 +1321,9 @@ def _run_sync_single_day(
         )
         analytics_client = AnalyticsWBClient()
         promotion_client = PromotionWBClient()
+        promotion_client.max_retries = 1
+        promotion_client.max_retry_delay_seconds = 30.0
+        promotion_client.update_shared_rate_limit_on_429 = False
         feedbacks_client = FeedbacksWBClient()
 
         def _bind_retry_progress(client, *, percent: int, stage: str) -> None:
@@ -1584,6 +1587,8 @@ def _run_sync_single_day(
                         )
                         metadata_client = PromotionWBClient()
                         metadata_client.max_retries = 1
+                        metadata_client.max_retry_delay_seconds = 30.0
+                        metadata_client.update_shared_rate_limit_on_429 = False
                         refresh_campaigns_metadata(campaigns, promotion_client=metadata_client)
                     except WBApiError as exc:
                         err_str = str(exc).lower()
