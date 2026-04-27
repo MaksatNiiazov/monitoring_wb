@@ -539,11 +539,23 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         keyword_offset = 0
 
         def row_after_keywords(base_row: int) -> int:
-            return base_row
+            return base_row + keyword_offset
+
+        if active_sheet["kind"] == "product":
+            for row_index, row in enumerate(active_sheet["rows"], start=1):
+                first_value = str(row[0] if row else "").strip()
+                second_value = str(row[1] if len(row) > 1 else "").strip()
+                if first_value == "Ключи":
+                    keyword_header_row = row_index
+                if second_value == "Обзор:":
+                    overview_row = row_index
+            if keyword_header_row and overview_row and overview_row > keyword_header_row:
+                keyword_rows_count = max(0, overview_row - keyword_header_row - 1)
+                keyword_offset = keyword_rows_count
 
         editable_controls: dict[tuple[int, int], dict[str, object]] = {
             (
-                22,
+                17,
                 1,
             ): {
                 "type": "input",
@@ -553,48 +565,27 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 "span_to_block_end": True,
                 "centered": True,
             },
-            (
-                23,
-                1,
-            ): {
-                "type": "input",
-                "field": "unit_cost",
-                "placeholder": "0,00",
-                "span_to_block_end": True,
-                "centered": True,
-            },
-            (
-                24,
-                1,
-            ): {
-                "type": "input",
-                "field": "logistics_cost",
-                "placeholder": "0,00",
-                "span_to_block_end": True,
-                "centered": True,
-            },
-            (25, 1): {"type": "stock_popup"},
-            (35, 7): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%"},
-            (36, 8): {"type": "input", "field": "seller_price", "placeholder": "0,00"},
-            (37, 8): {"type": "input", "field": "wb_price", "placeholder": "0,00"},
-            (38, 8): {
+            (27, 7): {"type": "stock_popup"},
+            (row_after_keywords(34), 2): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%"},
+            (row_after_keywords(35), 7): {"type": "input", "field": "seller_price", "placeholder": "0,00"},
+            (row_after_keywords(36), 7): {"type": "input", "field": "wb_price", "placeholder": "0,00"},
+            (row_after_keywords(37), 7): {
                 "type": "select",
                 "field": "promo_status",
                 "options": ["Не участвуем", "Участвуем", "Тест", "Акция"],
             },
-            (39, 8): {
+            (row_after_keywords(38), 7): {
                 "type": "select",
                 "field": "negative_feedback",
                 "options": ["Без изменений", "Есть негатив", "Нужна проверка", "Критично"],
             },
-            (41, 7): {"type": "bool", "field": "ads_enabled"},
-            (42, 7): {"type": "bool", "field": "price_changed"},
-            (43, 1): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
+            (row_after_keywords(40), 7): {"type": "bool", "field": "unified_enabled"},
+            (row_after_keywords(41), 7): {"type": "bool", "field": "manual_search_enabled"},
+            (row_after_keywords(42), 7): {"type": "bool", "field": "price_changed"},
+            (row_after_keywords(44), 1): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
         }
 
-        display_spans: dict[tuple[int, int], dict[str, bool]] = {
-            (21, 1): {"span_to_block_end": True, "centered": True},
-        }
+        display_spans: dict[tuple[int, int], dict[str, bool]] = {}
         block_dates = active_sheet.get("block_dates") or []
         product_id = active_sheet.get("product_id")
         block_span = BLOCK_WIDTH + BLOCK_GAP

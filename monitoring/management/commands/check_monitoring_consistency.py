@@ -110,7 +110,6 @@ class Command(BaseCommand):
         catalog = table_blocks["catalog"]
         manual = table_blocks["manual"]
         ad_total = table_blocks["ad_total"]
-        traffic_totals = report.get("traffic_totals", {})
         metrics = report.get("metrics")
 
         issues: list[str] = []
@@ -143,9 +142,9 @@ class Command(BaseCommand):
         )
         if unified_total_impressions > 0:
             unified_traffic_sum = (
-                _as_decimal(traffic_totals.get("search"))
-                + _as_decimal(traffic_totals.get("shelves"))
-                + _as_decimal(traffic_totals.get("catalog"))
+                _as_decimal(search.traffic_share(unified_total_impressions))
+                + _as_decimal(shelves.traffic_share(unified_total_impressions))
+                + _as_decimal(catalog.traffic_share(unified_total_impressions))
             )
             if abs(unified_traffic_sum - Decimal("100")) > Decimal("0.5"):
                 issues.append(

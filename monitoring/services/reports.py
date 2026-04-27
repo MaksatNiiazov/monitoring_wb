@@ -179,6 +179,7 @@ def metric_cell_from_search_clusters(cluster_rows: list[DailyCampaignSearchClust
         cell.carts += int(row.add_to_cart_count or 0)
         cell.orders += int(row.order_count or 0)
         cell.units += int(row.units_ordered or 0)
+        cell.order_sum += decimalize(row.order_sum)
     return cell
 
 

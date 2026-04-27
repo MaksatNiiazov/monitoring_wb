@@ -65,6 +65,8 @@
             this.timer = null;
             this.cancelPending = false;
             this.isRunning = false;
+            this.countdownTimer = null;
+            this.retryUntil = null;
 
             this.syncButtons.forEach((button) => {
                 if (!button.dataset.defaultLabel) {
@@ -87,6 +89,42 @@
         schedule(nextMs) {
             window.clearTimeout(this.timer);
             this.timer = window.setTimeout(() => this.poll(), nextMs);
+        }
+
+        startCountdown(retryUntil) {
+            this.stopCountdown();
+            this.retryUntil = retryUntil ? new Date(retryUntil).getTime() : null;
+            if (!this.retryUntil || Number.isNaN(this.retryUntil)) {
+                return;
+            }
+
+            const updateCountdown = () => {
+                if (!this.retryUntil) return;
+                const remaining = Math.max(0, Math.floor((this.retryUntil - Date.now()) / 1000));
+                if (remaining <= 0) {
+                    this.stopCountdown();
+                    return;
+                }
+                // Обновляем текст сообщения если он содержит "Ждём" или "сек"
+                if (this.messageNode && this.messageNode.textContent) {
+                    const text = this.messageNode.textContent;
+                    if (text.includes("Ждём") && text.includes("сек")) {
+                        // Заменяем число секунд в тексте
+                        this.messageNode.textContent = text.replace(/Ждём \d+ сек/, `Ждём ${remaining} сек`);
+                    }
+                }
+            };
+
+            updateCountdown(); // Сразу обновляем
+            this.countdownTimer = window.setInterval(updateCountdown, 1000); // Каждую секунду
+        }
+
+        stopCountdown() {
+            if (this.countdownTimer) {
+                window.clearInterval(this.countdownTimer);
+                this.countdownTimer = null;
+            }
+            this.retryUntil = null;
         }
 
         nextInterval() {
@@ -198,6 +236,13 @@
             const message = data.message || detail || "";
             this.isRunning = Boolean(data.is_running);
 
+            // Запускаем или останавливаем countdown для retry
+            if (progress.retry_until && data.is_running) {
+                this.startCountdown(progress.retry_until);
+            } else {
+                this.stopCountdown();
+            }
+
             if (this.titleNode) {
                 this.titleNode.textContent = `${data.kind_display}: ${data.status_display}`;
             }
@@ -266,6 +311,7 @@
             if (!this.statusUrl) {
                 return;
             }
+            // Не останавливаем countdown при poll, чтобы он продолжал работать между запросами
             try {
                 const response = await fetch(this.statusUrl, {
                     method: "GET",
@@ -284,9 +330,11 @@
                     this.schedule(this.nextInterval());
                 } else {
                     window.clearTimeout(this.timer);
+                    this.stopCountdown();
                 }
             } catch (_error) {
                 this.isRunning = false;
+                this.stopCountdown();
                 if (this.messageNode) {
                     this.messageNode.textContent = "Не удалось получить статус синхронизации. Обновите страницу или запустите синхронизацию повторно.";
                 }

@@ -2403,7 +2403,14 @@ body.is-modal-open {
 }
 
 .monitoring-grid-table td.is-repeat-label-col {
-    display: none;
+    min-width: 12px;
+    width: 12px;
+    max-width: 12px;
+    padding: 0;
+    color: transparent;
+    border-left: 2px solid rgba(20, 33, 42, 0.28);
+    border-right: 0;
+    background: rgba(20, 33, 42, 0.08);
 }
 
 .monitoring-grid-table td.is-keyword-label-col {
@@ -2903,6 +2910,12 @@ body.is-modal-open {
     min-width: 5px;
     width: 5px;
     max-width: 5px;
+}
+
+.table-wrap.is-compact .monitoring-grid-table td.is-repeat-label-col {
+    min-width: 10px;
+    width: 10px;
+    max-width: 10px;
 }
 
 .table-wrap.is-compact .grid-choice-btn {

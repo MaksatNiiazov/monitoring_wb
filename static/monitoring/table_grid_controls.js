@@ -101,18 +101,14 @@
             CONVERSION_ORDER: 14,
             ORDER_SUM: 15,
             BUYOUTS: 16,
-            COST_ORDER: 17,
-            COST_CART: 18,
-            DRR_ORDERS: 19,
-            DRR_SALES: 20,
-            PROFIT: 21,
-            BUYOUT_PERCENT: 22,
-            UNIT_COST: 23,
-            LOGISTICS: 24,
-            STOCK_TOTAL: 26,
-            AVG_STOCK_DROP: 30,
-            DAYS_UNTIL_ZERO: 31,
-            SELLER_PRICE: 36,
+            BUYOUT_PERCENT: 17,
+            COST_ORDER: 18,
+            COST_CART: 19,
+            DRR_ORDERS: 20,
+            DRR_SALES: 21,
+            STOCK_TOTAL: 27,
+            AVG_STOCK_DROP: 31,
+            DAYS_UNTIL_ZERO: 32,
         };
         const COL = {
             SEARCH: 1,
@@ -124,7 +120,6 @@
             OVERALL: 7,
             ORG: 8,
             INPUT_MAIN: 1,
-            SELLER_PRICE: 8,
             STOCK: 7,
         };
 
@@ -230,28 +225,6 @@
 
             const drrSalesCell = formatRatioCell(totalAdSpend, buyouts, { percent: true, blankWhenZeroNumerator: true });
             setCellText(ROW.DRR_SALES, blockIndex, COL.OVERALL, drrSalesCell);
-
-            const sellerPrice = readNumber(ROW.SELLER_PRICE, blockIndex, COL.SELLER_PRICE) || 0;
-            const unitCost = readNumber(ROW.UNIT_COST, blockIndex, COL.INPUT_MAIN) || 0;
-            const logistics = readNumber(ROW.LOGISTICS, blockIndex, COL.INPUT_MAIN) || 0;
-            const totalOrders = orders || 0;
-
-            let profit = null;
-            if (sellerPrice && buyoutFraction > 0) {
-                const drrRatioForProfit =
-                    Number.isFinite(totalAdSpend) && totalAdSpend > 0 && Number.isFinite(buyouts) && buyouts > 0
-                        ? totalAdSpend / buyouts
-                        : 0;
-                const logisticsAdjustment = logistics / buyoutFraction - 50;
-                const margin =
-                    sellerPrice -
-                    unitCost -
-                    (sellerPrice * drrRatioForProfit) -
-                    sellerPrice * 0.25 -
-                    logisticsAdjustment;
-                profit = margin * totalOrders * buyoutFraction;
-            }
-            setCellText(ROW.PROFIT, blockIndex, COL.INPUT_MAIN, Number.isFinite(profit) ? formatDecimalValue(profit) : "-");
         };
 
         const recalcAll = () => {

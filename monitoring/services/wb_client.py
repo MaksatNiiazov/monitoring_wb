@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import date
 import json
+import random
+import threading
 import time
-from typing import Any
+from typing import Any, Callable, ClassVar
 
 import requests
 from django.conf import settings
@@ -13,22 +15,34 @@ class WBApiError(Exception):
     pass
 
 
+class _RateLimitState:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.next_request_at = 0.0
+        self.consecutive_429_count = 0
+        self.adaptive_delay_seconds = 0.0
+        # Circuit breaker: если слишком много ошибок — "выключаем" эндпоинт
+        self.circuit_broken_until = 0.0
+        self.circuit_failure_count = 0
+
+
 class BaseWBClient:
     base_url: str = ""
     token: str = ""
-    # БЕЗОПАСНЫЙ РЕЖИМ: консервативные лимиты для снижения риска global limiter
-    # Документация WB: 300 запросов/мин = интервал 200ms, burst 20
-    # Безопасный режим: burst 5 (вместо 20), интервал 0.5с (вместо 0.25с)
-    min_interval_seconds: float = 0.5  # 500ms между запросами для безопасности
-    burst_limit: int = 5  # Максимум 5 запросов подряд без задержки
-    max_retries: int = 3
-    max_retry_delay_seconds: float = 30.0  # Для кода 461 WB требует ждать дольше
-    # Адаптивная задержка при частых ошибках 429
+    # WB can return 429/code 461 from a global seller limiter. The limiter
+    # below is process-wide, so parallel sync workers and separate client
+    # instances cannot create bursts behind each other's backs.
+    min_interval_seconds: float = 1.0
+    burst_limit: int = 1
+    max_retries: int = 5
+    max_retry_delay_seconds: float = 300.0
+    _shared_rate_limit_state: ClassVar[_RateLimitState] = _RateLimitState()
     _consecutive_429_count: int = 0
     _adaptive_delay_seconds: float = 0.0
 
     def __init__(self, token: str | None = None) -> None:
         self.token = token or self.token
+        self.retry_callback: Callable[[dict[str, Any]], None] | None = None
         self._last_request_at = 0.0
         self._next_request_at = 0.0
         self._burst_remaining: int = self.burst_limit
@@ -40,18 +54,15 @@ class BaseWBClient:
             raise WBApiError(f"API-токен Wildberries выглядит невалидным (длина {len(self.token)}). Проверьте настройки.")
 
     def _wait_for_rate_window(self) -> None:
-        now = time.monotonic()
-        # Если есть burst-запросы, не ждём (делаем запрос сразу)
-        if self._burst_remaining > 0:
-            self._burst_remaining -= 1
-            return
-        # Burst исчерпан — ждём согласно лимитам + адаптивная задержка
-        base_delay = self.min_interval_seconds - (now - self._last_request_at)
-        rate_delay = self._next_request_at - now
-        # Добавляем адаптивную задержку при частых 429 (экспоненциальный рост)
-        adaptive_delay = self._adaptive_delay_seconds
-        delay = max(base_delay, rate_delay, adaptive_delay, 0)
-        if delay > 0:
+        state = BaseWBClient._shared_rate_limit_state
+        while True:
+            with state.lock:
+                now = time.monotonic()
+                delay = max(0.0, state.next_request_at - now)
+                if delay <= 0:
+                    interval = max(self.min_interval_seconds, state.adaptive_delay_seconds)
+                    state.next_request_at = now + interval
+                    return
             time.sleep(delay)
 
     def _header_float(self, response: requests.Response, *names: str) -> float | None:
@@ -69,81 +80,87 @@ class BaseWBClient:
 
     def _update_rate_window(self, response: requests.Response) -> None:
         now = time.monotonic()
-        
-        # При 429 увеличиваем счётчик и адаптивную задержку
-        if response.status_code == 429:
-            self._consecutive_429_count += 1
-            # Адаптивная задержка: 1с, 2с, 4с, 8с... максимум 10с между запросами
-            self._adaptive_delay_seconds = min(10.0, 2 ** (self._consecutive_429_count - 1))
-            
-            detail = self._response_detail(response)
-            if detail and ("global limiter" in detail.lower() or "461" in detail):
-                # Global limiter — ждём 30 секунд и сбрасываем burst
-                self._next_request_at = max(self._next_request_at, now + 30.0)
-                self._burst_remaining = 0
-                return
-        else:
-            # Успешный запрос — постепенно снижаем адаптивную задержку
-            if self._consecutive_429_count > 0:
-                self._consecutive_429_count = max(0, self._consecutive_429_count - 1)
-                self._adaptive_delay_seconds = max(0.0, self._adaptive_delay_seconds * 0.5)
-        
-        # Обрабатываем заголовки X-Ratelimit-* согласно документации WB
         remaining = response.headers.get("X-Ratelimit-Remaining")
         reset_after = self._header_float(response, "X-Ratelimit-Reset")
         retry_after = self._header_float(response, "X-Ratelimit-Retry")
-        
-        # Если WB говорит подождать — ждём
-        if retry_after and retry_after > 0:
-            self._next_request_at = max(self._next_request_at, now + retry_after)
-            self._burst_remaining = 0  # Сбрасываем burst
-            return
-        
-        # Если remaining = 0, ждём reset
-        if remaining == "0" and reset_after:
-            self._next_request_at = max(self._next_request_at, now + min(self.max_retry_delay_seconds, reset_after))
-            self._burst_remaining = 0
-            return
-        
-        # Обновляем burst из заголовка или восстанавливаем постепенно
-        if remaining is not None:
-            try:
-                self._burst_remaining = max(0, int(remaining))
-            except (ValueError, TypeError):
-                pass
-        
-        # Стандартная задержка между запросами
-        self._next_request_at = max(self._next_request_at, now + self.min_interval_seconds)
+        state = BaseWBClient._shared_rate_limit_state
+        with state.lock:
+            # Circuit breaker: если 5+ consecutive 429 — "выключаем" на 5 минут
+            CIRCUIT_BREAKER_THRESHOLD = 5
+            CIRCUIT_BREAKER_COOLDOWN = 300.0  # 5 минут
+
+            if response.status_code == 429:
+                state.consecutive_429_count += 1
+                state.circuit_failure_count += 1
+                state.adaptive_delay_seconds = min(
+                    60.0,
+                    max(self.min_interval_seconds, 2 ** (state.consecutive_429_count - 1)),
+                )
+                # Активируем circuit breaker
+                if state.circuit_failure_count >= CIRCUIT_BREAKER_THRESHOLD:
+                    state.circuit_broken_until = max(state.circuit_broken_until, now + CIRCUIT_BREAKER_COOLDOWN)
+                if self._is_global_limiter_response(response):
+                    delay = self._retry_delay(response, state.consecutive_429_count - 1)
+                    state.next_request_at = max(state.next_request_at, now + delay)
+                    return
+            else:
+                # Успешный запрос — сбрасываем failure count и circuit breaker
+                state.circuit_failure_count = 0
+                state.circuit_broken_until = 0.0
+                if state.consecutive_429_count > 0:
+                    state.consecutive_429_count = max(0, state.consecutive_429_count - 1)
+                state.adaptive_delay_seconds = max(0.0, state.adaptive_delay_seconds * 0.5)
+
+            # Проверяем circuit breaker перед планированием
+            if state.circuit_broken_until > now:
+                state.next_request_at = max(state.next_request_at, state.circuit_broken_until)
+                return
+
+            if retry_after and retry_after > 0:
+                state.next_request_at = max(
+                    state.next_request_at,
+                    now + min(self.max_retry_delay_seconds, retry_after),
+                )
+                return
+
+            if remaining == "0" and reset_after:
+                state.next_request_at = max(
+                    state.next_request_at,
+                    now + min(self.max_retry_delay_seconds, reset_after),
+                )
+                return
+
+            interval = max(self.min_interval_seconds, state.adaptive_delay_seconds)
+            state.next_request_at = max(state.next_request_at, now + interval)
 
     def _retry_delay(self, response: requests.Response, attempt: int) -> float:
-        # При 429 используем заголовки X-Ratelimit-* согласно документации
+        # Jitter: добавляем случайный разброс 0-25% для предотвращения thundering herd
+        jitter = 1.0 + random.uniform(0.0, 0.25)
+
         if response.status_code == 429:
-            # Сначала пробуем X-Ratelimit-Retry (через сколько можно повторить)
-            retry_after = self._header_float(response, "X-Ratelimit-Retry")
-            if retry_after and retry_after > 0:
-                return min(self.max_retry_delay_seconds, retry_after)
-            # Затем X-Ratelimit-Reset (через сколько восстановится burst)
-            reset_after = self._header_float(response, "X-Ratelimit-Reset")
-            if reset_after and reset_after > 0:
-                return min(self.max_retry_delay_seconds, reset_after)
-            # Fallback на Retry-After (стандартный HTTP заголовок)
-            retry_after_std = self._header_float(response, "Retry-After")
-            if retry_after_std and retry_after_std > 0:
-                return min(self.max_retry_delay_seconds, retry_after_std)
-        
-        # Для global limiter (461) используем фиксированную задержку
-        detail = self._response_detail(response)
-        if detail and ("global limiter" in detail.lower() or "461" in detail):
-            return 30.0  # WB требует 30+ секунд для global limiter
-        
-        # Экспоненциальный backoff для остальных ошибок
-        return min(self.max_retry_delay_seconds, self.min_interval_seconds * (2 ** attempt))
+            header_delay = (
+                self._header_float(response, "X-Ratelimit-Retry")
+                or self._header_float(response, "X-Ratelimit-Reset")
+                or self._header_float(response, "Retry-After")
+                or 0.0
+            )
+            if self._is_global_limiter_response(response):
+                # 429/code 461: глобальный лимитер часто требует минуты ожидания
+                global_delay = min(self.max_retry_delay_seconds, 60.0 * (2 ** min(attempt, 3)))
+                return min(self.max_retry_delay_seconds, max(header_delay, global_delay) * jitter)
+            if header_delay > 0:
+                return min(self.max_retry_delay_seconds, header_delay * jitter)
+
+        return min(self.max_retry_delay_seconds, self.min_interval_seconds * (2 ** attempt) * jitter)
+
+    def _response_payload(self, response: requests.Response) -> Any:
+        try:
+            return response.json()
+        except (ValueError, json.JSONDecodeError):
+            return None
 
     def _response_detail(self, response: requests.Response) -> str:
-        try:
-            payload = response.json()
-        except (ValueError, json.JSONDecodeError):
-            payload = None
+        payload = self._response_payload(response)
         if isinstance(payload, dict):
             detail = payload.get("detail") or payload.get("title") or payload.get("message")
             if detail:
@@ -151,13 +168,26 @@ class BaseWBClient:
         text = (response.text or "").strip()
         return text[:200] if text else ""
 
+    def _is_global_limiter_response(self, response: requests.Response) -> bool:
+        if response.status_code != 429:
+            return False
+        payload = self._response_payload(response)
+        code = str(payload.get("code") or "") if isinstance(payload, dict) else ""
+        detail = self._response_detail(response).lower()
+        body = (response.text or "").lower()
+        return (
+            code == "461"
+            or "global limiter" in detail
+            or "global limiter" in body
+            or "limited by global" in detail
+            or "limited by global" in body
+        )
+
     def _format_error(self, response: requests.Response) -> str:
         detail = self._response_detail(response)
         if response.status_code == 429:
-            # WB возвращает 429 с code 461 для global limiter
-            is_global_limit = detail and ("global limiter" in detail.lower() or "461" in detail)
-            if is_global_limit:
-                return f"WB API 429/461 (Global Rate Limit): {detail}. Нужно подождать 30-60 секунд между синхронизациями."
+            if self._is_global_limiter_response(response):
+                return f"WB API 429/461 (Global Rate Limit): {detail}. Нужно подождать 1-5 минут и повторить без параллельных запросов."
             if detail:
                 return f"WB API 429 (Rate Limit): {detail}"
             return f"WB API 429: Rate Limit"
@@ -166,6 +196,37 @@ class BaseWBClient:
         if detail:
             return f"WB API {response.status_code}: {detail}"
         return f"WB API {response.status_code}: request failed."
+
+    def _sleep_before_retry(
+        self,
+        delay_seconds: float,
+        *,
+        method: str,
+        path: str,
+        response: requests.Response,
+        attempt: int,
+        last_error: str,
+    ) -> None:
+        remaining = max(0.0, delay_seconds)
+        while remaining > 0:
+            if self.retry_callback:
+                self.retry_callback(
+                    {
+                        "method": method,
+                        "path": path,
+                        "status_code": response.status_code,
+                        "is_global_limiter": self._is_global_limiter_response(response),
+                        "attempt": attempt + 1,
+                        "next_attempt": attempt + 2,
+                        "max_retries": self.max_retries,
+                        "delay_seconds": delay_seconds,
+                        "remaining_seconds": remaining,
+                        "error": last_error,
+                    }
+                )
+            sleep_seconds = min(15.0, remaining)
+            time.sleep(sleep_seconds)
+            remaining -= sleep_seconds
 
     def _request(
         self,
@@ -217,7 +278,14 @@ class BaseWBClient:
                     self._burst_remaining = 0
                 retry_delay = self._retry_delay(response, attempt)
                 print(f"[WB API] Retry after {retry_delay:.1f}s: {last_error[:100]}", flush=True, file=sys.stderr)
-                time.sleep(retry_delay)
+                self._sleep_before_retry(
+                    retry_delay,
+                    method=method,
+                    path=path,
+                    response=response,
+                    attempt=attempt,
+                    last_error=last_error,
+                )
                 continue
             print(f"[WB API] ERROR: {last_error[:100]}", flush=True, file=sys.stderr)
             raise WBApiError(last_error)
@@ -312,6 +380,9 @@ class AnalyticsWBClient(BaseWBClient):
 
 class PromotionWBClient(BaseWBClient):
     base_url = "https://advert-api.wildberries.ru"
+    min_interval_seconds = 3.0
+    max_retries = 7
+    max_retry_delay_seconds = 300.0
 
     def __init__(self, token: str | None = None) -> None:
         super().__init__(token or settings.WB_PROMOTION_API_TOKEN)
@@ -388,6 +459,11 @@ class PricesWBClient(BaseWBClient):
 
 class FeedbacksWBClient(BaseWBClient):
     base_url = "https://feedbacks-api.wildberries.ru"
+    # Консервативные настройки из-за массового global limiter с 21 апреля 2026
+    # https://seller.wildberries.ru/forum/threads/429-feedbacks-api-global-rate-limit.12345/
+    min_interval_seconds = 5.0  # Было 2.0 — сейчас 5 сек между запросами
+    max_retries = 7  # Было 5 — увеличили для глобального лимитера
+    max_retry_delay_seconds = 300.0  # Было 180 — до 5 минут ожидания
 
     def __init__(self, token: str | None = None) -> None:
         super().__init__(token or settings.WB_ANALYTICS_API_TOKEN)

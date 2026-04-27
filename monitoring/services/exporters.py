@@ -40,6 +40,13 @@ def format_int(value: int | float | Decimal | None) -> str:
     return str(int(decimalize(value)))
 
 
+def format_optional_int(value: int | float | Decimal | None) -> str:
+    number = decimalize(value)
+    if number == 0:
+        return ""
+    return format_int(number)
+
+
 def format_optional_decimal(value: Decimal | int | float | str | None) -> str:
     number = decimalize(value)
     if number == 0:
@@ -72,12 +79,14 @@ def spp_change_parts(report: dict, previous_report: dict | None = None) -> tuple
     if current == 0:
         return ("", "")
     if previous_report is None:
-        return ("Р‘РµР· РёР·РјРµРЅРµРЅРёР№", "")
+        return ("Без изменений", "")
     previous = decimalize(previous_report["note"].spp_percent)
+    if previous == 0:
+        return ("Без изменений", "")
     delta = current - previous
     if delta == 0:
-        return ("Р‘РµР· РёР·РјРµРЅРµРЅРёР№", "")
-    label = "Р’С‹СЂРѕСЃ РЅР°" if delta > 0 else "РЈРїР°Р» РЅР°"
+        return ("Без изменений", "")
+    label = "Вырос на" if delta > 0 else "Упал на"
     return (label, format_percent(abs(delta)))
 
 
@@ -121,8 +130,8 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
     metrics = report["metrics"]
     stock = report["stock"]
     note = report["note"]
-    promo_status_value = (note.promo_status or "").strip() or "РќРµ СѓС‡Р°СЃС‚РІСѓРµРј"
-    negative_feedback_value = (note.negative_feedback or "").strip() or "Р‘РµР· РёР·РјРµРЅРµРЅРёР№"
+    promo_status_value = (note.promo_status or "").strip() or "Не участвуем"
+    negative_feedback_value = (note.negative_feedback or "").strip() or "Без изменений"
     blocks = report["blocks"]
     total_ad = report["total_ad"]
     unified_search = blocks["unified_search"]
@@ -140,14 +149,25 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
         manual_catalog,
         manual_shelves,
     ]
+
+    def has_visible_zone_traffic(cell) -> bool:
+        return (
+            has_metric_cell_data(cell)
+            and (
+                cell.impressions > 0
+                or cell.clicks > 0
+                or decimalize(cell.spend) != 0
+            )
+        )
+
     unified_group_visible = any(has_metric_cell_data(cell) for cell in [unified_search, unified_shelves, unified_catalog])
     active_columns = [
-        unified_group_visible,
-        unified_group_visible,
-        unified_group_visible,
-        has_metric_cell_data(manual_search),
-        has_metric_cell_data(manual_catalog),
-        has_metric_cell_data(manual_shelves),
+        unified_group_visible and has_visible_zone_traffic(unified_search),
+        unified_group_visible and has_visible_zone_traffic(unified_shelves),
+        unified_group_visible and has_visible_zone_traffic(unified_catalog),
+        has_visible_zone_traffic(manual_search),
+        has_visible_zone_traffic(manual_catalog),
+        has_visible_zone_traffic(manual_shelves),
     ]
 
     unified_spend = (
@@ -176,21 +196,21 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
                 continue
             value = getattr(cell, metric_name)
             if isinstance(value, Decimal):
-                values.append(format_decimal(value))
+                values.append(format_optional_decimal(value))
             else:
-                values.append(format_int(value))
+                values.append(format_optional_int(value))
         return values
 
     def unified_traffic_value(cell) -> str:
-        if not has_metric_cell_data(cell) or unified_impressions <= 0:
+        if not has_visible_zone_traffic(cell) or unified_impressions <= 0 or cell.impressions <= 0:
             return ""
         return format_percent(cell.traffic_share(unified_impressions))
 
     def manual_search_traffic_value(cell) -> str:
-        if not has_metric_cell_data(cell):
+        if not has_visible_zone_traffic(cell):
             return ""
         manual_total_impressions = manual_search.impressions + manual_catalog.impressions
-        if manual_total_impressions <= 0:
+        if manual_total_impressions <= 0 or cell.impressions <= 0:
             return ""
         return format_percent(cell.traffic_share(manual_total_impressions))
 
@@ -291,8 +311,8 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
 
     rows = [
         ["", f"{report['stock_date']:%d.%m.%Y}", "", "", "", "", "", "", ""],
-        ["Тип рекламной кампании", "Единая ставка", "", "", "РС Поиск", "", "РС Полки", "Общая", "ОРГ"],
-        ["Зоны показов", "Поиск", "Полки", "Каталог", "Поиск", "Каталог", "Полки", "", ""],
+        ["", "Единая ставка", "", "", "РС Поиск", "", "РС Полки", "", ""],
+        ["Единая ставка", "Поиск", "Полки", "Каталог", "Поиск", "Каталог", "Полки", "Общая", "ОРГ"],
         [
             "Доля трафика (%)",
             unified_traffic_value(unified_search),
@@ -339,12 +359,12 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             format_ratio(total_ad_spend, total_ad_clicks),
             "-",
         ],
-        ["Клики", *pick("clicks"), format_int(overall_clicks), format_int(total_ad_clicks)],
-        ["Корзины", *pick("carts"), format_int(overall_carts), format_int(total_ad_carts)],
-        ["Конверсия в корзину (%)", "", "", "", "", "", "", format_percent_ratio(overall_carts, overall_clicks), format_percent_ratio(total_ad_carts, total_ad_clicks)],
-        ["Заказы", *pick("orders"), format_int(overall_orders), format_int(total_ad_orders)],
-        ["Конверсия в заказ (%)", "", "", "", "", "", "", format_percent_ratio(overall_orders, overall_carts), format_percent_ratio(total_ad_orders, total_ad_carts)],
-        ["Заказы (руб.)", *pick("order_sum"), format_decimal(overall_order_sum), format_decimal(total_ad_order_sum)],
+        ["Клики", *pick("clicks"), format_int(overall_clicks), format_int(organic_clicks)],
+        ["Корзины", *pick("carts"), format_int(overall_carts), format_int(organic_carts)],
+        ["Конверсия в корзину (%)", "", "", "", "", "", "", format_percent_ratio(overall_carts, overall_clicks), ""],
+        ["Заказы", *pick("orders"), format_int(overall_orders), format_int(organic_orders)],
+        ["Конверсия в заказ (%)", "", "", "", "", "", "", format_percent_ratio(overall_orders, overall_carts), ""],
+        ["Заказы (руб.)", *pick("order_sum"), format_decimal(overall_order_sum), format_decimal(organic_order_sum)],
         [
             "Выкупы ≈ (руб.)",
             derived_decimal(unified_search, estimate_buyout_sum(economics, unified_search.order_sum)),
@@ -356,6 +376,7 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             format_decimal(estimated_buyout_overall),
             "-",
         ],
+        ["Процент выкупа %", format_percent(percent_points(economics.buyout_percent)), "", "", "", "", "", "", "-"],
         [
             "Стоимость заказа",
             derived_ratio_decimal(unified_search, unified_search.spend, unified_search.orders, treat_zero_numerator_as_empty=True),
@@ -400,28 +421,48 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             format_percent_ratio(total_ad_spend, estimated_buyout_overall, treat_zero_numerator_as_empty=True),
             "-",
         ],
-        ["Прибыль", format_decimal(profit_overall), "", "", "", "", "", "", ""],
-        ["Процент выкупа %", format_percent(percent_points(economics.buyout_percent)), "", "", "", "", "", "", ""],
-        ["Себестоимость", format_decimal(economics.unit_cost), "", "", "", "", "", "", ""],
-        ["Логистика", format_decimal(economics.logistics_cost), "", "", "", "", "", "", ""],
-        ["", "Остатки:", "", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", "", ""],
         ["", "Остатки на складах WB", "", "", "", "", "", format_int(stock.total_stock if stock else 0), ""],
         ["", "Едут к клиенту", "", "", "", "", "", format_int(stock.in_way_to_client if stock else 0), ""],
         ["", "Возвращаются на склад", "", "", "", "", "", format_int(stock.in_way_from_client if stock else 0), ""],
         ["", "Ср. кол-во заказов/день", "", "", "", "", "", format_decimal(report["avg_orders_per_day"]), ""],
         ["", "Ср. убыль остатков/день", "", "", "", "", "", format_optional_decimal(report["avg_stock_drop_per_day"]), ""],
         ["", "Дней до АУТА", "", "", "", "", "", format_optional_decimal(report["days_until_zero_from_stock_drop"]), ""],
-        ["", "", "", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", "", "", ""],
-        ["", "Обзор:", "", "", "", "", "", "", ""],
-        ["", "СПП", "", "", "", "", "", format_optional_percent(note.spp_percent), spp_delta_text],
-        ["", "Цена WBSELLER (наша)", "", "", "", "", "", "", format_optional_decimal(note.seller_price)],
-        ["", "Цена WB (на сайте)", "", "", "", "", "", "", format_optional_decimal(note.wb_price)],
-        ["", "Акция", "", "", "", "", "", "", promo_status_value],
-        ["", "Негативные отзывы", "", "", "", "", "", "", negative_feedback_value],
-        ["", "Действия:", "", "", "", "", "", "", ""],
-        ["", "Включили рекламу?", "", "", "", "", "", "Да" if (note.unified_enabled or note.manual_search_enabled or note.manual_shelves_enabled or getattr(note, "manual_catalog_enabled", False)) else "Нет", ""],
-        ["", "Меняли цену?(WBSeller)", "", "", "", "", "", "Да" if note.price_changed else "Нет", ""],
-        ["Комментарий:", note.comment, "", "", "", "", "", "", ""],
     ]
+    rows.append(["Ключи", "Частота", "поз. ОРГ", "", "", "", "", "поз. БУСТ", "CTR (%)"])
+    for keyword_row in report.get("keyword_rows") or []:
+        has_data = bool(keyword_row.get("has_data"))
+        rows.append(
+            [
+                keyword_row.get("query_text") or "",
+                format_keyword_int(keyword_row.get("frequency"), has_data=has_data),
+                format_keyword_decimal(keyword_row.get("organic_position"), has_data=has_data),
+                "",
+                "",
+                "",
+                "",
+                format_keyword_decimal(keyword_row.get("boosted_position"), has_data=has_data),
+                format_optional_percent(keyword_row.get("boosted_ctr")) if has_data else "",
+            ]
+        )
+    rows.extend(
+        [
+            ["", "Обзор:", "", "", "", "", "", "", ""],
+            ["", "СПП", format_optional_percent(note.spp_percent), "", "", "", "", spp_delta_label, spp_delta_value],
+            ["", "Цена WBSELLER (наша)", "", "", "", "", "", format_optional_decimal(note.seller_price), ""],
+            ["", "Цена WB (на сайте)", "", "", "", "", "", format_optional_decimal(note.wb_price), ""],
+            ["", "Акция", "", "", "", "", "", promo_status_value, ""],
+            ["", "Негативные отзывы", "", "", "", "", "", negative_feedback_value, ""],
+            ["", "Действия:", "", "", "", "", "", "", ""],
+            ["", "Включили РК единая?", "", "", "", "", "", "Да" if note.unified_enabled else "Нет", ""],
+            ["", "Включили РК руч.поиск", "", "", "", "", "", "Да" if note.manual_search_enabled else "Нет", ""],
+            ["", "Меняли цену?(WBSeller)", "", "", "", "", "", "Да" if note.price_changed else "Нет", ""],
+            ["", "Комментарии:", "", "", "", "", "", "", ""],
+            ["", note.comment, "", "", "", "", "", "", ""],
+        ]
+    )
     return rows

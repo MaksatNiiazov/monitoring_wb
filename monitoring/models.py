@@ -307,6 +307,7 @@ class DailyCampaignSearchClusterStat(TimeStampedModel):
     add_to_cart_count = models.PositiveIntegerField(default=0, verbose_name="Корзины")
     order_count = models.PositiveIntegerField(default=0, verbose_name="Заказы")
     units_ordered = models.PositiveIntegerField(default=0, verbose_name="ШК")
+    order_sum = models.DecimalField(max_digits=14, decimal_places=2, default=0, verbose_name="Сумма заказов")
     raw_payload = models.JSONField(default=dict, blank=True, verbose_name="Сырой ответ API")
 
     class Meta:

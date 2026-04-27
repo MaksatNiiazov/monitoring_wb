@@ -134,7 +134,7 @@ def fetch_product_sizes_payloads(
     *,
     nm_ids: list[int],
     snapshot_date: date,
-    max_workers: int = 4,
+    max_workers: int = 1,
     on_item_done: Callable[[int, int], None] | None = None,
 ) -> dict[int, dict[str, Any]]:
     if not nm_ids:
@@ -681,25 +681,29 @@ def _aggregate_campaign_day_stats(
             zone_totals[zone]["order_sum"] += decimalize(item.get("sum_price"))
             zone_totals[zone]["raw_payload"].append({"appType": app_type, "item": item})
     
-    # Теперь присваиваем суммы зон каждому известному продукту
+    # Нормализуем данные для Единой ставки - делим на количество товаров
+    # чтобы избежать умножения данных при суммировании в отчётах
+    linked_count = len(linked_product_ids) if linked_product_ids else len(product_map)
+    divisor = max(1, linked_count)
+
     for nm_id, product in product_map.items():
         # Проверяем linked_product_ids если они есть
         if linked_product_ids and product.id not in linked_product_ids:
             continue
-            
+
         for zone, totals in zone_totals.items():
             key = (product.id, zone)
             aggregated[key] = {
-                "impressions": totals["impressions"],
-                "clicks": totals["clicks"],
-                "spend": totals["spend"],
-                "add_to_cart_count": totals["add_to_cart_count"],
-                "order_count": totals["order_count"],
-                "units_ordered": totals["units_ordered"],
-                "order_sum": totals["order_sum"],
+                "impressions": totals["impressions"] // divisor,
+                "clicks": totals["clicks"] // divisor,
+                "spend": quantize_money(totals["spend"] / divisor),
+                "add_to_cart_count": totals["add_to_cart_count"] // divisor,
+                "order_count": totals["order_count"] // divisor,
+                "units_ordered": totals["units_ordered"] // divisor,
+                "order_sum": quantize_money(totals["order_sum"] / divisor),
                 "raw_payload": totals["raw_payload"],
             }
-    
+
     return aggregated
 
 
@@ -827,7 +831,7 @@ def fetch_product_enrichment_payloads(
     *,
     products: list[Product],
     stats_date: date,
-    max_workers: int = 4,
+    max_workers: int = 1,
     analytics_client: AnalyticsWBClient | None = None,
     feedbacks_client: FeedbacksWBClient | None = None,
 ) -> tuple[dict[int, dict[str, Any]], list[str]]:
@@ -1116,7 +1120,14 @@ def _assert_not_cancelled(log: SyncLog) -> None:
         raise SyncCancelledError("Синхронизация отменена пользователем.")
 
 
-def _update_sync_progress(log: SyncLog, *, percent: int, stage: str, detail: str | None = None) -> None:
+def _update_sync_progress(
+    log: SyncLog,
+    *,
+    percent: int,
+    stage: str,
+    detail: str | None = None,
+    retry_until: str | None = None,
+) -> None:
     normalized_percent = max(0, min(int(percent), 100))
     progress_payload = {
         "percent": normalized_percent,
@@ -1124,6 +1135,8 @@ def _update_sync_progress(log: SyncLog, *, percent: int, stage: str, detail: str
         "detail": detail or "",
         "updated_at": timezone.now().isoformat(),
     }
+    if retry_until:
+        progress_payload["retry_until"] = retry_until
     log.payload = {
         **(log.payload or {}),
         "progress": progress_payload,
@@ -1309,6 +1322,34 @@ def _run_sync_single_day(
         analytics_client = AnalyticsWBClient()
         promotion_client = PromotionWBClient()
         feedbacks_client = FeedbacksWBClient()
+
+        def _bind_retry_progress(client, *, percent: int, stage: str) -> None:
+            def _on_retry(event: dict[str, Any]) -> None:
+                remaining = max(0, int(round(float(event.get("remaining_seconds") or 0))))
+                next_attempt = int(event.get("next_attempt") or 0)
+                max_retries = int(event.get("max_retries") or 0)
+                path = str(event.get("path") or "")
+                # Рассчитываем timestamp когда retry завершится (для live countdown на фронте)
+                retry_until = (timezone.now() + timezone.timedelta(seconds=remaining)).isoformat()
+                if event.get("is_global_limiter"):
+                    detail = (
+                        f"WB вернул 429/461 на {path}. Ждём {remaining} сек перед повтором "
+                        f"{next_attempt}/{max_retries}. Синхронизация не зависла."
+                    )
+                else:
+                    detail = (
+                        f"WB API временно недоступен на {path}. Ждём {remaining} сек перед повтором "
+                        f"{next_attempt}/{max_retries}."
+                    )
+                _update_sync_progress(log, percent=percent, stage=stage, detail=detail, retry_until=retry_until)
+                _assert_not_cancelled(log)
+
+            client.retry_callback = _on_retry
+
+        _bind_retry_progress(analytics_client, percent=18, stage="WB лимит")
+        _bind_retry_progress(promotion_client, percent=46, stage="WB лимит рекламы")
+        _bind_retry_progress(feedbacks_client, percent=90, stage="WB лимит")
+
         queryset = Product.objects.filter(is_active=True)
         if product_ids:
             queryset = queryset.filter(id__in=product_ids)
@@ -1457,7 +1498,7 @@ def _run_sync_single_day(
                 sizes_payload_by_nm_id = fetch_product_sizes_payloads(
                     nm_ids=[product.nm_id for product in products],
                     snapshot_date=dates.stock_date,
-                    max_workers=4,
+                    max_workers=1,
                     on_item_done=_on_sizes_item_done,
                 )
             except WBApiError as exc:
@@ -1502,7 +1543,7 @@ def _run_sync_single_day(
                     )
 
             # БЕЗОПАСНЫЙ РЕЖИМ: пауза перед рекламой (чувствительный API)
-            time.sleep(2.0)
+            time.sleep(10.0)
             _update_sync_progress(
                 log,
                 percent=45,
@@ -1512,7 +1553,12 @@ def _run_sync_single_day(
             _assert_not_cancelled(log)
             if campaigns:
                 try:
-                    refresh_campaigns_metadata(campaigns, promotion_client=promotion_client)
+                    _update_sync_progress(
+                        log,
+                        percent=45,
+                        stage="Реклама",
+                        detail="Получение рекламной статистики WB.",
+                    )
                     stats_payload = promotion_client.get_campaign_stats(
                         ids=[campaign.external_id for campaign in campaigns],
                         start_date=dates.stats_date,
@@ -1529,6 +1575,23 @@ def _run_sync_single_day(
                             linked_products_by_campaign_id=linked_products_by_campaign_id,
                             tracked_product_ids=tracked_product_ids,
                         )
+                    try:
+                        _update_sync_progress(
+                            log,
+                            percent=58,
+                            stage="Реклама",
+                            detail="Обновление метаданных рекламных кампаний.",
+                        )
+                        metadata_client = PromotionWBClient()
+                        metadata_client.max_retries = 1
+                        refresh_campaigns_metadata(campaigns, promotion_client=metadata_client)
+                    except WBApiError as exc:
+                        err_str = str(exc).lower()
+                        if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
+                            _sync_console("ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на метаданных кампаний. Пропускаем.")
+                            optional_errors.append(f"campaign_metadata rate limit: {str(exc)[:80]}")
+                        else:
+                            raise
                 except WBApiError as exc:
                     err_str = str(exc).lower()
                     if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
@@ -1568,11 +1631,8 @@ def _run_sync_single_day(
                 except WBApiError as exc:
                     return {}, f"supplier_orders: {exc}"
 
-            with ThreadPoolExecutor(max_workers=2, thread_name_prefix="wb-sync-stage") as executor:
-                price_future = executor.submit(_fetch_price_lookup)
-                supplier_future = executor.submit(_fetch_supplier_orders_lookup)
-                price_lookup, price_error = price_future.result()
-                supplier_orders_lookup, supplier_error = supplier_future.result()
+            price_lookup, price_error = _fetch_price_lookup()
+            supplier_orders_lookup, supplier_error = _fetch_supplier_orders_lookup()
 
             if price_error:
                 optional_errors.append(price_error)
@@ -1629,6 +1689,7 @@ def _run_sync_single_day(
                                     "add_to_cart_count": 0,
                                     "order_count": 0,
                                     "units_ordered": 0,
+                                    "order_sum": Decimal("0"),
                                     "raw_payload": [],
                                 },
                             )
@@ -1647,6 +1708,7 @@ def _run_sync_single_day(
                                 pair_totals["add_to_cart_count"] += int(stat.get("atbs") or 0)
                                 pair_totals["order_count"] += int(stat.get("orders") or 0)
                                 pair_totals["units_ordered"] += int(stat.get("shks") or 0)
+                                pair_totals["order_sum"] += decimalize(stat.get("sum_price"))
                                 pair_totals["raw_payload"].append(daily_stat)
 
                                 normalized_query = normalize_search_text(stat.get("normQuery") or "")
@@ -1694,6 +1756,7 @@ def _run_sync_single_day(
                             add_to_cart_count=payload["add_to_cart_count"],
                             order_count=payload["order_count"],
                             units_ordered=payload["units_ordered"],
+                            order_sum=quantize_money(payload["order_sum"]),
                             raw_payload={"daily_stats": payload["raw_payload"]},
                         )
                         for (campaign_id, product_id), payload in search_cluster_totals_by_pair.items()
@@ -1758,7 +1821,7 @@ def _run_sync_single_day(
                 product_enrichment_by_id, enrichment_warnings = fetch_product_enrichment_payloads(
                     products=products,
                     stats_date=dates.stats_date,
-                    max_workers=4,
+                    max_workers=1,
                     analytics_client=analytics_client,
                     feedbacks_client=feedbacks_client,
                 )
