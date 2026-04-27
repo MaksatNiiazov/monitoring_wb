@@ -55,6 +55,13 @@ class SyncCancelledError(SyncServiceError):
 
 logger = logging.getLogger(__name__)
 
+WB_RATE_LIMIT_MARKERS = ("429", "461", "global limiter", "rate limit", "limited by")
+API_FAMILY_ANALYTICS = "analytics"
+API_FAMILY_PROMOTION = "promotion"
+API_FAMILY_PRICES = "prices"
+API_FAMILY_STATISTICS = "statistics"
+API_FAMILY_FEEDBACKS = "feedbacks"
+
 
 def _sync_console(message: str) -> None:
     timestamp = timezone.localtime().strftime("%Y-%m-%d %H:%M:%S")
@@ -117,6 +124,20 @@ def is_wb_start_day_limit_error(message: str) -> bool:
     )
 
 
+def is_wb_rate_limit_error(message: str) -> bool:
+    normalized = (message or "").lower()
+    return any(marker in normalized for marker in WB_RATE_LIMIT_MARKERS)
+
+
+def configure_sync_wb_client(client: Any, *, max_retries: int | None = None) -> Any:
+    if max_retries is not None:
+        client.max_retries = max_retries
+    client.max_retry_delay_seconds = min(float(getattr(client, "max_retry_delay_seconds", 30.0)), 30.0)
+    client.fast_fail_rate_limit = True
+    client.update_shared_rate_limit_on_429 = False
+    return client
+
+
 def humanize_sync_error_message(message: str) -> str:
     if is_wb_start_day_limit_error(message):
         return (
@@ -136,14 +157,16 @@ def fetch_product_sizes_payloads(
     snapshot_date: date,
     max_workers: int = 1,
     on_item_done: Callable[[int, int], None] | None = None,
+    client_factory: Callable[[], AnalyticsWBClient] | None = None,
 ) -> dict[int, dict[str, Any]]:
     if not nm_ids:
         return {}
 
     total = len(nm_ids)
     worker_count = max(1, min(max_workers, len(nm_ids)))
+    resolved_client_factory = client_factory or AnalyticsWBClient
     if worker_count == 1:
-        client = AnalyticsWBClient()
+        client = resolved_client_factory()
         payloads: dict[int, dict[str, Any]] = {}
         for index, nm_id in enumerate(nm_ids, start=1):
             payloads[nm_id] = client.get_product_sizes(nm_id=nm_id, snapshot_date=snapshot_date)
@@ -152,7 +175,7 @@ def fetch_product_sizes_payloads(
         return payloads
 
     def _fetch_one(target_nm_id: int) -> tuple[int, dict[str, Any]]:
-        thread_client = AnalyticsWBClient()
+        thread_client = resolved_client_factory()
         return target_nm_id, thread_client.get_product_sizes(nm_id=target_nm_id, snapshot_date=snapshot_date)
 
     payloads: dict[int, dict[str, Any]] = {}
@@ -834,6 +857,8 @@ def fetch_product_enrichment_payloads(
     max_workers: int = 1,
     analytics_client: AnalyticsWBClient | None = None,
     feedbacks_client: FeedbacksWBClient | None = None,
+    skip_analytics: bool = False,
+    skip_feedbacks: bool = False,
 ) -> tuple[dict[int, dict[str, Any]], list[str]]:
     payloads_by_product_id: dict[int, dict[str, Any]] = {}
     warnings: list[str] = []
@@ -852,7 +877,7 @@ def fetch_product_enrichment_payloads(
         organic_keyword_payload: dict[str, Any] | None = None
         negative_feedback_count: int | None = None
 
-        if keywords:
+        if keywords and not skip_analytics:
             try:
                 organic_keyword_payload = local_analytics_client.get_search_orders(
                     nm_id=product.nm_id,
@@ -862,15 +887,20 @@ def fetch_product_enrichment_payloads(
                 )
             except WBApiError as exc:
                 local_warnings.append(f"organic_keywords:{product.nm_id}: {exc}")
+        elif keywords and skip_analytics:
+            local_warnings.append(f"organic_keywords:{product.nm_id}: skipped because analytics API is rate-limited")
 
-        try:
-            negative_feedback_count = fetch_negative_feedback_count(
-                feedback_client=local_feedbacks_client,
-                product=product,
-                stats_date=stats_date,
-            )
-        except WBApiError as exc:
-            local_warnings.append(f"feedbacks:{product.nm_id}: {exc}")
+        if not skip_feedbacks:
+            try:
+                negative_feedback_count = fetch_negative_feedback_count(
+                    feedback_client=local_feedbacks_client,
+                    product=product,
+                    stats_date=stats_date,
+                )
+            except WBApiError as exc:
+                local_warnings.append(f"feedbacks:{product.nm_id}: {exc}")
+        else:
+            local_warnings.append(f"feedbacks:{product.nm_id}: skipped because feedbacks API is rate-limited")
 
         return (
             product.id,
@@ -1217,6 +1247,7 @@ def run_sync(
 
     last_log: SyncLog | None = None
     skipped_dates_due_api_limit: list[str] = []
+    blocked_api_families: set[str] = set()
     for sync_day in sync_dates:
         _sync_console(f"sync day started date={sync_day.stats_date.isoformat()}")
         try:
@@ -1228,7 +1259,9 @@ def run_sync(
                 days_count=len(sync_dates),
                 overwrite=overwrite,
                 kind=kind,
+                blocked_api_families=blocked_api_families,
             )
+            blocked_api_families.update((last_log.payload or {}).get("wb_limited_families") or [])
         except SyncServiceError as exc:
             if is_wb_start_day_limit_error(str(exc)):
                 skipped_dates_due_api_limit.append(sync_day.stats_date.isoformat())
@@ -1265,9 +1298,19 @@ def run_sync(
         last_log.message = (
             f"{(last_log.message or '').strip()} Пропущено дат из-за ограничения WB Analytics: {len(skipped_dates_due_api_limit)}."
         ).strip()
+    if blocked_api_families:
+        payload["wb_limited_families"] = sorted(blocked_api_families)
+        payload["partial_sync"] = True
+        warnings_payload = payload.get("warnings")
+        warnings = list(warnings_payload) if isinstance(warnings_payload, list) else []
+        range_warning = f"Часть WB API была пропущена из-за лимита: {', '.join(sorted(blocked_api_families))}."
+        if range_warning not in warnings:
+            warnings.append(range_warning)
+        payload["warnings"] = warnings
+        last_log.message = f"{(last_log.message or '').strip()} Частичная синхронизация: {range_warning}".strip()
     last_log.payload = payload
     update_fields = ["payload", "updated_at"]
-    if skipped_dates_due_api_limit:
+    if skipped_dates_due_api_limit or blocked_api_families:
         update_fields.append("message")
     last_log.save(update_fields=update_fields)
     _sync_console(
@@ -1286,6 +1329,7 @@ def _run_sync_single_day(
     days_count: int = 1,
     overwrite: bool = True,
     kind: str = SyncKind.FULL,
+    blocked_api_families: set[str] | None = None,
 ) -> SyncLog:
     dates = resolve_sync_dates(reference_date)
     runtime_settings = get_monitoring_settings()
@@ -1312,6 +1356,19 @@ def _run_sync_single_day(
         f"log={log.id} started kind={kind} date={dates.stats_date.isoformat()} "
         f"days_count={max(1, days_count)} overwrite={overwrite}"
     )
+    optional_errors: list[str] = []
+    limited_api_families: set[str] = set(blocked_api_families or set())
+
+    def _family_limited(family: str) -> bool:
+        return family in limited_api_families
+
+    def _record_rate_limit(family: str, source: str, exc: Exception | str) -> None:
+        limited_api_families.add(family)
+        warning = f"{source} rate limit: {str(exc)[:120]}"
+        if warning not in optional_errors:
+            optional_errors.append(warning)
+        _sync_console(f"WB API family limited family={family} source={source}. Further calls in this family are skipped.")
+
     try:
         _update_sync_progress(
             log,
@@ -1319,12 +1376,9 @@ def _run_sync_single_day(
             stage="Подготовка",
             detail="Инициализация клиентов WB и подготовка списка товаров.",
         )
-        analytics_client = AnalyticsWBClient()
-        promotion_client = PromotionWBClient()
-        promotion_client.max_retries = 1
-        promotion_client.max_retry_delay_seconds = 30.0
-        promotion_client.update_shared_rate_limit_on_429 = False
-        feedbacks_client = FeedbacksWBClient()
+        analytics_client = configure_sync_wb_client(AnalyticsWBClient())
+        promotion_client = configure_sync_wb_client(PromotionWBClient(), max_retries=1)
+        feedbacks_client = configure_sync_wb_client(FeedbacksWBClient(), max_retries=1)
 
         def _bind_retry_progress(client, *, percent: int, stage: str) -> None:
             def _on_retry(event: dict[str, Any]) -> None:
@@ -1361,7 +1415,6 @@ def _run_sync_single_day(
             raise SyncServiceError("Нет активных товаров для синхронизации.")
         _assert_not_cancelled(log)
 
-        optional_errors: list[str] = []
         product_map = {product.nm_id: product for product in products}
         tracked_product_ids = [product.id for product in products]
         campaigns = list(Campaign.objects.filter(is_active=True, products__in=products).distinct())
@@ -1393,9 +1446,13 @@ def _run_sync_single_day(
             funnel_chunk_size = 50  # БЕЗОПАСНЫЙ РЕЖИМ: уменьшили с 100 до 50
             total_funnel_chunks = max(1, (len(nm_ids_list) + funnel_chunk_size - 1) // funnel_chunk_size)
             _sync_console(f"Начинаем сбор воронки: {len(nm_ids_list)} товаров, {total_funnel_chunks} чанков по {funnel_chunk_size}")
-            for chunk_index, nm_chunk in enumerate(batched(nm_ids_list, funnel_chunk_size), start=1):
-                _assert_not_cancelled(log)
-                if nm_chunk:
+            if _family_limited(API_FAMILY_ANALYTICS):
+                _sync_console("Пропускаем воронку: Analytics API уже ограничен в этом запуске.")
+            else:
+                for chunk_index, nm_chunk in enumerate(batched(nm_ids_list, funnel_chunk_size), start=1):
+                    _assert_not_cancelled(log)
+                    if not nm_chunk:
+                        continue
                     _sync_console(f"Запрос воронки: чанк {chunk_index}/{total_funnel_chunks} ({len(nm_chunk)} товаров)")
                     import time
                     start_time = time.monotonic()
@@ -1412,12 +1469,11 @@ def _run_sync_single_day(
                         elapsed = time.monotonic() - start_time
                         err_str = str(exc).lower()
                         # При 429/461 (rate limit / global limiter) продолжаем без данных воронки, чтобы не зависать
-                        is_rate_limit = any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"])
+                        is_rate_limit = is_wb_rate_limit_error(err_str)
                         if is_rate_limit:
                             _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на воронке после {elapsed:.1f}с. Пропускаем.")
-                            _sync_console(f"Подождите 30-60 секунд и запустите синхронизацию снова (global limiter WB).")
-                            optional_errors.append(f"sales_funnel_history rate limit after {elapsed:.1f}s: {str(exc)[:80]}")
-                            break  # Выходим из цикла чанков, продолжаем без воронки
+                            _record_rate_limit(API_FAMILY_ANALYTICS, "sales_funnel_history", exc)
+                            break
                         _sync_console(f"ОШИБКА воронки чанк {chunk_index}/{total_funnel_chunks} после {elapsed:.1f}с: {exc}")
                         raise
                     # Обновляем прогресс внутри этапа "Воронка" (12% -> 28%)
@@ -1458,29 +1514,31 @@ def _run_sync_single_day(
             )
             _assert_not_cancelled(log)
             stock_items_by_nm_id: dict[int, dict[str, Any]] = {}
-            try:
-                # Разбиваем запросы остатков на chunks для стабильности
-                stock_chunk_size = 50  # БЕЗОПАСНЫЙ РЕЖИМ: уменьшили с 200 до 50
-                for nm_chunk in batched(list(product_map.keys()), stock_chunk_size):
-                    _assert_not_cancelled(log)
-                    if not nm_chunk:
-                        continue
-                    stock_response = analytics_client.get_product_stocks(
-                        nm_ids=list(nm_chunk),
-                        snapshot_date=dates.stock_date,
-                    )
-                    for item in stock_response.get("data", {}).get("items", []) or []:
-                        nm_id = item.get("nmID")
-                        if nm_id:
-                            stock_items_by_nm_id[nm_id] = item
-            except WBApiError as exc:
-                err_str = str(exc).lower()
-                # При 429/461 продолжаем без остатков, при 500 тоже продолжаем (было раньше)
-                if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
-                    _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на остатках. Пропускаем.")
-                    optional_errors.append(f"product_stocks rate limit: {str(exc)[:80]}")
-                elif "wb api 500" not in err_str:
-                    raise
+            if _family_limited(API_FAMILY_ANALYTICS):
+                _sync_console("Пропускаем остатки: Analytics API уже ограничен в этом запуске.")
+            else:
+                try:
+                    # Разбиваем запросы остатков на chunks для стабильности
+                    stock_chunk_size = 50  # БЕЗОПАСНЫЙ РЕЖИМ: уменьшили с 200 до 50
+                    for nm_chunk in batched(list(product_map.keys()), stock_chunk_size):
+                        _assert_not_cancelled(log)
+                        if not nm_chunk:
+                            continue
+                        stock_response = analytics_client.get_product_stocks(
+                            nm_ids=list(nm_chunk),
+                            snapshot_date=dates.stock_date,
+                        )
+                        for item in stock_response.get("data", {}).get("items", []) or []:
+                            nm_id = item.get("nmID")
+                            if nm_id:
+                                stock_items_by_nm_id[nm_id] = item
+                except WBApiError as exc:
+                    err_str = str(exc).lower()
+                    if is_wb_rate_limit_error(err_str):
+                        _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на остатках. Пропускаем.")
+                        _record_rate_limit(API_FAMILY_ANALYTICS, "product_stocks", exc)
+                    elif "wb api 500" not in err_str:
+                        raise
 
             _assert_not_cancelled(log)
             sizes_total = max(1, len(products))
@@ -1497,35 +1555,43 @@ def _run_sync_single_day(
                     )
 
             sizes_payload_by_nm_id: dict[int, dict[str, Any]] = {}
-            try:
-                sizes_payload_by_nm_id = fetch_product_sizes_payloads(
-                    nm_ids=[product.nm_id for product in products],
-                    snapshot_date=dates.stock_date,
-                    max_workers=1,
-                    on_item_done=_on_sizes_item_done,
-                )
-            except WBApiError as exc:
-                err_str = str(exc).lower()
-                if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
-                    _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на размерах. Пропускаем.")
-                    optional_errors.append(f"product_sizes rate limit: {str(exc)[:80]}")
-                else:
-                    raise
+            if _family_limited(API_FAMILY_ANALYTICS):
+                _sync_console("Пропускаем размеры: Analytics API уже ограничен в этом запуске.")
+            else:
+                try:
+                    sizes_payload_by_nm_id = fetch_product_sizes_payloads(
+                        nm_ids=[product.nm_id for product in products],
+                        snapshot_date=dates.stock_date,
+                        max_workers=1,
+                        on_item_done=_on_sizes_item_done,
+                        client_factory=lambda: configure_sync_wb_client(AnalyticsWBClient()),
+                    )
+                except WBApiError as exc:
+                    err_str = str(exc).lower()
+                    if is_wb_rate_limit_error(err_str):
+                        _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на размерах. Пропускаем.")
+                        _record_rate_limit(API_FAMILY_ANALYTICS, "product_sizes", exc)
+                    else:
+                        raise
 
             for product in products:
                 _assert_not_cancelled(log)
                 sizes_payload = sizes_payload_by_nm_id.get(product.nm_id)
                 # Если нет sizes_payload (rate limit или нет данных), используем минимальный payload
                 if sizes_payload is None:
-                    try:
-                        sizes_payload = analytics_client.get_product_sizes(nm_id=product.nm_id, snapshot_date=dates.stock_date)
-                    except WBApiError as exc:
-                        err_str = str(exc).lower()
-                        if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
-                            _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: Пропуск размеров для nm_id={product.nm_id} из-за rate limit")
-                            sizes_payload = {}
-                        else:
-                            raise
+                    if _family_limited(API_FAMILY_ANALYTICS):
+                        sizes_payload = {}
+                    else:
+                        try:
+                            sizes_payload = analytics_client.get_product_sizes(nm_id=product.nm_id, snapshot_date=dates.stock_date)
+                        except WBApiError as exc:
+                            err_str = str(exc).lower()
+                            if is_wb_rate_limit_error(err_str):
+                                _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: Пропуск размеров для nm_id={product.nm_id} из-за rate limit")
+                                _record_rate_limit(API_FAMILY_ANALYTICS, "product_sizes", exc)
+                                sizes_payload = {}
+                            else:
+                                raise
                 derived_stock_payload = build_product_stock_payload_from_sizes(sizes_payload) if sizes_payload else {"metrics": {}}
                 stock_item = stock_items_by_nm_id.get(product.nm_id)
                 if stock_item:
@@ -1554,7 +1620,9 @@ def _run_sync_single_day(
                 detail="Обновление статусов кампаний и рекламной статистики.",
             )
             _assert_not_cancelled(log)
-            if campaigns:
+            if campaigns and _family_limited(API_FAMILY_PROMOTION):
+                _sync_console("Пропускаем рекламу: Promotion API уже ограничен в этом запуске.")
+            elif campaigns:
                 try:
                     _update_sync_progress(
                         log,
@@ -1585,23 +1653,20 @@ def _run_sync_single_day(
                             stage="Реклама",
                             detail="Обновление метаданных рекламных кампаний.",
                         )
-                        metadata_client = PromotionWBClient()
-                        metadata_client.max_retries = 1
-                        metadata_client.max_retry_delay_seconds = 30.0
-                        metadata_client.update_shared_rate_limit_on_429 = False
+                        metadata_client = configure_sync_wb_client(PromotionWBClient(), max_retries=1)
                         refresh_campaigns_metadata(campaigns, promotion_client=metadata_client)
                     except WBApiError as exc:
                         err_str = str(exc).lower()
-                        if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
+                        if is_wb_rate_limit_error(err_str):
                             _sync_console("ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на метаданных кампаний. Пропускаем.")
-                            optional_errors.append(f"campaign_metadata rate limit: {str(exc)[:80]}")
+                            _record_rate_limit(API_FAMILY_PROMOTION, "campaign_metadata", exc)
                         else:
                             raise
                 except WBApiError as exc:
                     err_str = str(exc).lower()
-                    if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
+                    if is_wb_rate_limit_error(err_str):
                         _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на рекламе. Пропускаем.")
-                        optional_errors.append(f"campaign_stats rate limit: {str(exc)[:80]}")
+                        _record_rate_limit(API_FAMILY_PROMOTION, "campaign_stats", exc)
                     else:
                         raise
 
@@ -1614,7 +1679,7 @@ def _run_sync_single_day(
             _assert_not_cancelled(log)
             def _fetch_price_lookup() -> tuple[dict[int, dict[str, Decimal]], str | None]:
                 try:
-                    local_prices_client = PricesWBClient()
+                    local_prices_client = configure_sync_wb_client(PricesWBClient())
                     lookup: dict[int, dict[str, Decimal]] = {}
                     for nm_chunk in batched(list(product_map.keys()), 1000):
                         if not nm_chunk:
@@ -1626,7 +1691,7 @@ def _run_sync_single_day(
 
             def _fetch_supplier_orders_lookup() -> tuple[dict[int, list[dict[str, Any]]], str | None]:
                 try:
-                    local_statistics_client = StatisticsWBClient()
+                    local_statistics_client = configure_sync_wb_client(StatisticsWBClient())
                     supplier_rows = local_statistics_client.get_supplier_orders(date_from=dates.stats_date)
                     supplier_lookup_by_date, undated_supplier_lookup = split_supplier_orders_lookup_by_date(supplier_rows)
                     supplier_lookup = supplier_lookup_by_date.get(dates.stats_date, {})
@@ -1636,13 +1701,27 @@ def _run_sync_single_day(
                 except WBApiError as exc:
                     return {}, f"supplier_orders: {exc}"
 
-            price_lookup, price_error = _fetch_price_lookup()
-            supplier_orders_lookup, supplier_error = _fetch_supplier_orders_lookup()
-
+            if _family_limited(API_FAMILY_PRICES):
+                _sync_console("Пропускаем цены: Prices API уже ограничен в этом запуске.")
+                price_lookup, price_error = {}, None
+            else:
+                price_lookup, price_error = _fetch_price_lookup()
             if price_error:
                 optional_errors.append(price_error)
+                if is_wb_rate_limit_error(price_error):
+                    _record_rate_limit(API_FAMILY_PRICES, "prices", price_error)
+                    price_lookup = {}
+
+            if _family_limited(API_FAMILY_STATISTICS):
+                _sync_console("Пропускаем заказы поставщика: Statistics API уже ограничен в этом запуске.")
+                supplier_orders_lookup, supplier_error = {}, None
+            else:
+                supplier_orders_lookup, supplier_error = _fetch_supplier_orders_lookup()
             if supplier_error:
                 optional_errors.append(supplier_error)
+                if is_wb_rate_limit_error(supplier_error):
+                    _record_rate_limit(API_FAMILY_STATISTICS, "supplier_orders", supplier_error)
+                    supplier_orders_lookup = {}
 
             _update_sync_progress(
                 log,
@@ -1653,7 +1732,10 @@ def _run_sync_single_day(
             _assert_not_cancelled(log)
             boosted_keyword_aggregates: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
             search_cluster_totals_by_pair: dict[tuple[int, int], dict[str, Any]] = {}
-            if campaigns:
+            search_cluster_refresh_ok = False
+            if campaigns and _family_limited(API_FAMILY_PROMOTION):
+                _sync_console("Пропускаем ключевые запросы рекламы: Promotion API уже ограничен в этом запуске.")
+            elif campaigns:
                 current_date_iso = dates.stats_date.isoformat()
                 normquery_items = [
                     {"advertId": pair.campaign.external_id, "nmId": pair.product.nm_id}
@@ -1735,21 +1817,22 @@ def _run_sync_single_day(
                                 entry["views"] += views
                                 entry["clicks"] += clicks
                                 entry["raw_payload"].append(stat)
+                    search_cluster_refresh_ok = True
                 except WBApiError as exc:
                     err_str = str(exc).lower()
-                    if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
+                    if is_wb_rate_limit_error(err_str):
                         _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на ключевых словах. Пропускаем.")
-                        optional_errors.append(f"boosted_keywords rate limit: {str(exc)[:80]}")
+                        _record_rate_limit(API_FAMILY_PROMOTION, "boosted_keywords", exc)
                     else:
                         optional_errors.append(f"boosted_keywords: {exc}")
 
-                if overwrite:
+                if search_cluster_refresh_ok and overwrite:
                     DailyCampaignSearchClusterStat.objects.filter(
                         campaign__in=campaigns,
                         product__in=products,
                         stats_date=dates.stats_date,
                     ).delete()
-                if search_cluster_totals_by_pair:
+                if search_cluster_refresh_ok and search_cluster_totals_by_pair:
                     cluster_rows = [
                         DailyCampaignSearchClusterStat(
                             campaign_id=campaign_id,
@@ -1829,13 +1912,20 @@ def _run_sync_single_day(
                     max_workers=1,
                     analytics_client=analytics_client,
                     feedbacks_client=feedbacks_client,
+                    skip_analytics=_family_limited(API_FAMILY_ANALYTICS),
+                    skip_feedbacks=_family_limited(API_FAMILY_FEEDBACKS),
                 )
                 optional_errors.extend(enrichment_warnings)
+                for warning in enrichment_warnings:
+                    if warning.startswith("organic_keywords:") and is_wb_rate_limit_error(warning):
+                        _record_rate_limit(API_FAMILY_ANALYTICS, "organic_keywords", warning)
+                    if warning.startswith("feedbacks:") and is_wb_rate_limit_error(warning):
+                        _record_rate_limit(API_FAMILY_FEEDBACKS, "feedbacks", warning)
             except WBApiError as exc:
                 err_str = str(exc).lower()
-                if any(x in err_str for x in ["429", "461", "global limiter", "rate limit", "limited by"]):
+                if is_wb_rate_limit_error(err_str):
                     _sync_console(f"ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на обзоре по товарам. Пропускаем.")
-                    optional_errors.append(f"product_enrichment rate limit: {str(exc)[:80]}")
+                    _record_rate_limit(API_FAMILY_ANALYTICS, "product_enrichment", exc)
                 else:
                     raise
             for product in products:
@@ -1878,20 +1968,31 @@ def _run_sync_single_day(
         _assert_not_cancelled(log)
         log.status = SyncStatus.SUCCESS
         log.finished_at = timezone.now()
+        success_detail = "Синхронизация завершена успешно."
+        success_stage = "Завершено"
+        if limited_api_families:
+            success_stage = "Завершено частично"
+            success_detail = (
+                "Синхронизация завершена частично: часть WB API была ограничена 429/461, "
+                "поэтому эти разделы пропущены без повторного спама запросами."
+            )
         final_payload = {
             **(log.payload or {}),
             "progress": {
                 "percent": 100,
-                "stage": "Завершено",
-                "detail": "Синхронизация завершена успешно.",
+                "stage": success_stage,
+                "detail": success_detail,
                 "updated_at": timezone.now().isoformat(),
             },
         }
         if optional_errors:
             final_payload["warnings"] = optional_errors
+        if limited_api_families:
+            final_payload["wb_limited_families"] = sorted(limited_api_families)
+            final_payload["partial_sync"] = True
         log.payload = final_payload
         optional_note = f" Предупреждений: {len(optional_errors)}." if optional_errors else ""
-        log.message = f"Синхронизация завершена.{optional_note}".strip()
+        log.message = f"{success_detail}{optional_note}".strip()
         log.save(update_fields=["status", "finished_at", "message", "payload", "updated_at"])
         _sync_console(
             f"log={log.id} finished status={log.status} warnings={len(optional_errors)} "

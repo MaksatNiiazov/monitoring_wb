@@ -36,6 +36,7 @@ class BaseWBClient:
     burst_limit: int = 1
     max_retries: int = 5
     max_retry_delay_seconds: float = 300.0
+    fast_fail_rate_limit: bool = False
     update_shared_rate_limit_on_429: bool = True
     _shared_rate_limit_state: ClassVar[_RateLimitState] = _RateLimitState()
     _consecutive_429_count: int = 0
@@ -276,6 +277,9 @@ class BaseWBClient:
                 return response.json()
 
             last_error = self._format_error(response)
+            if response.status_code == 429 and self.fast_fail_rate_limit:
+                print(f"[WB API] Fast fail on rate limit: {last_error[:100]}", flush=True, file=sys.stderr)
+                raise WBApiError(last_error)
             if response.status_code in {429, 500, 502, 503, 504} and attempt < self.max_retries - 1:
                 # При 429 сбрасываем burst (документация WB)
                 if response.status_code == 429:
@@ -467,6 +471,7 @@ class FeedbacksWBClient(BaseWBClient):
     min_interval_seconds = 5.0
     max_retries = 1
     max_retry_delay_seconds = 30.0
+    fast_fail_rate_limit = True
     update_shared_rate_limit_on_429 = False
 
     def __init__(self, token: str | None = None) -> None:
