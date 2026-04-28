@@ -14,8 +14,6 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from monitoring.models import (
-    CampaignMonitoringGroup,
-    CampaignZone,
     DailyCampaignProductStat,
     DailyCampaignSearchClusterStat,
     DailyProductKeywordStat,

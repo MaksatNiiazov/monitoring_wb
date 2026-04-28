@@ -33,7 +33,6 @@ from monitoring.models import (
     SyncStatus,
     Warehouse,
 )
-from monitoring.services.config import get_monitoring_settings
 from monitoring.services.reports import decimalize, map_app_type_to_zone, normalize_search_text, quantize_money
 from monitoring.services.wb_client import (
     AnalyticsWBClient,
@@ -100,20 +99,6 @@ def iter_sync_dates(*, date_from: date, date_to: date) -> list[SyncDates]:
         sync_dates.append(resolve_sync_dates(current))
         current += timedelta(days=1)
     return sync_dates
-
-
-def stage_progress_percent(*, step_index: int, total_steps: int, start_percent: int = 3, end_percent: int = 96) -> int:
-    if total_steps <= 0:
-        return end_percent
-    normalized_step = max(0, min(step_index, total_steps))
-    ratio = normalized_step / total_steps
-    return int(round(start_percent + (end_percent - start_percent) * ratio))
-
-
-def day_stage_detail(*, detail: str, sync_date: date, day_index: int, total_days: int) -> str:
-    if total_days <= 1:
-        return detail
-    return f"День {day_index}/{total_days} ({sync_date:%d.%m.%Y}). {detail}"
 
 
 def is_wb_start_day_limit_error(message: str) -> bool:
@@ -272,15 +257,6 @@ def build_price_lookup(price_payload: dict[str, Any]) -> dict[int, dict[str, Dec
             "raw_payload": item,
         }
     return result
-
-
-def build_supplier_orders_lookup(order_rows: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
-    grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
-    for row in order_rows:
-        nm_id = row.get("nmId")
-        if nm_id:
-            grouped[nm_id].append(row)
-    return dict(grouped)
 
 
 def extract_supplier_order_date(order_row: dict[str, Any]) -> date | None:
@@ -1272,10 +1248,8 @@ def _run_sync_single_day(
     days_count: int = 1,
     overwrite: bool = True,
     kind: str = SyncKind.FULL,
-    blocked_api_families: set[str] | None = None,
 ) -> SyncLog:
     dates = resolve_sync_dates(reference_date)
-    runtime_settings = get_monitoring_settings()
     period_start = range_start or dates.stats_date
     period_end = range_end or dates.stats_date
     period_dates = iter_sync_dates(date_from=period_start, date_to=period_end)
@@ -1309,7 +1283,7 @@ def _run_sync_single_day(
         f"days_count={max(1, days_count)} overwrite={overwrite}"
     )
     optional_errors: list[str] = []
-    limited_api_families: set[str] = set(blocked_api_families or set())
+    limited_api_families: set[str] = set()
 
     def _family_limited(family: str) -> bool:
         return family in limited_api_families
