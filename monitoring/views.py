@@ -38,6 +38,7 @@ from .models import (
     SyncKind,
     SyncLog,
     SyncStatus,
+    WBApiRateLimit,
 )
 from .services.config import (
     build_readiness_summary,
@@ -237,6 +238,56 @@ def _sync_product_note_keywords(
         )
         item.updated_at = now
     DailyProductNote.objects.bulk_update(notes, ["keywords", "keyword_rows_count", "updated_at"])
+
+
+def _current_wb_sync_cooldown() -> dict[str, object]:
+    now = timezone.now()
+    record = (
+        WBApiRateLimit.objects.filter(next_request_at__gt=now)
+        .order_by("-next_request_at", "path")
+        .first()
+    )
+    if record is None or record.next_request_at is None:
+        return {
+            "is_blocked": False,
+            "remaining_seconds": 0,
+            "retry_until": None,
+            "source": "",
+            "detail": "",
+        }
+
+    remaining_seconds = max(1, int((record.next_request_at - now).total_seconds()))
+    retry_local = timezone.localtime(record.next_request_at)
+    source = f"{record.method} {record.path}"
+    return {
+        "is_blocked": True,
+        "remaining_seconds": remaining_seconds,
+        "retry_until": record.next_request_at.isoformat(),
+        "source": source,
+        "detail": record.last_detail or "",
+        "status": record.last_status,
+        "token_type": record.token_type,
+        "retry_at_display": retry_local.strftime("%d.%m.%Y %H:%M:%S"),
+        "message": (
+            f"WB лимит активен: {source}. "
+            f"Следующая полная синхронизация будет доступна через {remaining_seconds} сек "
+            f"(после {retry_local:%d.%m.%Y %H:%M:%S})."
+        ),
+    }
+
+
+def _warn_about_wb_sync_cooldown(request: HttpRequest) -> bool:
+    cooldown = _current_wb_sync_cooldown()
+    if not cooldown.get("is_blocked"):
+        return False
+    messages.warning(
+        request,
+        str(
+            cooldown.get("message")
+            or "WB API временно ограничил запросы. Повторите синхронизацию позже."
+        ),
+    )
+    return True
 
 
 def _parse_stock_int(raw_value: object) -> int:
@@ -1259,6 +1310,8 @@ def sync_all(request: HttpRequest) -> HttpResponse:
             "Синхронизация уже запущена. Дождитесь завершения текущего обновления и повторите позже.",
         )
         return redirect("monitoring:dashboard")
+    if _warn_about_wb_sync_cooldown(request):
+        return redirect("monitoring:dashboard")
 
     selected_products = list(form.cleaned_data.get("product_ids") or [])
     product_ids = [product.id for product in selected_products] if selected_products else None
@@ -1334,6 +1387,8 @@ def sync_product(request: HttpRequest, pk: int) -> HttpResponse:
             request,
             "Синхронизация уже выполняется. Новый запуск будет доступен после завершения текущего.",
         )
+    elif _warn_about_wb_sync_cooldown(request):
+        pass
     else:
         run_sync_in_background(
             product_ids=[product.id],
@@ -1394,6 +1449,7 @@ def sync_cancel(request: HttpRequest) -> JsonResponse | HttpResponse:
 def sync_status(request: HttpRequest) -> JsonResponse:
     mark_stale_running_syncs()
     log = get_running_sync() or SyncLog.objects.order_by("-created_at").first()
+    sync_cooldown = _current_wb_sync_cooldown()
     if not log:
         return JsonResponse(
             {
@@ -1408,6 +1464,7 @@ def sync_status(request: HttpRequest) -> JsonResponse:
                     "stage": "Ожидание запуска",
                     "detail": "",
                 },
+                "sync_cooldown": sync_cooldown,
             }
         )
 
@@ -1448,6 +1505,7 @@ def sync_status(request: HttpRequest) -> JsonResponse:
                 "updated_at": progress.get("updated_at") or (log.updated_at.isoformat() if log.updated_at else None),
                 "retry_until": progress.get("retry_until"),
             },
+            "sync_cooldown": sync_cooldown,
         }
     )
 

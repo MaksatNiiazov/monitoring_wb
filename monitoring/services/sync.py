@@ -868,6 +868,8 @@ def fetch_product_enrichment_payloads(
     *,
     products: list[Product],
     stats_date: date,
+    period_start: date | None = None,
+    period_end: date | None = None,
     max_workers: int = 1,
     analytics_client: AnalyticsWBClient | None = None,
     feedbacks_client: FeedbacksWBClient | None = None,
@@ -876,6 +878,8 @@ def fetch_product_enrichment_payloads(
 ) -> tuple[dict[int, dict[str, Any]], list[str]]:
     payloads_by_product_id: dict[int, dict[str, Any]] = {}
     warnings: list[str] = []
+    organic_start_date = period_start or stats_date
+    organic_end_date = period_end or stats_date
 
     if not products:
         return payloads_by_product_id, warnings
@@ -895,8 +899,8 @@ def fetch_product_enrichment_payloads(
             try:
                 organic_keyword_payload = local_analytics_client.get_search_orders(
                     nm_id=product.nm_id,
-                    start_date=stats_date,
-                    end_date=stats_date,
+                    start_date=organic_start_date,
+                    end_date=organic_end_date,
                     search_texts=keywords,
                 )
             except WBApiError as exc:
@@ -1248,90 +1252,15 @@ def run_sync(
     if not sync_dates:
         raise SyncServiceError("Не удалось определить даты синхронизации.")
 
-    if len(sync_dates) == 1:
-        return _run_sync_single_day(
-            product_ids=product_ids,
-            reference_date=sync_dates[0].stats_date,
-            range_start=range_start,
-            range_end=range_end,
-            days_count=1,
-            overwrite=overwrite,
-            kind=kind,
-        )
-
-    last_log: SyncLog | None = None
-    skipped_dates_due_api_limit: list[str] = []
-    blocked_api_families: set[str] = set()
-    for sync_day in sync_dates:
-        _sync_console(f"sync day started date={sync_day.stats_date.isoformat()}")
-        try:
-            last_log = _run_sync_single_day(
-                product_ids=product_ids,
-                reference_date=sync_day.stats_date,
-                range_start=range_start,
-                range_end=range_end,
-                days_count=len(sync_dates),
-                overwrite=overwrite,
-                kind=kind,
-                blocked_api_families=blocked_api_families,
-            )
-            blocked_api_families.update((last_log.payload or {}).get("wb_limited_families") or [])
-        except SyncServiceError as exc:
-            if is_wb_start_day_limit_error(str(exc)):
-                skipped_dates_due_api_limit.append(sync_day.stats_date.isoformat())
-                _sync_console(
-                    "sync day skipped by WB API limit "
-                    f"date={sync_day.stats_date.isoformat()} reason={exc}"
-                )
-                continue
-            raise
-
-    if not last_log:
-        if skipped_dates_due_api_limit:
-            raise SyncServiceError(
-                "WB Analytics ограничивает глубину исторических данных: выбранный диапазон целиком вне допустимого окна API."
-            )
-        raise SyncServiceError("Не удалось завершить синхронизацию диапазона.")
-
-    payload = dict(last_log.payload or {})
-    payload.update(
-        {
-            "stats_date_from": range_start.isoformat(),
-            "stats_date_to": range_end.isoformat(),
-            "days_count": len(sync_dates),
-        }
+    return _run_sync_single_day(
+        product_ids=product_ids,
+        reference_date=sync_dates[-1].stats_date,
+        range_start=range_start,
+        range_end=range_end,
+        days_count=len(sync_dates),
+        overwrite=overwrite,
+        kind=kind,
     )
-    if skipped_dates_due_api_limit:
-        payload["skipped_dates_due_api_limit"] = skipped_dates_due_api_limit
-        warnings_payload = payload.get("warnings")
-        warnings: list[str] = list(warnings_payload) if isinstance(warnings_payload, list) else []
-        warnings.append(
-            f"Пропущены даты из-за ограничения WB Analytics: {', '.join(skipped_dates_due_api_limit)}."
-        )
-        payload["warnings"] = warnings
-        last_log.message = (
-            f"{(last_log.message or '').strip()} Пропущено дат из-за ограничения WB Analytics: {len(skipped_dates_due_api_limit)}."
-        ).strip()
-    if blocked_api_families:
-        payload["wb_limited_families"] = sorted(blocked_api_families)
-        payload["partial_sync"] = True
-        warnings_payload = payload.get("warnings")
-        warnings = list(warnings_payload) if isinstance(warnings_payload, list) else []
-        range_warning = f"Часть WB API была пропущена из-за лимита: {', '.join(sorted(blocked_api_families))}."
-        if range_warning not in warnings:
-            warnings.append(range_warning)
-        payload["warnings"] = warnings
-        last_log.message = f"{(last_log.message or '').strip()} Частичная синхронизация: {range_warning}".strip()
-    last_log.payload = payload
-    update_fields = ["payload", "updated_at"]
-    if skipped_dates_due_api_limit or blocked_api_families:
-        update_fields.append("message")
-    last_log.save(update_fields=update_fields)
-    _sync_console(
-        "sync completed "
-        f"log={last_log.id} status={last_log.status} skipped_days={len(skipped_dates_due_api_limit)}"
-    )
-    return last_log
 
 
 def _run_sync_single_day(
@@ -1347,6 +1276,15 @@ def _run_sync_single_day(
 ) -> SyncLog:
     dates = resolve_sync_dates(reference_date)
     runtime_settings = get_monitoring_settings()
+    period_start = range_start or dates.stats_date
+    period_end = range_end or dates.stats_date
+    period_dates = iter_sync_dates(date_from=period_start, date_to=period_end)
+    allowed_stats_dates = {item.stats_date for item in period_dates}
+    period_label = (
+        f"{period_start:%d.%m.%Y}-{period_end:%d.%m.%Y}"
+        if period_start != period_end
+        else f"{dates.stats_date:%d.%m.%Y}"
+    )
 
     mark_stale_running_syncs()
     running_sync = get_running_sync()
@@ -1446,7 +1384,7 @@ def _run_sync_single_day(
             log,
             percent=12,
             stage="Воронка",
-            detail=f"Сбор воронки продаж за {dates.stats_date:%d.%m.%Y}.",
+            detail=f"Сбор воронки продаж за {period_label}.",
         )
 
         # SQLite блокирует всю БД на запись во время длинной транзакции.
@@ -1457,7 +1395,7 @@ def _run_sync_single_day(
             # Разбиваем запросы на chunks, чтобы избежать зависания WB API
             funnel_rows: list[dict[str, Any]] = []
             nm_ids_list = list(product_map.keys())
-            funnel_chunk_size = 50  # БЕЗОПАСНЫЙ РЕЖИМ: уменьшили с 100 до 50
+            funnel_chunk_size = 20  # WB limit for /sales-funnel/products/history nmIds
             total_funnel_chunks = max(1, (len(nm_ids_list) + funnel_chunk_size - 1) // funnel_chunk_size)
             _sync_console(f"Начинаем сбор воронки: {len(nm_ids_list)} товаров, {total_funnel_chunks} чанков по {funnel_chunk_size}")
             if _family_limited(API_FAMILY_ANALYTICS):
@@ -1473,8 +1411,8 @@ def _run_sync_single_day(
                     try:
                         chunk_rows = analytics_client.get_sales_funnel_history(
                             nm_ids=list(nm_chunk),
-                            start_date=dates.stats_date,
-                            end_date=dates.stats_date,
+                            start_date=period_start,
+                            end_date=period_end,
                         )
                         elapsed = time.monotonic() - start_time
                         _sync_console(f"Воронка чанк {chunk_index}/{total_funnel_chunks} получено {len(chunk_rows)} строк за {elapsed:.1f}с")
@@ -1508,7 +1446,7 @@ def _run_sync_single_day(
                 for history_entry in row.get("history", []):
                     _assert_not_cancelled(log)
                     history_date = date.fromisoformat(history_entry["date"])
-                    if history_date != dates.stats_date:
+                    if history_date not in allowed_stats_dates:
                         continue
                     upsert_product_metrics(
                         product=product,
@@ -1646,8 +1584,8 @@ def _run_sync_single_day(
                     )
                     stats_payload = promotion_client.get_campaign_stats(
                         ids=[campaign.external_id for campaign in campaigns],
-                        start_date=dates.stats_date,
-                        end_date=dates.stats_date,
+                        start_date=period_start,
+                        end_date=period_end,
                     )
                     for item in stats_payload:
                         _assert_not_cancelled(log)
@@ -1656,7 +1594,7 @@ def _run_sync_single_day(
                             campaign_map=campaign_map,
                             stat_payload=item,
                             overwrite=overwrite,
-                            allowed_dates={dates.stats_date},
+                            allowed_dates=allowed_stats_dates,
                             linked_products_by_campaign_id=linked_products_by_campaign_id,
                             tracked_product_ids=tracked_product_ids,
                         )
@@ -1703,17 +1641,23 @@ def _run_sync_single_day(
                 except WBApiError as exc:
                     return {}, f"prices: {exc}"
 
-            def _fetch_supplier_orders_lookup() -> tuple[dict[int, list[dict[str, Any]]], str | None]:
+            def _fetch_supplier_orders_lookup() -> tuple[
+                dict[date, dict[int, list[dict[str, Any]]]],
+                dict[int, list[dict[str, Any]]],
+                str | None,
+            ]:
                 try:
                     local_statistics_client = configure_sync_wb_client(StatisticsWBClient())
-                    supplier_rows = local_statistics_client.get_supplier_orders(date_from=dates.stats_date)
+                    supplier_rows = local_statistics_client.get_supplier_orders(date_from=period_start)
                     supplier_lookup_by_date, undated_supplier_lookup = split_supplier_orders_lookup_by_date(supplier_rows)
-                    supplier_lookup = supplier_lookup_by_date.get(dates.stats_date, {})
-                    if not supplier_lookup:
-                        supplier_lookup = undated_supplier_lookup
-                    return supplier_lookup, None
+                    supplier_lookup_by_date = {
+                        stats_date: lookup
+                        for stats_date, lookup in supplier_lookup_by_date.items()
+                        if stats_date in allowed_stats_dates
+                    }
+                    return supplier_lookup_by_date, undated_supplier_lookup, None
                 except WBApiError as exc:
-                    return {}, f"supplier_orders: {exc}"
+                    return {}, {}, f"supplier_orders: {exc}"
 
             if _family_limited(API_FAMILY_PRICES):
                 _sync_console("Пропускаем цены: Prices API уже ограничен в этом запуске.")
@@ -1728,14 +1672,15 @@ def _run_sync_single_day(
 
             if _family_limited(API_FAMILY_STATISTICS):
                 _sync_console("Пропускаем заказы поставщика: Statistics API уже ограничен в этом запуске.")
-                supplier_orders_lookup, supplier_error = {}, None
+                supplier_orders_lookup_by_date, undated_supplier_orders_lookup, supplier_error = {}, {}, None
             else:
-                supplier_orders_lookup, supplier_error = _fetch_supplier_orders_lookup()
+                supplier_orders_lookup_by_date, undated_supplier_orders_lookup, supplier_error = _fetch_supplier_orders_lookup()
             if supplier_error:
                 optional_errors.append(supplier_error)
                 if is_wb_rate_limit_error(supplier_error):
                     _record_rate_limit(API_FAMILY_STATISTICS, "supplier_orders", supplier_error)
-                    supplier_orders_lookup = {}
+                    supplier_orders_lookup_by_date = {}
+                    undated_supplier_orders_lookup = {}
 
             _update_sync_progress(
                 log,
@@ -1744,13 +1689,14 @@ def _run_sync_single_day(
                 detail="Сбор органики и буст-статистики по ключам.",
             )
             _assert_not_cancelled(log)
-            boosted_keyword_aggregates: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
-            search_cluster_totals_by_pair: dict[tuple[int, int], dict[str, Any]] = {}
+            boosted_keyword_aggregates: dict[date, dict[int, dict[str, dict[str, Any]]]] = defaultdict(
+                lambda: defaultdict(dict)
+            )
+            search_cluster_totals_by_pair: dict[tuple[date, int, int], dict[str, Any]] = {}
             search_cluster_refresh_ok = False
             if campaigns and _family_limited(API_FAMILY_PROMOTION):
                 _sync_console("Пропускаем ключевые запросы рекламы: Promotion API уже ограничен в этом запуске.")
             elif campaigns:
-                current_date_iso = dates.stats_date.isoformat()
                 normquery_items = [
                     {"advertId": pair.campaign.external_id, "nmId": pair.product.nm_id}
                     for pair in campaign_pairs
@@ -1765,8 +1711,8 @@ def _run_sync_single_day(
                             nm_ids_by_advert[pair_payload["advertId"]].append(pair_payload["nmId"])
                         payload = promotion_client.get_daily_search_cluster_stats(
                             items=item_chunk,
-                            start_date=dates.stats_date,
-                            end_date=dates.stats_date,
+                            start_date=period_start,
+                            end_date=period_end,
                         )
                         for item in payload.get("items") or []:
                             _assert_not_cancelled(log)
@@ -1780,27 +1726,31 @@ def _run_sync_single_day(
                             product = product_map.get(nm_id)
                             if not campaign or not product:
                                 continue
-                            pair_key = (campaign.id, product.id)
-                            pair_totals = search_cluster_totals_by_pair.setdefault(
-                                pair_key,
-                                {
-                                    "impressions": 0,
-                                    "clicks": 0,
-                                    "spend": Decimal("0"),
-                                    "add_to_cart_count": 0,
-                                    "order_count": 0,
-                                    "units_ordered": 0,
-                                    "order_sum": Decimal("0"),
-                                    "raw_payload": [],
-                                },
-                            )
-                            product_bucket = boosted_keyword_aggregates[product.id]
                             for daily_stat in item.get("dailyStats") or []:
                                 _assert_not_cancelled(log)
-                                stat_date = (daily_stat.get("date") or "")[:10]
-                                if stat_date and stat_date != current_date_iso:
+                                raw_stat_date = (daily_stat.get("date") or "")[:10]
+                                try:
+                                    target_stats_date = date.fromisoformat(raw_stat_date) if raw_stat_date else dates.stats_date
+                                except ValueError:
+                                    target_stats_date = dates.stats_date
+                                if target_stats_date not in allowed_stats_dates:
                                     continue
                                 stat = daily_stat.get("stat") or {}
+                                pair_key = (target_stats_date, campaign.id, product.id)
+                                pair_totals = search_cluster_totals_by_pair.setdefault(
+                                    pair_key,
+                                    {
+                                        "impressions": 0,
+                                        "clicks": 0,
+                                        "spend": Decimal("0"),
+                                        "add_to_cart_count": 0,
+                                        "order_count": 0,
+                                        "units_ordered": 0,
+                                        "order_sum": Decimal("0"),
+                                        "raw_payload": [],
+                                    },
+                                )
+                                product_bucket = boosted_keyword_aggregates[target_stats_date][product.id]
                                 views = int(stat.get("views") or 0)
                                 clicks = int(stat.get("clicks") or 0)
                                 pair_totals["impressions"] += views
@@ -1844,14 +1794,14 @@ def _run_sync_single_day(
                     DailyCampaignSearchClusterStat.objects.filter(
                         campaign__in=campaigns,
                         product__in=products,
-                        stats_date=dates.stats_date,
+                        stats_date__in=allowed_stats_dates,
                     ).delete()
                 if search_cluster_refresh_ok and search_cluster_totals_by_pair:
                     cluster_rows = [
                         DailyCampaignSearchClusterStat(
                             campaign_id=campaign_id,
                             product_id=product_id,
-                            stats_date=dates.stats_date,
+                            stats_date=stats_date,
                             impressions=payload["impressions"],
                             clicks=payload["clicks"],
                             spend=quantize_money(payload["spend"]),
@@ -1861,7 +1811,7 @@ def _run_sync_single_day(
                             order_sum=quantize_money(payload["order_sum"]),
                             raw_payload={"daily_stats": payload["raw_payload"]},
                         )
-                        for (campaign_id, product_id), payload in search_cluster_totals_by_pair.items()
+                        for (stats_date, campaign_id, product_id), payload in search_cluster_totals_by_pair.items()
                     ]
                     if overwrite:
                         DailyCampaignSearchClusterStat.objects.bulk_create(cluster_rows, batch_size=500)
@@ -1882,31 +1832,33 @@ def _run_sync_single_day(
                                 },
                             )
 
-            boosted_keyword_stats: dict[int, dict[str, dict[str, Any]]] = {}
-            for product_id, query_map in boosted_keyword_aggregates.items():
-                boosted_keyword_stats[product_id] = {}
-                for query_text, aggregate in query_map.items():
-                    weight = aggregate["weight"]
-                    views = aggregate["views"]
-                    clicks = aggregate["clicks"]
-                    boosted_keyword_stats[product_id][query_text] = {
-                        "avg_position": quantize_money(
-                            aggregate["weighted_position_sum"] / weight if weight else Decimal("0")
-                        ),
-                        "ctr": quantize_money(decimalize(clicks) * Decimal("100") / Decimal(views)) if views else Decimal("0"),
-                        "views": views,
-                        "clicks": clicks,
-                        "raw_payload": aggregate["raw_payload"],
-                    }
+            boosted_keyword_stats_by_date: dict[date, dict[int, dict[str, dict[str, Any]]]] = {}
+            for stats_date, product_query_map in boosted_keyword_aggregates.items():
+                boosted_keyword_stats_by_date[stats_date] = {}
+                for product_id, query_map in product_query_map.items():
+                    boosted_keyword_stats_by_date[stats_date][product_id] = {}
+                    for query_text, aggregate in query_map.items():
+                        weight = aggregate["weight"]
+                        views = aggregate["views"]
+                        clicks = aggregate["clicks"]
+                        boosted_keyword_stats_by_date[stats_date][product_id][query_text] = {
+                            "avg_position": quantize_money(
+                                aggregate["weighted_position_sum"] / weight if weight else Decimal("0")
+                            ),
+                            "ctr": quantize_money(decimalize(clicks) * Decimal("100") / Decimal(views)) if views else Decimal("0"),
+                            "views": views,
+                            "clicks": clicks,
+                            "raw_payload": aggregate["raw_payload"],
+                        }
 
-            enabled_groups_by_product: dict[int, set[str]] = defaultdict(set)
+            enabled_groups_by_date_product: dict[date, dict[int, set[str]]] = defaultdict(lambda: defaultdict(set))
             groups_rows = (
-                DailyCampaignProductStat.objects.filter(product_id__in=tracked_product_ids, stats_date=dates.stats_date)
-                .values("product_id", "campaign__monitoring_group")
+                DailyCampaignProductStat.objects.filter(product_id__in=tracked_product_ids, stats_date__in=allowed_stats_dates)
+                .values("stats_date", "product_id", "campaign__monitoring_group")
                 .distinct()
             )
             for row in groups_rows:
-                enabled_groups_by_product[row["product_id"]].add(
+                enabled_groups_by_date_product[row["stats_date"]][row["product_id"]].add(
                     row["campaign__monitoring_group"] or CampaignMonitoringGroup.OTHER
                 )
 
@@ -1923,6 +1875,8 @@ def _run_sync_single_day(
                 product_enrichment_by_id, enrichment_warnings = fetch_product_enrichment_payloads(
                     products=products,
                     stats_date=dates.stats_date,
+                    period_start=period_start,
+                    period_end=period_end,
                     max_workers=1,
                     analytics_client=analytics_client,
                     feedbacks_client=feedbacks_client,
@@ -1949,28 +1903,32 @@ def _run_sync_single_day(
                 organic_keyword_payload = enrichment_payload.get("organic_keyword_payload")
                 negative_feedback_count = enrichment_payload.get("negative_feedback_count")
 
-                if keywords:
-                    upsert_keyword_stats(
+                for stats_date in sorted(allowed_stats_dates):
+                    if keywords:
+                        upsert_keyword_stats(
+                            product=product,
+                            stats_date=stats_date,
+                            keywords=keywords,
+                            organic_payload=organic_keyword_payload,
+                            boosted_stats=boosted_keyword_stats_by_date.get(stats_date, {}).get(product.id, {}),
+                            overwrite=overwrite,
+                        )
+
+                    supplier_lookup = supplier_orders_lookup_by_date.get(stats_date, {})
+                    if not supplier_lookup and not supplier_orders_lookup_by_date:
+                        supplier_lookup = undated_supplier_orders_lookup
+                    supplier_order_rows = supplier_lookup.get(product.nm_id) or []
+                    supplier_order_summary = summarize_supplier_orders(supplier_order_rows) if supplier_order_rows else None
+
+                    upsert_product_note(
                         product=product,
-                        stats_date=dates.stats_date,
-                        keywords=keywords,
-                        organic_payload=organic_keyword_payload,
-                        boosted_stats=boosted_keyword_stats.get(product.id, {}),
+                        stats_date=stats_date,
                         overwrite=overwrite,
+                        supplier_order_summary=supplier_order_summary,
+                        price_summary=price_lookup.get(product.nm_id),
+                        negative_feedback_count=negative_feedback_count if stats_date == dates.stats_date else None,
+                        enabled_groups=enabled_groups_by_date_product.get(stats_date, {}).get(product.id, set()),
                     )
-
-                supplier_order_rows = supplier_orders_lookup.get(product.nm_id) or []
-                supplier_order_summary = summarize_supplier_orders(supplier_order_rows) if supplier_order_rows else None
-
-                upsert_product_note(
-                    product=product,
-                    stats_date=dates.stats_date,
-                    overwrite=overwrite,
-                    supplier_order_summary=supplier_order_summary,
-                    price_summary=price_lookup.get(product.nm_id),
-                    negative_feedback_count=negative_feedback_count,
-                    enabled_groups=enabled_groups_by_product.get(product.id, set()),
-                )
 
         _assert_not_cancelled(log)
         _update_sync_progress(

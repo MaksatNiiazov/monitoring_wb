@@ -398,6 +398,27 @@ class SyncLog(TimeStampedModel):
         return f"{self.get_kind_display()} / {self.get_status_display()} / {self.created_at:%d.%m.%Y %H:%M}"
 
 
+class WBApiRateLimit(TimeStampedModel):
+    scope = models.CharField(max_length=255, unique=True, verbose_name="WB API rate limit scope")
+    token_hash = models.CharField(max_length=64, blank=True, verbose_name="Token hash")
+    token_type = models.CharField(max_length=32, blank=True, verbose_name="Token type")
+    method = models.CharField(max_length=8, verbose_name="HTTP method")
+    base_url = models.CharField(max_length=255, verbose_name="Base URL")
+    path = models.CharField(max_length=255, verbose_name="Path")
+    next_request_at = models.DateTimeField(null=True, blank=True, verbose_name="Next request at")
+    last_status = models.PositiveSmallIntegerField(null=True, blank=True, verbose_name="Last status")
+    last_detail = models.TextField(blank=True, verbose_name="Last detail")
+    last_headers = models.JSONField(default=dict, blank=True, verbose_name="Last rate limit headers")
+
+    class Meta:
+        ordering = ["next_request_at", "scope"]
+        verbose_name = "WB API rate limit"
+        verbose_name_plural = "WB API rate limits"
+
+    def __str__(self) -> str:
+        return f"{self.method} {self.base_url}{self.path} -> {self.next_request_at or '-'}"
+
+
 class MonitoringSettings(TimeStampedModel):
     project_name = models.CharField(max_length=255, default="Мониторинг WB", verbose_name="Название проекта")
     report_timezone = models.CharField(max_length=64, default="Asia/Bishkek", verbose_name="Часовой пояс отчётов")
