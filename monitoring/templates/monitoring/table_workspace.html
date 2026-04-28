@@ -114,14 +114,14 @@
             <table class="monitoring-grid-table {% if active_sheet.kind == 'product' %}is-product{% else %}is-dashboard{% endif %}">
                 <tbody>
                     {% for row in active_sheet.rows %}
-                        <tr{% if row.row_visual_key %} class="table-row-tone-{{ row.row_visual_key }}"{% endif %}>
+                        <tr{% if row.row_visual_key or row.row_style_key %} class="{% if row.row_visual_key %}table-row-tone-{{ row.row_visual_key }}{% endif %}{% if row.row_style_key %} table-row-style-{{ row.row_style_key }}{% endif %}"{% endif %}>
                             {% for cell in row.cells %}
                                 <td
                                     {% if cell.colspan and cell.colspan > 1 %}colspan="{{ cell.colspan }}"{% endif %}
                                     data-row="{{ cell.row_index }}"
                                     data-block="{{ cell.block_index }}"
                                     data-in-block-col="{{ cell.in_block_col }}"
-                                    class="{% if cell.is_gap_col %}is-gap-col{% endif %}{% if cell.is_block_start %} is-block-start{% endif %}{% if cell.is_spacer_col %} is-spacer-col{% endif %}{% if cell.is_label_col %} is-label-col{% endif %}{% if cell.is_repeat_label_col %} is-repeat-label-col{% endif %}{% if cell.is_keyword_label_col %} is-keyword-label-col{% endif %}{% if cell.control %} is-control-cell{% endif %}{% if cell.is_comment_span %} is-comment-span{% endif %}{% if cell.is_stock_span %} is-stock-span{% endif %}{% if cell.is_input_span %} is-input-span{% endif %}{% if cell.is_centered_value_span %} is-centered-value-span{% endif %}"
+                                    class="{% if cell.is_gap_col %}is-gap-col{% endif %}{% if cell.is_block_start %} is-block-start{% endif %}{% if cell.is_spacer_col %} is-spacer-col{% endif %}{% if cell.is_label_col %} is-label-col{% endif %}{% if cell.is_repeat_label_col %} is-repeat-label-col{% endif %}{% if cell.control %} is-control-cell{% endif %}{% if cell.is_comment_span %} is-comment-span{% endif %}{% if cell.is_stock_span %} is-stock-span{% endif %}{% if cell.is_input_span %} is-input-span{% endif %}{% if cell.is_centered_value_span %} is-centered-value-span{% endif %}"
                                 >
                                     {% if cell.control and cell.control.type == "stock_popup" %}
                                         <button
@@ -137,6 +137,19 @@
                                                 {{ cell.control.summary_text }}
                                             </span>
                                         </button>
+                                    {% elif cell.control and cell.control.type == "keyword_rows" %}
+                                        <div class="grid-keyword-header">
+                                            <span class="grid-keyword-title">{{ cell.value|default_if_none:"" }}</span>
+                                            <div
+                                                class="grid-keyword-actions"
+                                                data-note-control="keyword-rows"
+                                                data-product-id="{{ cell.control.product_id }}"
+                                                data-note-date="{{ cell.control.note_date }}"
+                                                data-field="{{ cell.control.field }}"
+                                            >
+                                                <button type="button" class="grid-keyword-action" data-delta="1" aria-label="Добавить строку ключа">+</button>
+                                            </div>
+                                        </div>
                                     {% elif cell.control and cell.control.type == "keyword_table" %}
                                         <div class="grid-keyword-table">
                                             <div class="grid-keyword-table-head">
@@ -148,7 +161,6 @@
                                                     data-note-date="{{ cell.control.note_date }}"
                                                     data-field="{{ cell.control.field }}"
                                                 >
-                                                    <button type="button" class="grid-keyword-action" data-delta="-1" aria-label="Убрать строку ключа">-</button>
                                                     <button type="button" class="grid-keyword-action" data-delta="1" aria-label="Добавить строку ключа">+</button>
                                                 </div>
                                             </div>
@@ -250,6 +262,21 @@
                                             {% endfor %}
                                         </select>
                                     {% elif cell.control and cell.control.type == "input" %}
+                                        {% if cell.control.field == "keyword_query" %}
+                                            <div class="grid-keyword-row-control">
+                                                <button
+                                                    type="button"
+                                                    class="grid-keyword-delete"
+                                                    data-note-control="keyword-delete"
+                                                    data-product-id="{{ cell.control.product_id }}"
+                                                    data-note-date="{{ cell.control.note_date }}"
+                                                    data-field="keyword_delete"
+                                                    data-keyword-prev="{{ cell.control.keyword_prev|default_if_none:'' }}"
+                                                    data-keyword-query="{{ cell.control.value|default_if_none:'' }}"
+                                                    aria-label="Удалить ключ"
+                                                    title="Удалить ключ"
+                                                >&times;</button>
+                                        {% endif %}
                                         <input
                                             class="grid-input{% if cell.control.centered %} grid-input-centered{% endif %}"
                                             type="text"
@@ -262,6 +289,9 @@
                                             value="{{ cell.control.value|default_if_none:'' }}"
                                             placeholder="{{ cell.control.placeholder|default_if_none:'' }}"
                                         >
+                                        {% if cell.control.field == "keyword_query" %}
+                                            </div>
+                                        {% endif %}
                                     {% elif cell.control and cell.control.type == "textarea" %}
                                         <textarea
                                             class="grid-input grid-input-textarea"

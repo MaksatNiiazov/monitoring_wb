@@ -34,6 +34,7 @@ from .models import (
     Product,
     ProductCampaign,
     ProductEconomicsVersion,
+    ProductKeyword,
     SyncKind,
     SyncLog,
     SyncStatus,
@@ -58,6 +59,8 @@ from .services.reports import (
     build_product_report,
     decimalize,
     get_default_dates,
+    normalize_keyword_texts,
+    normalize_search_text,
     normalize_warehouse_name,
     resolve_product_economics,
 )
@@ -148,6 +151,92 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
         seen.add(cleaned)
         result.append(cleaned)
     return result
+
+
+def _product_keyword_values(product: Product) -> list[str]:
+    return normalize_keyword_texts(
+        list(
+            ProductKeyword.objects.filter(product=product)
+            .order_by("position", "query_text", "id")
+            .values_list("query_text", flat=True)
+        )
+    )
+
+
+def _note_keyword_values(note: DailyProductNote) -> list[str]:
+    if not isinstance(note.keywords, list):
+        return []
+    return normalize_keyword_texts([str(item) for item in note.keywords])
+
+
+def _effective_keyword_values(product: Product, note: DailyProductNote) -> list[str]:
+    return normalize_keyword_texts([*_note_keyword_values(note), *_product_keyword_values(product)])
+
+
+def _sync_product_keywords(product: Product, keyword_texts: list[str]) -> None:
+    cleaned_keywords = normalize_keyword_texts(keyword_texts)
+    existing_keywords = list(ProductKeyword.objects.filter(product=product).order_by("position", "query_text", "id"))
+    existing_by_normalized: dict[str, ProductKeyword] = {}
+    duplicate_ids: list[int] = []
+    for keyword in existing_keywords:
+        normalized_keyword = normalize_search_text(keyword.query_text)
+        if normalized_keyword in existing_by_normalized:
+            duplicate_ids.append(keyword.id)
+            continue
+        existing_by_normalized[normalized_keyword] = keyword
+    if duplicate_ids:
+        ProductKeyword.objects.filter(id__in=duplicate_ids).delete()
+
+    kept_ids: list[int] = []
+    for position, keyword_text in enumerate(cleaned_keywords):
+        normalized_text = normalize_search_text(keyword_text)
+        keyword = existing_by_normalized.get(normalized_text)
+        if keyword is None:
+            keyword = ProductKeyword.objects.create(
+                product=product,
+                query_text=keyword_text,
+                position=position,
+            )
+        else:
+            update_fields: list[str] = []
+            if keyword.query_text != keyword_text:
+                keyword.query_text = keyword_text
+                update_fields.append("query_text")
+            if keyword.position != position:
+                keyword.position = position
+                update_fields.append("position")
+            if update_fields:
+                keyword.save(update_fields=[*update_fields, "updated_at"])
+        kept_ids.append(keyword.id)
+
+    queryset = ProductKeyword.objects.filter(product=product)
+    if kept_ids:
+        queryset.exclude(id__in=kept_ids).delete()
+    else:
+        queryset.delete()
+
+
+def _sync_product_note_keywords(
+    *,
+    product: Product,
+    source_note: DailyProductNote,
+    keyword_texts: list[str],
+    rows_count: int,
+    preserve_larger_rows: bool,
+) -> None:
+    cleaned_keywords = normalize_keyword_texts(keyword_texts)
+    rows_target = max(int(rows_count or 0), len(cleaned_keywords), 0)
+    notes = list(DailyProductNote.objects.filter(product=product).exclude(pk=source_note.pk))
+    if not notes:
+        return
+    now = timezone.now()
+    for item in notes:
+        item.keywords = cleaned_keywords
+        item.keyword_rows_count = (
+            max(int(item.keyword_rows_count or 0), rows_target) if preserve_larger_rows else rows_target
+        )
+        item.updated_at = now
+    DailyProductNote.objects.bulk_update(notes, ["keywords", "keyword_rows_count", "updated_at"])
 
 
 def _parse_stock_int(raw_value: object) -> int:
@@ -438,6 +527,33 @@ def _keyword_stat_has_values(stat: DailyProductKeywordStat) -> bool:
     )
 
 
+def _sync_keyword_stat_query_texts(*, product: Product, previous_text: str, resolved_text: str) -> None:
+    previous_text = previous_text.strip()[:255]
+    resolved_text = resolved_text.strip()[:255]
+    if not previous_text:
+        return
+
+    previous_stats = list(DailyProductKeywordStat.objects.filter(product=product, query_text=previous_text))
+    if not previous_stats:
+        return
+    if not resolved_text:
+        DailyProductKeywordStat.objects.filter(id__in=[stat.id for stat in previous_stats]).delete()
+        return
+
+    existing_by_date = {
+        stat.stats_date: stat
+        for stat in DailyProductKeywordStat.objects.filter(product=product, query_text=resolved_text)
+    }
+    for stat in previous_stats:
+        existing_stat = existing_by_date.get(stat.stats_date)
+        if existing_stat is not None and existing_stat.pk != stat.pk:
+            stat.delete()
+            continue
+        if stat.query_text != resolved_text:
+            stat.query_text = resolved_text
+            stat.save(update_fields=["query_text", "updated_at"])
+
+
 def _safe_next_url(raw: str | None, fallback: str) -> str:
     candidate = (raw or "").strip()
     if candidate.startswith("/") and not candidate.startswith("//"):
@@ -459,6 +575,51 @@ def _table_row_visual_key(value: object) -> str:
         "конверсия в заказ (%)": "conversion-order",
     }
     return exact_mapping.get(normalized, "")
+
+
+def _table_row_style_key(
+    *,
+    row_number: int,
+    keyword_header_row: int | None,
+    overview_row: int | None,
+) -> str:
+    if row_number == 1:
+        return "date"
+    if row_number == 2:
+        return "campaign-header"
+    if row_number == 3:
+        return "zone-header"
+    if 4 <= row_number <= 21:
+        if row_number == 17:
+            return "metric-muted-input"
+        if row_number in {7, 19, 21}:
+            return "metric-muted-formula"
+        if row_number in {9, 16, 18, 20}:
+            return "metric-formula"
+        if row_number in {5, 8, 11, 12, 15}:
+            return "metric-muted"
+        return "metric"
+    if 27 <= row_number <= 32:
+        return "stock"
+    if keyword_header_row is not None and row_number == keyword_header_row:
+        return "keyword-header"
+    if (
+        keyword_header_row is not None
+        and overview_row is not None
+        and keyword_header_row < row_number < overview_row
+    ):
+        return "keyword-row"
+    if overview_row is not None and row_number >= overview_row:
+        overview_offset = row_number - overview_row
+        if overview_offset in {0, 6, 10}:
+            return "section-header"
+        if 1 <= overview_offset <= 5:
+            return "overview-field"
+        if 7 <= overview_offset <= 9:
+            return "action-field"
+        if overview_offset == 11:
+            return "comment-row"
+    return ""
 
 
 def dashboard(request: HttpRequest) -> HttpResponse:
@@ -562,30 +723,89 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 "field": "buyout_percent",
                 "percent": True,
                 "placeholder": "%",
-                "span_to_block_end": True,
+                "colspan": 7,
                 "centered": True,
             },
             (27, 7): {"type": "stock_popup"},
-            (row_after_keywords(34), 2): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%"},
-            (row_after_keywords(35), 7): {"type": "input", "field": "seller_price", "placeholder": "0,00"},
-            (row_after_keywords(36), 7): {"type": "input", "field": "wb_price", "placeholder": "0,00"},
-            (row_after_keywords(37), 7): {
+            (row_after_keywords(35), 2): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%", "colspan": 5},
+            (row_after_keywords(36), 7): {"type": "input", "field": "seller_price", "placeholder": "0,00", "colspan": 2},
+            (row_after_keywords(37), 7): {"type": "input", "field": "wb_price", "placeholder": "0,00", "colspan": 2},
+            (row_after_keywords(38), 7): {
                 "type": "select",
                 "field": "promo_status",
                 "options": ["Не участвуем", "Участвуем", "Тест", "Акция"],
+                "colspan": 2,
             },
-            (row_after_keywords(38), 7): {
+            (row_after_keywords(39), 7): {
                 "type": "select",
                 "field": "negative_feedback",
                 "options": ["Без изменений", "Есть негатив", "Нужна проверка", "Критично"],
+                "colspan": 2,
             },
-            (row_after_keywords(40), 7): {"type": "bool", "field": "unified_enabled"},
-            (row_after_keywords(41), 7): {"type": "bool", "field": "manual_search_enabled"},
-            (row_after_keywords(42), 7): {"type": "bool", "field": "price_changed"},
-            (row_after_keywords(44), 1): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
+            (row_after_keywords(41), 7): {"type": "bool", "field": "unified_enabled"},
+            (row_after_keywords(42), 7): {"type": "bool", "field": "manual_search_enabled"},
+            (row_after_keywords(43), 7): {"type": "bool", "field": "price_changed"},
+            (row_after_keywords(45), 1): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
         }
+        if keyword_header_row:
+            editable_controls[(keyword_header_row, 0)] = {
+                "type": "keyword_rows",
+                "field": "keyword_rows_count_delta",
+            }
+            for keyword_row_number in range(keyword_header_row + 1, keyword_header_row + keyword_rows_count + 1):
+                editable_controls[(keyword_row_number, 0)] = {
+                    "type": "input",
+                    "field": "keyword_query",
+                    "input_mode": "text",
+                    "placeholder": "Ключ",
+                }
+                editable_controls[(keyword_row_number, 1)] = {
+                    "type": "input",
+                    "field": "keyword_frequency",
+                    "input_mode": "numeric",
+                    "placeholder": "0",
+                    "centered": True,
+                }
+                editable_controls[(keyword_row_number, 2)] = {
+                    "type": "input",
+                    "field": "keyword_organic_position",
+                    "placeholder": "0,00",
+                    "centered": True,
+                }
+                editable_controls[(keyword_row_number, 7)] = {
+                    "type": "input",
+                    "field": "keyword_boosted_position",
+                    "placeholder": "0,00",
+                    "centered": True,
+                }
+                editable_controls[(keyword_row_number, 8)] = {
+                    "type": "input",
+                    "field": "keyword_boosted_ctr",
+                    "placeholder": "0,00",
+                    "centered": True,
+                }
 
-        display_spans: dict[tuple[int, int], dict[str, bool]] = {}
+        display_spans: dict[tuple[int, int], dict[str, object]] = {}
+        display_spans[(1, 1)] = {"colspan": 8, "centered": True}
+        display_spans[(2, 1)] = {"colspan": 3, "centered": True}
+        display_spans[(2, 4)] = {"colspan": 2, "centered": True}
+        display_spans[(12, 1)] = {"colspan": 6}
+        display_spans[(14, 1)] = {"colspan": 6}
+        for blank_row_number in range(22, 27):
+            display_spans[(blank_row_number, 1)] = {"colspan": 8}
+        for stock_row_number in range(27, 33):
+            display_spans[(stock_row_number, 1)] = {"colspan": 2}
+            display_spans[(stock_row_number, 7)] = {"colspan": 2, "centered": True}
+        if overview_row:
+            display_spans[(overview_row, 1)] = {"colspan": 8, "centered": True}
+            display_spans[(overview_row + 1, 2)] = {"colspan": 5}
+            for overview_field_row in range(overview_row + 2, overview_row + 6):
+                display_spans[(overview_field_row, 1)] = {"colspan": 2}
+                display_spans[(overview_field_row, 7)] = {"colspan": 2}
+            display_spans[(overview_row + 6, 1)] = {"colspan": 8, "centered": True}
+            for action_field_row in range(overview_row + 7, overview_row + 10):
+                display_spans[(action_field_row, 1)] = {"colspan": 2}
+            display_spans[(overview_row + 10, 1)] = {"colspan": 8, "centered": True}
         block_dates = active_sheet.get("block_dates") or []
         product_id = active_sheet.get("product_id")
         block_span = BLOCK_WIDTH + BLOCK_GAP
@@ -595,6 +815,11 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
             prepared_cells: list[dict] = []
             row_number = row_index + 1
             row_visual_key = _table_row_visual_key(row[0] if row else "")
+            row_style_key = _table_row_style_key(
+                row_number=row_number,
+                keyword_header_row=keyword_header_row,
+                overview_row=overview_row,
+            )
 
             column_index = 0
             while column_index < len(row):
@@ -602,6 +827,12 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 block_index = column_index // block_span
                 in_block_col = column_index % block_span
                 is_gap_col = active_sheet["kind"] == "product" and in_block_col == BLOCK_WIDTH
+                is_keyword_section_row = (
+                    active_sheet["kind"] == "product"
+                    and keyword_header_row is not None
+                    and overview_row is not None
+                    and keyword_header_row <= row_number < overview_row
+                )
                 is_repeat_label_col = (
                     active_sheet["kind"] == "product"
                     and in_block_col == 0
@@ -615,6 +846,8 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 if active_sheet["kind"] == "product" and product_id and not is_gap_col:
                     control_spec = editable_controls.get((row_number, in_block_col))
                     display_span_spec = display_spans.get((row_number, in_block_col))
+                    if is_keyword_section_row and in_block_col == 0 and block_index != label_anchor_block_index:
+                        control_spec = None
                 else:
                     control_spec = None
                     display_span_spec = None
@@ -661,10 +894,20 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                                 "product_id": product_id,
                                 "centered": bool(control_spec.get("centered")),
                             }
-                            if control_spec.get("keyword_prev") is not None:
+                            if field_name.startswith("keyword_"):
+                                keyword_prev_value = str(row[0] if row else "").strip()
+                                control["keyword_prev"] = keyword_prev_value
+                            elif control_spec.get("keyword_prev") is not None:
                                 control["keyword_prev"] = str(control_spec.get("keyword_prev") or "")
                             if control_spec.get("span_to_block_end") and in_block_col < BLOCK_WIDTH:
                                 colspan = max(1, BLOCK_WIDTH - in_block_col)
+                        elif control_type == "keyword_rows":
+                            control = {
+                                "type": "keyword_rows",
+                                "field": field_name,
+                                "note_date": note_date.isoformat(),
+                                "product_id": product_id,
+                            }
                         elif control_type == "textarea":
                             control = {
                                 "type": "textarea",
@@ -691,8 +934,20 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                             }
                             if in_block_col < BLOCK_WIDTH:
                                 colspan = max(1, BLOCK_WIDTH - in_block_col)
+                        explicit_colspan = control_spec.get("colspan")
+                        if control and explicit_colspan and in_block_col < BLOCK_WIDTH:
+                            try:
+                                colspan = max(1, min(BLOCK_WIDTH - in_block_col, int(explicit_colspan)))
+                            except (TypeError, ValueError):
+                                colspan = 1
                 elif display_span_spec and in_block_col < BLOCK_WIDTH:
-                    if display_span_spec.get("span_to_block_end"):
+                    explicit_colspan = display_span_spec.get("colspan")
+                    if explicit_colspan:
+                        try:
+                            colspan = max(1, min(BLOCK_WIDTH - in_block_col, int(explicit_colspan)))
+                        except (TypeError, ValueError):
+                            colspan = 1
+                    elif display_span_spec.get("span_to_block_end"):
                         colspan = max(1, BLOCK_WIDTH - in_block_col)
                     centered_value = bool(display_span_spec.get("centered"))
 
@@ -707,7 +962,6 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                         "is_spacer_col": False,
                         "is_label_col": active_sheet["kind"] == "product" and in_block_col == 0 and not is_repeat_label_col,
                         "is_repeat_label_col": is_repeat_label_col,
-                        "is_keyword_label_col": False,
                         "control": control,
                         "colspan": colspan,
                         "is_comment_span": bool(control and control.get("type") == "textarea" and colspan > 1),
@@ -717,7 +971,13 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                     }
                 )
                 column_index += colspan
-            prepared_rows.append({"cells": prepared_cells, "row_visual_key": row_visual_key})
+            prepared_rows.append(
+                {
+                    "cells": prepared_cells,
+                    "row_visual_key": row_visual_key,
+                    "row_style_key": row_style_key,
+                }
+            )
         active_sheet = {**active_sheet, "rows": prepared_rows, "keyword_offset": keyword_offset}
 
     table_timeline = build_table_timeline_context(
@@ -1295,12 +1555,16 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
     if field == "keyword_query":
         resolved_text = str(raw_value or "").strip()
         prev_text = keyword_prev.strip()
-        keyword_list = [str(item).strip() for item in (note.keywords or []) if str(item).strip()]
+        keyword_list = _effective_keyword_values(product, note)
         updated = False
         if prev_text:
             try:
-                prev_index = keyword_list.index(prev_text)
-            except ValueError:
+                prev_index = next(
+                    index
+                    for index, item in enumerate(keyword_list)
+                    if normalize_search_text(item) == normalize_search_text(prev_text)
+                )
+            except StopIteration:
                 prev_index = None
             if prev_index is not None:
                 if resolved_text:
@@ -1318,40 +1582,40 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
             updated = True
 
         if updated:
-            note.keywords = _dedupe_preserve_order(keyword_list)
-            note_update_fields = ["keywords", "updated_at"]
-        previous_stat = (
-            DailyProductKeywordStat.objects.filter(
+            note.keywords = normalize_keyword_texts(keyword_list)
+            note.keyword_rows_count = max(int(note.keyword_rows_count or 0), len(note.keywords), 0)
+            note_update_fields = ["keywords", "keyword_rows_count", "updated_at"]
+            _sync_product_keywords(product, note.keywords)
+            _sync_product_note_keywords(
                 product=product,
-                stats_date=note_date,
-                query_text=prev_text,
-            ).first()
-            if prev_text
-            else None
-        )
-        if previous_stat is not None:
-            if resolved_text:
-                existing_stat = DailyProductKeywordStat.objects.filter(
-                    product=product,
-                    stats_date=note_date,
-                    query_text=resolved_text,
-                ).exclude(pk=previous_stat.pk).first()
-                if existing_stat is not None:
-                    previous_stat.delete()
-                elif previous_stat.query_text != resolved_text:
-                    previous_stat.query_text = resolved_text[:255]
-                    previous_stat.save(update_fields=["query_text", "updated_at"])
-            else:
-                previous_stat.delete()
+                source_note=note,
+                keyword_texts=note.keywords,
+                rows_count=note.keyword_rows_count,
+                preserve_larger_rows=True,
+            )
+            _sync_keyword_stat_query_texts(
+                product=product,
+                previous_text=prev_text,
+                resolved_text=resolved_text,
+            )
         display_value = resolved_text[:255]
     elif field in keyword_int_fields or field in keyword_decimal_fields:
         resolved_keyword = keyword_query or keyword_prev
         if not resolved_keyword.strip():
             return JsonResponse({"ok": False, "detail": "Сначала заполните ключ."}, status=400)
-        normalized_keywords = _dedupe_preserve_order([*(note.keywords or []), resolved_keyword])
-        if normalized_keywords != list(note.keywords or []):
+        normalized_keywords = normalize_keyword_texts([*_effective_keyword_values(product, note), resolved_keyword])
+        if normalized_keywords != _note_keyword_values(note):
             note.keywords = normalized_keywords
-            note_update_fields = ["keywords", "updated_at"]
+            note.keyword_rows_count = max(int(note.keyword_rows_count or 0), len(normalized_keywords), 0)
+            note_update_fields = ["keywords", "keyword_rows_count", "updated_at"]
+        _sync_product_keywords(product, normalized_keywords)
+        _sync_product_note_keywords(
+            product=product,
+            source_note=note,
+            keyword_texts=normalized_keywords,
+            rows_count=note.keyword_rows_count,
+            preserve_larger_rows=True,
+        )
 
         stat = _resolve_daily_keyword_stat(
             product=product,
@@ -1389,6 +1653,46 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
 
         if not _keyword_stat_has_values(stat):
             stat.delete()
+    elif field == "keyword_delete":
+        keyword_list = _effective_keyword_values(product, note)
+        current_rows = max(int(note.keyword_rows_count or 0), len(keyword_list), 0)
+        target_text = str(keyword_prev or raw_value or keyword_query or "").strip()
+        target_normalized = normalize_search_text(target_text)
+        removed_keywords: list[str] = []
+
+        if target_normalized:
+            remaining_keywords: list[str] = []
+            removed = False
+            for keyword_text in keyword_list:
+                if not removed and normalize_search_text(keyword_text) == target_normalized:
+                    removed_keywords.append(keyword_text)
+                    removed = True
+                    continue
+                remaining_keywords.append(keyword_text)
+            keyword_list = remaining_keywords
+        elif current_rows <= len(keyword_list) and keyword_list:
+            removed_keywords.append(keyword_list[-1])
+            keyword_list = keyword_list[:-1]
+
+        next_rows = max(0, current_rows - 1)
+        next_rows = max(next_rows, len(keyword_list))
+        note.keywords = normalize_keyword_texts(keyword_list)
+        note.keyword_rows_count = next_rows
+        note_update_fields = ["keywords", "keyword_rows_count", "updated_at"]
+        _sync_product_keywords(product, note.keywords)
+        _sync_product_note_keywords(
+            product=product,
+            source_note=note,
+            keyword_texts=note.keywords,
+            rows_count=next_rows,
+            preserve_larger_rows=False,
+        )
+        for removed_keyword in removed_keywords:
+            DailyProductKeywordStat.objects.filter(
+                product=product,
+                query_text=removed_keyword,
+            ).delete()
+        display_value = str(next_rows)
     elif field == "keyword_rows_count_delta":
         try:
             delta = int(str(raw_value or "0"))
@@ -1397,9 +1701,9 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
         if delta not in {-1, 1}:
             return JsonResponse({"ok": False, "detail": "Некорректное изменение строк."}, status=400)
 
-        keyword_list = _dedupe_preserve_order([str(item).strip() for item in (note.keywords or []) if str(item).strip()])
-        current_rows = max(int(note.keyword_rows_count or 0), len(keyword_list), 1)
-        next_rows = max(1, current_rows + delta)
+        keyword_list = _effective_keyword_values(product, note)
+        current_rows = max(int(note.keyword_rows_count or 0), len(keyword_list), 0)
+        next_rows = max(0, current_rows + delta)
         removed_keywords: list[str] = []
         if next_rows < len(keyword_list):
             removed_keywords = keyword_list[next_rows:]
@@ -1407,13 +1711,28 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
             note.keywords = keyword_list
         note.keyword_rows_count = next_rows
         note_update_fields = ["keyword_rows_count", "updated_at"]
-        if removed_keywords or note.keywords != keyword_list:
-            note.keywords = keyword_list
+        if removed_keywords or _note_keyword_values(note) != keyword_list:
+            note.keywords = normalize_keyword_texts(keyword_list)
             note_update_fields = ["keywords", "keyword_rows_count", "updated_at"]
+            _sync_product_keywords(product, note.keywords)
+            _sync_product_note_keywords(
+                product=product,
+                source_note=note,
+                keyword_texts=note.keywords,
+                rows_count=next_rows,
+                preserve_larger_rows=False,
+            )
+        else:
+            _sync_product_note_keywords(
+                product=product,
+                source_note=note,
+                keyword_texts=keyword_list,
+                rows_count=next_rows,
+                preserve_larger_rows=False,
+            )
         if removed_keywords:
             DailyProductKeywordStat.objects.filter(
                 product=product,
-                stats_date=note_date,
                 query_text__in=removed_keywords,
             ).delete()
         display_value = str(next_rows)

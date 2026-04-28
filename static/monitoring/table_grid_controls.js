@@ -271,6 +271,18 @@
         });
     }
 
+    function setKeywordDeletePending(button, pending) {
+        const wrapper = button.closest(".grid-keyword-row-control");
+        if (wrapper) {
+            wrapper.classList.toggle("is-pending", pending);
+            wrapper.querySelectorAll("button, input").forEach((element) => {
+                element.disabled = pending;
+            });
+        } else {
+            button.disabled = pending;
+        }
+    }
+
     function initInlineControls(tableWrap, updateUrl) {
         const statusNode = document.querySelector("[data-inline-status]");
         let statusTimer = 0;
@@ -289,6 +301,41 @@
                     statusNode.textContent = "";
                 }, 1700);
             }
+        };
+        const findKeywordQueryInput = (input) => {
+            const keywordEntry = input.closest("[data-keyword-entry]");
+            if (keywordEntry) {
+                return keywordEntry.querySelector("[data-field='keyword_query']");
+            }
+            const cell = input.closest("td[data-block]");
+            const row = input.closest("tr");
+            if (!cell || !row) {
+                return null;
+            }
+            const blockIndex = cell.dataset.block || "";
+            const blockCells = Array.from(row.querySelectorAll("td[data-block]"));
+            const queryCell = blockCells.find((item) => item.dataset.block === blockIndex && item.dataset.inBlockCol === "0");
+            const blockQueryInput = queryCell ? queryCell.querySelector("[data-field='keyword_query']") : null;
+            return blockQueryInput || row.querySelector("[data-field='keyword_query']");
+        };
+        const relatedKeywordInputs = (input) => {
+            const keywordEntry = input.closest("[data-keyword-entry]");
+            if (keywordEntry) {
+                return Array.from(keywordEntry.querySelectorAll("[data-note-control='input'][data-keyword-prev]"));
+            }
+            const cell = input.closest("td[data-block]");
+            const row = input.closest("tr");
+            if (!cell || !row) {
+                return [];
+            }
+            if (input.dataset.field === "keyword_query") {
+                return Array.from(row.querySelectorAll("[data-note-control='input'][data-keyword-prev]"));
+            }
+            const blockIndex = cell.dataset.block || "";
+            return Array.from(row.querySelectorAll("[data-note-control='input'][data-keyword-prev]")).filter((relatedInput) => {
+                const relatedCell = relatedInput.closest("td[data-block]");
+                return relatedCell && relatedCell.dataset.block === blockIndex;
+            });
         };
 
         tableWrap.querySelectorAll("[data-note-control='select']").forEach((select) => {
@@ -318,10 +365,7 @@
                 payload.keyword_prev = input.dataset.keywordPrev || "";
             }
             if (keywordField) {
-                const keywordEntry = input.closest("[data-keyword-entry]");
-                const queryInput = keywordEntry
-                    ? keywordEntry.querySelector("[data-field='keyword_query']")
-                    : null;
+                const queryInput = findKeywordQueryInput(input);
                 payload.keyword_query = queryInput ? queryInput.value.trim() : "";
             }
             try {
@@ -330,15 +374,17 @@
                 const serverValue = result && typeof result.value !== "undefined" ? String(result.value ?? "") : next;
                 input.value = serverValue;
                 input.dataset.previousValue = serverValue;
-                if (typeof input.dataset.keywordPrev !== "undefined") {
-                    input.dataset.keywordPrev = serverValue;
-                }
                 if (input.dataset.field === "keyword_query") {
-                    const keywordEntry = input.closest("[data-keyword-entry]");
-                    (keywordEntry ? keywordEntry.querySelectorAll("[data-note-control='input'][data-keyword-prev]") : [])
-                        .forEach((relatedInput) => {
-                            relatedInput.dataset.keywordPrev = serverValue;
+                    relatedKeywordInputs(input).forEach((relatedInput) => {
+                        relatedInput.dataset.keywordPrev = serverValue;
+                    });
+                    const keywordScope = input.closest("[data-keyword-entry]") || input.closest("tr");
+                    if (keywordScope) {
+                        keywordScope.querySelectorAll("[data-note-control='keyword-delete']").forEach((button) => {
+                            button.dataset.keywordPrev = serverValue;
+                            button.dataset.keywordQuery = serverValue;
                         });
+                    }
                 }
                 showStatus("Сохранено", "success");
                 const cell = input.closest("td[data-block]");
@@ -356,7 +402,43 @@
             }
         };
 
+        tableWrap.addEventListener("mousedown", (event) => {
+            if (event.target.closest("[data-note-control='keyword-delete']")) {
+                event.preventDefault();
+            }
+        });
+
         tableWrap.addEventListener("click", async (event) => {
+            const keywordDeleteButton = event.target.closest("[data-note-control='keyword-delete']");
+            if (keywordDeleteButton) {
+                const rowControl = keywordDeleteButton.closest(".grid-keyword-row-control");
+                const queryInput = rowControl ? rowControl.querySelector("[data-field='keyword_query']") : null;
+                const keywordText = (keywordDeleteButton.dataset.keywordPrev || keywordDeleteButton.dataset.keywordQuery || (queryInput ? queryInput.value : "") || "").trim();
+                const confirmMessage = keywordText
+                    ? `Удалить ключ "${keywordText}"? Статистика по нему тоже будет удалена.`
+                    : "Удалить пустую строку ключа?";
+                if (!window.confirm(confirmMessage)) {
+                    return;
+                }
+                const payload = {
+                    product_id: keywordDeleteButton.dataset.productId,
+                    note_date: keywordDeleteButton.dataset.noteDate,
+                    field: keywordDeleteButton.dataset.field,
+                    value: keywordText,
+                    keyword_prev: keywordDeleteButton.dataset.keywordPrev || "",
+                    keyword_query: queryInput ? queryInput.value.trim() : "",
+                };
+                try {
+                    setKeywordDeletePending(keywordDeleteButton, true);
+                    await saveCell(updateUrl, payload);
+                    window.location.reload();
+                } catch (error) {
+                    showStatus(`Ошибка удаления: ${error.message}`, "error");
+                    setKeywordDeletePending(keywordDeleteButton, false);
+                }
+                return;
+            }
+
             const keywordRowsButton = event.target.closest(".grid-keyword-action");
             if (keywordRowsButton) {
                 const wrapper = keywordRowsButton.closest("[data-note-control='keyword-rows']");

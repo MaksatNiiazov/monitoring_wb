@@ -199,6 +199,20 @@ def collect_product_keywords(product: Product) -> list[str]:
     )
     keyword_texts = [item.strip() for item in saved_keywords if item and item.strip()]
     if not keyword_texts:
+        latest_note_keywords = (
+            DailyProductNote.objects.filter(product=product)
+            .exclude(keywords=[])
+            .order_by("-note_date", "-id")
+            .values_list("keywords", flat=True)
+            .first()
+        )
+        if isinstance(latest_note_keywords, list):
+            keyword_texts = [
+                str(item).strip()
+                for item in latest_note_keywords
+                if str(item).strip()
+            ]
+    if not keyword_texts:
         keyword_texts = [
             item.strip()
             for item in [product.primary_keyword, product.secondary_keyword]

@@ -24,6 +24,7 @@ from monitoring.models import (
     DailyProductStock,
     DailyWarehouseStock,
     Product,
+    ProductKeyword,
     ProductEconomicsVersion,
 )
 from monitoring.services.config import get_monitoring_settings
@@ -35,6 +36,7 @@ from monitoring.services.reports import (
     build_product_report,
     decimalize,
     has_metric_cell_data,
+    normalize_search_text,
     normalize_warehouse_name,
 )
 
@@ -122,12 +124,50 @@ def _block_height(keyword_rows: list[dict[str, Any]]) -> int:
 def _normalize_keyword_rows_count(reports: list[dict[str, Any]]) -> None:
     if not reports:
         return
-    target = max(len(report.get("keyword_rows") or []) for report in reports)
+    keyword_texts: list[str] = []
+    seen_keywords: set[str] = set()
+    target = 0
     for report in reports:
         keyword_rows = report.get("keyword_rows") or []
-        missing = max(0, target - len(keyword_rows))
+        target = max(target, len(keyword_rows))
+        for keyword_row in keyword_rows:
+            query_text = str(keyword_row.get("query_text") or "").strip()
+            normalized_query = normalize_search_text(query_text)
+            if not normalized_query or normalized_query in seen_keywords:
+                continue
+            seen_keywords.add(normalized_query)
+            keyword_texts.append(query_text)
+    target = max(target, len(keyword_texts))
+
+    for report in reports:
+        keyword_rows = report.get("keyword_rows") or []
+        rows_by_query: dict[str, dict[str, Any]] = {}
+        for keyword_row in keyword_rows:
+            normalized_query = normalize_search_text(str(keyword_row.get("query_text") or ""))
+            if normalized_query:
+                rows_by_query.setdefault(normalized_query, keyword_row)
+
+        aligned_rows: list[dict[str, Any]] = []
+        for query_text in keyword_texts:
+            normalized_query = normalize_search_text(query_text)
+            source_row = rows_by_query.get(normalized_query)
+            if source_row:
+                aligned_rows.append({**source_row, "query_text": query_text})
+            else:
+                aligned_rows.append(
+                    {
+                        "query_text": query_text,
+                        "has_data": False,
+                        "frequency": None,
+                        "organic_position": None,
+                        "boosted_position": None,
+                        "boosted_ctr": None,
+                    }
+                )
+
+        missing = max(0, target - len(aligned_rows))
         for _ in range(missing):
-            keyword_rows.append(
+            aligned_rows.append(
                 {
                     "query_text": "",
                     "has_data": False,
@@ -137,7 +177,7 @@ def _normalize_keyword_rows_count(reports: list[dict[str, Any]]) -> None:
                     "boosted_ctr": None,
                 }
             )
-        report["keyword_rows"] = keyword_rows
+        report["keyword_rows"] = aligned_rows
 
 
 def _cell_ref(*, start_row: int, start_col: int, relative_row: int, relative_col: int) -> str:
@@ -531,6 +571,11 @@ def _build_prefetched_product_report_context(*, product: Product, stock_dates: l
         stats_date__in=normalized_dates,
     ).order_by("stats_date", "query_text"):
         keyword_stats_by_date[row.stats_date].append(row)
+    product_keywords = list(
+        ProductKeyword.objects.filter(product=product)
+        .order_by("position", "query_text", "id")
+        .values_list("query_text", flat=True)
+    )
 
     search_cluster_stats_by_date: dict[date, list[DailyCampaignSearchClusterStat]] = defaultdict(list)
     for row in DailyCampaignSearchClusterStat.objects.filter(
@@ -594,6 +639,7 @@ def _build_prefetched_product_report_context(*, product: Product, stock_dates: l
         "preloaded_warehouse_rows": warehouse_rows_by_date,
         "preloaded_campaign_stats": campaign_stats_by_date,
         "preloaded_keyword_stats": keyword_stats_by_date,
+        "preloaded_product_keywords": product_keywords,
         "preloaded_search_cluster_stats": search_cluster_stats_by_date,
         "preloaded_economics": economics_by_date,
         "preloaded_visible_warehouse_names": visible_warehouse_names,

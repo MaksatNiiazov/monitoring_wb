@@ -22,6 +22,7 @@ from monitoring.models import (
     DailyProductStock,
     DailyWarehouseStock,
     Product,
+    ProductKeyword,
     ProductEconomicsVersion,
     ProductCampaign,
     SyncLog,
@@ -30,8 +31,9 @@ from monitoring.models import (
 ZERO = Decimal("0")
 ONE = Decimal("1")
 ONE_HUNDRED = Decimal("100")
-MIN_KEYWORD_ROWS = 1
-KEYWORD_ROW_BUFFER = 1
+DEFAULT_KEYWORD_ROWS = 3
+MIN_KEYWORD_ROWS = 0
+KEYWORD_ROW_BUFFER = 0
 
 
 def decimalize(value: Any) -> Decimal:
@@ -68,6 +70,31 @@ def quantize_money(value: Decimal) -> Decimal:
 
 def normalize_search_text(value: str) -> str:
     return " ".join((value or "").strip().lower().split())
+
+
+def normalize_keyword_texts(values: list[str] | tuple[str, ...]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cleaned = str(value or "").strip()[:255]
+        normalized = normalize_search_text(cleaned)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(cleaned)
+    return result
+
+
+def latest_keyword_rows_count(product: Product) -> int:
+    value = (
+        DailyProductNote.objects.filter(product=product)
+        .order_by("-updated_at", "-note_date", "-id")
+        .values_list("keyword_rows_count", flat=True)
+        .first()
+    )
+    if value is None:
+        return DEFAULT_KEYWORD_ROWS
+    return max(int(value or 0), MIN_KEYWORD_ROWS)
 
 
 @lru_cache(maxsize=1)
@@ -694,6 +721,7 @@ def build_product_report(
     preloaded_warehouse_rows: dict[date, list[DailyWarehouseStock]] | None = None,
     preloaded_campaign_stats: dict[date, list[DailyCampaignProductStat]] | None = None,
     preloaded_keyword_stats: dict[date, list[DailyProductKeywordStat]] | None = None,
+    preloaded_product_keywords: list[str] | None = None,
     preloaded_search_cluster_stats: dict[date, list[DailyCampaignSearchClusterStat]] | None = None,
     preloaded_economics: dict[date, ResolvedEconomics] | None = None,
     preloaded_visible_warehouse_names: set[str] | None = None,
@@ -722,7 +750,11 @@ def build_product_report(
         if preloaded_notes is not None and stats_date in preloaded_notes:
             daily_note = preloaded_notes[stats_date]
         else:
-            daily_note, _ = DailyProductNote.objects.get_or_create(product=product, note_date=stats_date)
+            daily_note, _ = DailyProductNote.objects.get_or_create(
+                product=product,
+                note_date=stats_date,
+                defaults={"keyword_rows_count": latest_keyword_rows_count(product)},
+            )
     else:
         daily_note = (
             preloaded_notes.get(stats_date) if preloaded_notes is not None else None
@@ -1080,9 +1112,20 @@ def build_product_report(
 
     keyword_stats_map = {normalize_search_text(item.query_text): item for item in keyword_stats}
     keyword_rows: list[dict[str, Any]] = []
-    keyword_texts: list[str] = []
+    note_keyword_texts: list[str] = []
     if daily_note and isinstance(daily_note.keywords, list):
-        keyword_texts = [str(item).strip() for item in daily_note.keywords if str(item).strip()]
+        note_keyword_texts = normalize_keyword_texts([str(item) for item in daily_note.keywords])
+    if preloaded_product_keywords is None:
+        product_keyword_texts = list(
+            ProductKeyword.objects.filter(product=product)
+            .order_by("position", "query_text", "id")
+            .values_list("query_text", flat=True)
+        )
+    else:
+        product_keyword_texts = list(preloaded_product_keywords)
+    keyword_texts = normalize_keyword_texts([*note_keyword_texts, *[str(item) for item in product_keyword_texts]])
+    if not keyword_texts:
+        keyword_texts = normalize_keyword_texts([item.query_text for item in keyword_stats])
 
     for query_text in keyword_texts:
         normalized_query = normalize_search_text(query_text)
