@@ -247,8 +247,9 @@
                             <th>Ед. ставка / Поиск</th>
                             <th>Ед. ставка / Полки</th>
                             <th>Ед. ставка / Каталог</th>
-                            <th>Руч. поиск</th>
-                            <th>Руч. полки</th>
+                            <th>РС Поиск</th>
+                            <th>РС Каталог</th>
+                            <th>РС Полки</th>
                             <th>Общая РК</th>
                             <th>Органика</th>
                         </tr>
@@ -260,6 +261,7 @@
                             <td>{{ report.blocks.unified_shelves.impressions|intspace }}</td>
                             <td>{{ report.blocks.unified_catalog.impressions|intspace }}</td>
                             <td>{{ report.blocks.manual_search.impressions|intspace }}</td>
+                            <td>{{ report.blocks.manual_catalog.impressions|intspace }}</td>
                             <td>{{ report.blocks.manual_shelves.impressions|intspace }}</td>
                             <td>{{ report.total_ad.impressions|intspace }}</td>
                             <td>-</td>
@@ -270,6 +272,7 @@
                             <td>{{ report.blocks.unified_shelves.clicks|intspace }}</td>
                             <td>{{ report.blocks.unified_catalog.clicks|intspace }}</td>
                             <td>{{ report.blocks.manual_search.clicks|intspace }}</td>
+                            <td>{{ report.blocks.manual_catalog.clicks|intspace }}</td>
                             <td>{{ report.blocks.manual_shelves.clicks|intspace }}</td>
                             <td>{{ report.total_ad.clicks|intspace }}</td>
                             <td>{{ report.organic.open_count|intspace }}</td>
@@ -280,6 +283,7 @@
                             <td>{{ report.blocks.unified_shelves.carts|intspace }}</td>
                             <td>{{ report.blocks.unified_catalog.carts|intspace }}</td>
                             <td>{{ report.blocks.manual_search.carts|intspace }}</td>
+                            <td>{{ report.blocks.manual_catalog.carts|intspace }}</td>
                             <td>{{ report.blocks.manual_shelves.carts|intspace }}</td>
                             <td>{{ report.total_ad.carts|intspace }}</td>
                             <td>{{ report.organic.cart_count|intspace }}</td>
@@ -290,6 +294,7 @@
                             <td>{{ report.blocks.unified_shelves.orders|intspace }}</td>
                             <td>{{ report.blocks.unified_catalog.orders|intspace }}</td>
                             <td>{{ report.blocks.manual_search.orders|intspace }}</td>
+                            <td>{{ report.blocks.manual_catalog.orders|intspace }}</td>
                             <td>{{ report.blocks.manual_shelves.orders|intspace }}</td>
                             <td>{{ report.total_ad.orders|intspace }}</td>
                             <td>{{ report.organic.order_count|intspace }}</td>
@@ -300,6 +305,7 @@
                             <td>{{ report.blocks.unified_shelves.order_sum|money }}</td>
                             <td>{{ report.blocks.unified_catalog.order_sum|money }}</td>
                             <td>{{ report.blocks.manual_search.order_sum|money }}</td>
+                            <td>{{ report.blocks.manual_catalog.order_sum|money }}</td>
                             <td>{{ report.blocks.manual_shelves.order_sum|money }}</td>
                             <td>{{ report.total_ad.order_sum|money }}</td>
                             <td>{{ report.organic.order_sum|money }}</td>
@@ -310,6 +316,7 @@
                             <td>{{ report.blocks.unified_shelves.spend|money }}</td>
                             <td>{{ report.blocks.unified_catalog.spend|money }}</td>
                             <td>{{ report.blocks.manual_search.spend|money }}</td>
+                            <td>{{ report.blocks.manual_catalog.spend|money }}</td>
                             <td>{{ report.blocks.manual_shelves.spend|money }}</td>
                             <td>{{ report.total_ad.spend|money }}</td>
                             <td>-</td>
@@ -320,6 +327,7 @@
                             <td>{{ report.blocks.unified_shelves.ctr|percent }}</td>
                             <td>{{ report.blocks.unified_catalog.ctr|percent }}</td>
                             <td>{{ report.blocks.manual_search.ctr|percent }}</td>
+                            <td>{{ report.blocks.manual_catalog.ctr|percent }}</td>
                             <td>{{ report.blocks.manual_shelves.ctr|percent }}</td>
                             <td>{{ report.total_ad.ctr|percent }}</td>
                             <td>-</td>
@@ -330,6 +338,7 @@
                             <td>{{ report.blocks.unified_shelves.cpc|money }}</td>
                             <td>{{ report.blocks.unified_catalog.cpc|money }}</td>
                             <td>{{ report.blocks.manual_search.cpc|money }}</td>
+                            <td>{{ report.blocks.manual_catalog.cpc|money }}</td>
                             <td>{{ report.blocks.manual_shelves.cpc|money }}</td>
                             <td>{{ report.total_ad.cpc|money }}</td>
                             <td>-</td>

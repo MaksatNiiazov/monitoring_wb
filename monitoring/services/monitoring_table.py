@@ -12,6 +12,7 @@ from django.utils import timezone
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 from monitoring.models import (
     DailyCampaignProductStat,
@@ -38,7 +39,7 @@ from monitoring.services.reports import (
     normalize_warehouse_name,
 )
 
-BASE_BLOCK_HEIGHT = 45
+BASE_BLOCK_HEIGHT = 50
 BASE_KEYWORD_ROWS = 0
 BLOCK_WIDTH = 9
 BLOCK_GAP = 0
@@ -54,9 +55,9 @@ class MonitoringSheetPayload:
     block_dates: list[date] | None = None
 
 
-THIN_SIDE = Side(style="thin", color="D4D8E4")
+THIN_SIDE = Side(style="thin", color="000000")
 THIN_BORDER = Border(left=THIN_SIDE, right=THIN_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
-BLOCK_EDGE_SIDE = Side(style="medium", color="9AA6BF")
+BLOCK_EDGE_SIDE = Side(style="thick", color="000000")
 BLOCK_LEFT_BORDER = Border(left=BLOCK_EDGE_SIDE, right=THIN_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
 BLOCK_RIGHT_BORDER = Border(left=THIN_SIDE, right=BLOCK_EDGE_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
 NO_BORDER = Border()
@@ -237,6 +238,13 @@ def build_day_block(
     metrics = report["metrics"]
     promo_status_value = (note.promo_status or "").strip() or "Не участвуем"
     negative_feedback_value = (note.negative_feedback or "").strip() or "Без изменений"
+    ads_enabled_value = _bool(
+        bool(note.unified_enabled or note.manual_search_enabled or note.manual_shelves_enabled)
+    )
+    price_change_status_value = (
+        (getattr(note, "price_change_status", "") or "").strip()
+        or ("Повысили" if note.price_changed else "Нет")
+    )
 
     blocks = report["blocks"]
     total_ad = report["total_ad"]
@@ -321,8 +329,6 @@ def build_day_block(
             return ""
         return _fraction(decimalize(cell.impressions) * Decimal("100") / decimalize(manual_total))
 
-    buyout_percent_ref = _cell_ref(start_row=start_row, start_col=start_col, relative_row=17, relative_col=2)
-
     def row_value_ref(relative_row: int, relative_col: int) -> str:
         return _cell_ref(
             start_row=start_row,
@@ -330,6 +336,8 @@ def build_day_block(
             relative_row=relative_row,
             relative_col=relative_col,
         )
+
+    buyout_percent_ref = row_value_ref(22, 2)
 
     def buyout_formula(relative_col: int) -> str:
         return f"={row_value_ref(15, relative_col)}*{buyout_percent_ref}"
@@ -354,6 +362,21 @@ def build_day_block(
             row_value_ref(denominator_row, relative_col),
             scale=100,
             treat_zero_numerator_as_empty=True,
+        )
+
+    def profit_formula() -> str:
+        keyword_count = len(report.get("keyword_rows") or [])
+        seller_price_ref = row_value_ref(39 + keyword_count, 6)
+        unit_cost_ref = row_value_ref(23, 2)
+        logistics_ref = row_value_ref(24, 2)
+        drr_sales_ref = row_value_ref(20, 8)
+        orders_ref = row_value_ref(13, 8)
+        buyout_fraction = f"IF({buyout_percent_ref}>1,{buyout_percent_ref}/100,{buyout_percent_ref})"
+        return (
+            f'=IFERROR(IF({seller_price_ref}=0,0,'
+            f'(({seller_price_ref}-{unit_cost_ref}-({seller_price_ref}*({drr_sales_ref}/100)))'
+            f'-({seller_price_ref}*25/100)-(({logistics_ref}/{buyout_fraction})-50))'
+            f'*({orders_ref}*{buyout_fraction})),0)'
         )
 
     def safe_divide_formula(
@@ -409,8 +432,8 @@ def build_day_block(
 
     rows: list[list[Any]] = [
         ["", _block_header(report), "", "", "", "", "", "", ""],
-        ["", "Единая ставка", "", "", "РС Поиск", "", "РС Полки", "", ""],
-        ["Единая ставка", "Поиск", "Полки", "Каталог", "Поиск", "Каталог", "Полки", "Общая", "ОРГ"],
+        ["Тип рекламной кампании", "Единая ставка", "", "", "РС Поиск", "", "РС Полки", "Общая", "Органика"],
+        ["Зоны показов", "Поиск", "Полки", "Каталог", "Поиск", "Каталог", "Полки", "Общая", "Органика"],
         [
             "Доля трафика (%)",
             unified_traffic_value(2),
@@ -464,24 +487,24 @@ def build_day_block(
         ["Конверсия в заказ (%)", "", "", "", "", "", "", safe_divide_formula(row_value_ref(13, 8), row_value_ref(11, 8), scale=100), ""],
         ["Заказы (руб.)", *pick_numbers("order_sum"), _money(metrics.order_sum if metrics else 0), f"={row_value_ref(15, 8)}-SUM({row_value_ref(15, 2)}:{row_value_ref(15, 7)})"],
         ["Выкупы ≈ (руб.)", maybe_formula(2, buyout_formula(2)), maybe_formula(3, buyout_formula(3)), maybe_formula(4, buyout_formula(4)), maybe_formula(5, buyout_formula(5)), maybe_formula(6, buyout_formula(6)), maybe_formula(7, buyout_formula(7)), buyout_formula(8), "-"],
-        ["Процент выкупа %", _fraction(economics.buyout_percent), "", "", "", "", "", "", "-"],
         ["Стоимость заказа", maybe_formula(2, cost_per_order_formula(2)), maybe_formula(3, cost_per_order_formula(3)), maybe_formula(4, cost_per_order_formula(4)), maybe_formula(5, cost_per_order_formula(5)), maybe_formula(6, cost_per_order_formula(6)), maybe_formula(7, cost_per_order_formula(7)), safe_divide_formula(row_value_ref(5, 8), row_value_ref(13, 8), treat_zero_numerator_as_empty=True), "-"],
         ["Стоимость корзины", maybe_formula(2, cost_per_cart_formula(2)), maybe_formula(3, cost_per_cart_formula(3)), maybe_formula(4, cost_per_cart_formula(4)), maybe_formula(5, cost_per_cart_formula(5)), maybe_formula(6, cost_per_cart_formula(6)), maybe_formula(7, cost_per_cart_formula(7)), safe_divide_formula(row_value_ref(5, 8), row_value_ref(11, 8), treat_zero_numerator_as_empty=True), "-"],
         ["ДРР от заказов (%)", maybe_formula(2, ratio_formula(2, 15)), maybe_formula(3, ratio_formula(3, 15)), maybe_formula(4, ratio_formula(4, 15)), maybe_formula(5, ratio_formula(5, 15)), maybe_formula(6, ratio_formula(6, 15)), maybe_formula(7, ratio_formula(7, 15)), safe_divide_formula(row_value_ref(5, 8), row_value_ref(15, 8), scale=100, treat_zero_numerator_as_empty=True), "-"],
         ["ДРР от продаж ≈ (%)", maybe_formula(2, ratio_formula(2, 16)), maybe_formula(3, ratio_formula(3, 16)), maybe_formula(4, ratio_formula(4, 16)), maybe_formula(5, ratio_formula(5, 16)), maybe_formula(6, ratio_formula(6, 16)), maybe_formula(7, ratio_formula(7, 16)), safe_divide_formula(row_value_ref(5, 8), row_value_ref(16, 8), scale=100, treat_zero_numerator_as_empty=True), "-"],
+        ["прибыль (без налогов, костов вне ВБ и возвратов)", profit_formula(), "", "", "", "", "", "", ""],
+        ["Процент выкупа %", _fraction(economics.buyout_percent), "", "", "", "", "", "", ""],
+        ["Себестоимость", _money(economics.unit_cost, optional=True), "", "", "", "", "", "", ""],
+        ["Логистика", _money(economics.logistics_cost, optional=True), "", "", "", "", "", "", ""],
+        ["", "Остатки:", "", "", "", "", "", "", ""],
+        ["", "Остатки на складах WB", "", "", _int(stock.total_stock if stock else 0), "", "", "", ""],
+        ["", "Едут к клиенту", "", "", _int(stock.in_way_to_client if stock else 0), "", "", "", ""],
+        ["", "Возвращаются на склад", "", "", _int(stock.in_way_from_client if stock else 0), "", "", "", ""],
+        ["", "Ср. кол-во заказов/день", "", "", average_orders_formula(), "", "", "", ""],
+        ["", "Ср. убыль остатков/день", "", "", average_stock_drop_value(), "", "", "", ""],
+        ["", "Дней до АУТА", "", "", days_until_zero_value(), "", "", "", ""],
         ["", "", "", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", "", "", ""],
-        ["", "", "", "", "", "", "", "", ""],
-        ["", "Остатки на складах WB", "", "", "", "", "", _int(stock.total_stock if stock else 0), ""],
-        ["", "Едут к клиенту", "", "", "", "", "", _int(stock.in_way_to_client if stock else 0), ""],
-        ["", "Возвращаются на склад", "", "", "", "", "", _int(stock.in_way_from_client if stock else 0), ""],
-        ["", "Ср. кол-во заказов/день", "", "", "", "", "", average_orders_formula(), ""],
-        ["", "Ср. убыль остатков/день", "", "", "", "", "", average_stock_drop_value(), ""],
-        ["", "Дней до АУТА", "", "", "", "", "", days_until_zero_value(), ""],
     ]
-    rows.append(["Ключи", "Частота", "поз. ОРГ", "", "", "", "", "поз. БУСТ", "CTR (%)"])
+    rows.append(["Ключи", "Частота", "Позиция ОРГАНИЧЕСКАЯ", "Позиция БУСТОВАЯ", "CTR (%)"])
     for keyword_row in report.get("keyword_rows") or []:
         has_data = bool(keyword_row.get("has_data"))
         rows.append(
@@ -489,10 +512,6 @@ def build_day_block(
                 keyword_row.get("query_text") or "",
                 _int(keyword_row.get("frequency"), optional=not has_data),
                 _money(keyword_row.get("organic_position"), optional=not has_data),
-                "",
-                "",
-                "",
-                "",
                 _money(keyword_row.get("boosted_position"), optional=not has_data),
                 _fraction(keyword_row.get("boosted_ctr"), optional=not has_data),
             ]
@@ -500,17 +519,19 @@ def build_day_block(
     rows.extend(
         [
             ["", "Обзор:", "", "", "", "", "", "", ""],
-            ["", "СПП", _fraction(note.spp_percent, optional=True), "", "", "", "", spp_delta_label, spp_delta_value],
-            ["", "Цена WBSELLER (наша)", "", "", "", "", "", _money(note.seller_price, optional=True), ""],
-            ["", "Цена WB (на сайте)", "", "", "", "", "", _money(note.wb_price, optional=True), ""],
-            ["", "Акция", "", "", "", "", "", promo_status_value, ""],
-            ["", "Негативные отзывы", "", "", "", "", "", negative_feedback_value, ""],
+            ["", "СПП", "", _fraction(note.spp_percent, optional=True), "", spp_delta_label, "", spp_delta_value, ""],
+            ["", "Цена WBSELLER (наша)", "", "", "", _money(note.seller_price, optional=True), "", "", ""],
+            ["", "Цена WB (на сайте)", "", "", "", _money(note.wb_price, optional=True), "", "", ""],
+            ["", "Акция", "", "", "", promo_status_value, "", "", ""],
+            ["", "Негативные отзывы", "", "", "", negative_feedback_value, "", "", ""],
             ["", "Действия:", "", "", "", "", "", "", ""],
-            ["", "Включили РК единая?", "", "", "", "", "", _bool(note.unified_enabled), ""],
-            ["", "Включили РК руч.поиск", "", "", "", "", "", _bool(note.manual_search_enabled), ""],
-            ["", "Меняли цену?(WBSeller)", "", "", "", "", "", _bool(note.price_changed), ""],
+            ["", "Включили рекламу?", "", "", ads_enabled_value, "", "", _money(getattr(note, "ads_budget", 0), optional=True), ""],
+            ["", "Меняли цену?(WBSeller)", "", "", price_change_status_value, "", "", _money(getattr(note, "price_change_amount", 0), optional=True), ""],
             ["", "Комментарии:", "", "", "", "", "", "", ""],
             ["", note.comment, "", "", "", "", "", "", ""],
+            ["", "", "", "", "", "", "", "", ""],
+            ["", "", "", "", "", "", "", "", ""],
+            ["", "", "", "", "", "", "", "", ""],
         ]
     )
     return rows
@@ -872,28 +893,46 @@ def _apply_dashboard_style(sheet) -> None:
 
 
 def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> None:
-    sheet.freeze_panes = "B4"
+    sheet.freeze_panes = "B1"
     keyword_offset = max(0, block_height - BASE_BLOCK_HEIGHT)
-    overview_row = 34 + keyword_offset
+    keyword_header_row = 36
+    overview_row = 37 + keyword_offset
     actions_row = overview_row + 6
-    comments_row = overview_row + 10
-    percent_rows = {4, 12, 14, 17, 20, 21, overview_row + 1}
-    money_rows = {5, 15, 16, 18, 19, overview_row + 2, overview_row + 3}
-    integer_rows = {6, 10, 11, 13, 27, 28, 29}
-    decimal_rows = {7, 8, 9, 30, 31, 32}
-    section_rows = {33, overview_row, actions_row, comments_row}
+    comments_row = overview_row + 9
+    percent_rows = {4, 12, 14, 19, 20, 22, overview_row + 1}
+    money_rows = {
+        5,
+        15,
+        16,
+        17,
+        18,
+        21,
+        23,
+        24,
+        overview_row + 2,
+        overview_row + 3,
+        actions_row + 1,
+        actions_row + 2,
+    }
+    integer_rows = {6, 10, 11, 13, 26, 27, 28}
+    decimal_rows = {7, 8, 9, 29, 30, 31}
+    muted_rows = {5, 7, 9, 11, 13, 15, 17, 19, 21, 23}
+    dark_rows = {1, 2, 25, keyword_header_row, overview_row, actions_row, comments_row}
+    screenshot_rows = set(range(32, 36))
 
     for row_idx in range(1, block_height + 1):
         if row_idx in (1, 2, 3):
             sheet.row_dimensions[row_idx].height = 24
-        elif row_idx in section_rows:
+        elif row_idx in dark_rows:
             sheet.row_dimensions[row_idx].height = 22
+        elif row_idx in screenshot_rows:
+            sheet.row_dimensions[row_idx].height = 26
         else:
             sheet.row_dimensions[row_idx].height = 19
 
     for block_index in range(history_days):
         start_col = 1 + block_index * (BLOCK_WIDTH + BLOCK_GAP)
-        widths = [24, 12, 12, 12, 12, 12, 12, 12, 12]
+        widths = [27.63 if block_index == 0 else 5.38, 11.38, 13, 13, 13, 13, 13, 13, 13]
         for offset, width in enumerate(widths):
             sheet.column_dimensions[get_column_letter(start_col + offset)].width = width
         if BLOCK_GAP and block_index < history_days - 1:
@@ -910,16 +949,18 @@ def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> N
                     cell.border = THIN_BORDER
                 cell.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
 
-                if row_idx in (1, 2, 3):
-                    cell.fill = HEADER_FILL if row_idx in (1, 2) else SUBHEADER_FILL
-                    cell.font = HEADER_FONT if row_idx in (1, 2) else SECTION_FONT
-                elif row_idx in section_rows:
-                    cell.fill = SECTION_FILL
-                    cell.font = SECTION_FONT
-                elif isinstance(cell.value, str) and cell.value.startswith("="):
-                    cell.fill = FORMULA_FILL
+                if row_idx in dark_rows:
+                    cell.fill = HEADER_FILL
+                    cell.font = HEADER_FONT
+                elif row_idx == 3 or row_idx in muted_rows or row_idx == 26:
+                    cell.fill = SUBHEADER_FILL
+                    cell.font = Font(bold=col_offset == 0 or row_idx in {3, 21, 23, 26})
+                elif row_idx in screenshot_rows:
+                    cell.fill = PatternFill(fill_type=None)
+                    cell.font = Font(name="Arial")
                 else:
-                    cell.fill = META_FILL
+                    cell.fill = PatternFill(fill_type=None)
+                    cell.font = Font(name="Arial", bold=col_offset == 0)
 
                 if row_idx in percent_rows:
                     cell.number_format = "0.##%"
@@ -930,8 +971,67 @@ def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> N
                 elif row_idx in decimal_rows:
                     cell.number_format = "#,##0.##"
 
-                if col_offset == 0 or row_idx in section_rows:
+                if row_idx == 21:
+                    cell.font = Font(name="Arial", size=14, bold=True, color="34A853")
+                elif row_idx in {5}:
+                    cell.font = Font(name="Arial", bold=col_offset == 0, color="34A853")
+                elif row_idx in {11, 12}:
+                    cell.font = Font(name="Arial", bold=col_offset == 0 or row_idx == 12, color="4285F4")
+                elif row_idx in {13, 14}:
+                    cell.font = Font(name="Arial", bold=col_offset == 0 or row_idx == 14, color="FF9900")
+
+                if col_offset == 0 or row_idx in dark_rows:
                     cell.alignment = Alignment(vertical="center", horizontal="left", wrap_text=True)
+
+        def merge(row_idx: int, first_offset: int, last_offset: int, end_row: int | None = None) -> None:
+            sheet.merge_cells(
+                start_row=row_idx,
+                start_column=start_col + first_offset,
+                end_row=end_row or row_idx,
+                end_column=start_col + last_offset,
+            )
+
+        merge(1, 1, 8)
+        merge(2, 1, 3)
+        merge(2, 4, 5)
+        for row_idx in range(21, 26):
+            merge(row_idx, 1, 8)
+        for row_idx in range(26, 32):
+            merge(row_idx, 1, 3)
+            merge(row_idx, 4, 8)
+        merge(32, 1, 8, 35)
+        for row_idx in range(keyword_header_row, overview_row):
+            merge(row_idx, 2, 3)
+            merge(row_idx, 4, 5)
+            merge(row_idx, 7, 8)
+        merge(overview_row, 1, 8)
+        merge(overview_row + 1, 1, 2)
+        merge(overview_row + 1, 3, 4)
+        merge(overview_row + 1, 5, 6)
+        merge(overview_row + 1, 7, 8)
+        for row_idx in range(overview_row + 2, overview_row + 6):
+            merge(row_idx, 1, 4)
+            merge(row_idx, 5, 8)
+        merge(actions_row, 1, 8)
+        for row_idx in range(actions_row + 1, actions_row + 3):
+            merge(row_idx, 1, 3)
+            merge(row_idx, 4, 5)
+            merge(row_idx, 7, 8)
+        merge(comments_row, 1, 8)
+        for row_idx in range(comments_row + 1, comments_row + 5):
+            merge(row_idx, 1, 8)
+
+        validation_specs = [
+            (overview_row + 1, 5, '"Без изменений,Вырос на,Упал на"'),
+            (overview_row + 4, 5, '"Участвуем,Не участвуем"'),
+            (overview_row + 5, 5, '"Без изменений,Поступили"'),
+            (actions_row + 1, 4, '"Да,Нет"'),
+            (actions_row + 2, 4, '"Нет,Повысили,Понизили"'),
+        ]
+        for row_idx, col_offset, formula in validation_specs:
+            validation = DataValidation(type="list", formula1=formula, allow_blank=True)
+            sheet.add_data_validation(validation)
+            validation.add(sheet.cell(row=row_idx, column=start_col + col_offset))
 
         if BLOCK_GAP and block_index < history_days - 1:
             separator_col = start_col + BLOCK_WIDTH
@@ -940,7 +1040,8 @@ def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> N
                 separator_cell.value = ""
                 separator_cell.fill = BLOCK_SEPARATOR_FILL
                 separator_cell.border = NO_BORDER
-    sheet.row_dimensions[comments_row + 1].height = 42
+    for row_idx in range(comments_row + 1, comments_row + 5):
+        sheet.row_dimensions[row_idx].height = 14.25
 
 
 def build_monitoring_workbook(

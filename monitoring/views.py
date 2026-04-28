@@ -649,18 +649,24 @@ def _table_row_style_key(
         return "campaign-header"
     if row_number == 3:
         return "zone-header"
-    if 4 <= row_number <= 21:
-        if row_number == 17:
-            return "metric-muted-input"
-        if row_number in {7, 19, 21}:
+    if 4 <= row_number <= 24:
+        if row_number == 21:
+            return "profit"
+        if row_number in {22, 23, 24}:
+            return "metric-muted-input" if row_number == 23 else "metric-input"
+        if row_number in {7, 9, 17, 19}:
             return "metric-muted-formula"
-        if row_number in {9, 16, 18, 20}:
+        if row_number in {8, 16, 18, 20}:
             return "metric-formula"
-        if row_number in {5, 8, 11, 12, 15}:
+        if row_number in {5, 11, 13, 15}:
             return "metric-muted"
         return "metric"
-    if 27 <= row_number <= 32:
+    if row_number == 25:
+        return "stock-header"
+    if 26 <= row_number <= 31:
         return "stock"
+    if 32 <= row_number <= 35:
+        return "stock-image"
     if keyword_header_row is not None and row_number == keyword_header_row:
         return "keyword-header"
     if (
@@ -671,13 +677,13 @@ def _table_row_style_key(
         return "keyword-row"
     if overview_row is not None and row_number >= overview_row:
         overview_offset = row_number - overview_row
-        if overview_offset in {0, 6, 10}:
+        if overview_offset in {0, 6, 9}:
             return "section-header"
         if 1 <= overview_offset <= 5:
             return "overview-field"
-        if 7 <= overview_offset <= 9:
+        if 7 <= overview_offset <= 8:
             return "action-field"
-        if overview_offset == 11:
+        if 10 <= overview_offset <= 13:
             return "comment-row"
     return ""
 
@@ -776,36 +782,44 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
 
         editable_controls: dict[tuple[int, int], dict[str, object]] = {
             (
-                17,
+                22,
                 1,
             ): {
                 "type": "input",
                 "field": "buyout_percent",
                 "percent": True,
                 "placeholder": "%",
-                "colspan": 7,
+                "span_to_block_end": True,
                 "centered": True,
             },
-            (27, 7): {"type": "stock_popup"},
-            (row_after_keywords(35), 2): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%", "colspan": 5},
-            (row_after_keywords(36), 7): {"type": "input", "field": "seller_price", "placeholder": "0,00", "colspan": 2},
-            (row_after_keywords(37), 7): {"type": "input", "field": "wb_price", "placeholder": "0,00", "colspan": 2},
-            (row_after_keywords(38), 7): {
+            (23, 1): {"type": "input", "field": "unit_cost", "placeholder": "0,00", "span_to_block_end": True, "centered": True},
+            (24, 1): {"type": "input", "field": "logistics_cost", "placeholder": "0,00", "span_to_block_end": True, "centered": True},
+            (26, 4): {"type": "stock_popup"},
+            (row_after_keywords(38), 3): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%", "colspan": 2},
+            (row_after_keywords(39), 5): {"type": "input", "field": "seller_price", "placeholder": "0,00", "colspan": 4},
+            (row_after_keywords(40), 5): {"type": "input", "field": "wb_price", "placeholder": "0,00", "colspan": 4},
+            (row_after_keywords(41), 5): {
                 "type": "select",
                 "field": "promo_status",
-                "options": ["Не участвуем", "Участвуем", "Тест", "Акция"],
-                "colspan": 2,
+                "options": ["Участвуем", "Не участвуем"],
+                "colspan": 4,
             },
-            (row_after_keywords(39), 7): {
+            (row_after_keywords(42), 5): {
                 "type": "select",
                 "field": "negative_feedback",
-                "options": ["Без изменений", "Есть негатив", "Нужна проверка", "Критично"],
+                "options": ["Без изменений", "Поступили"],
+                "colspan": 4,
+            },
+            (row_after_keywords(44), 4): {"type": "select", "field": "ads_enabled", "options": ["Да", "Нет"], "colspan": 2},
+            (row_after_keywords(44), 7): {"type": "input", "field": "ads_budget", "placeholder": "0,00", "colspan": 2, "centered": True},
+            (row_after_keywords(45), 4): {
+                "type": "select",
+                "field": "price_change_status",
+                "options": ["Нет", "Повысили", "Понизили"],
                 "colspan": 2,
             },
-            (row_after_keywords(41), 7): {"type": "bool", "field": "unified_enabled"},
-            (row_after_keywords(42), 7): {"type": "bool", "field": "manual_search_enabled"},
-            (row_after_keywords(43), 7): {"type": "bool", "field": "price_changed"},
-            (row_after_keywords(45), 1): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
+            (row_after_keywords(45), 7): {"type": "input", "field": "price_change_amount", "placeholder": "0,00", "colspan": 2, "centered": True},
+            (row_after_keywords(47), 1): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
         }
         if keyword_header_row:
             editable_controls[(keyword_header_row, 0)] = {
@@ -831,41 +845,57 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                     "field": "keyword_organic_position",
                     "placeholder": "0,00",
                     "centered": True,
+                    "colspan": 2,
                 }
-                editable_controls[(keyword_row_number, 7)] = {
+                editable_controls[(keyword_row_number, 4)] = {
                     "type": "input",
                     "field": "keyword_boosted_position",
                     "placeholder": "0,00",
                     "centered": True,
+                    "colspan": 2,
                 }
-                editable_controls[(keyword_row_number, 8)] = {
+                editable_controls[(keyword_row_number, 7)] = {
                     "type": "input",
                     "field": "keyword_boosted_ctr",
                     "placeholder": "0,00",
                     "centered": True,
+                    "colspan": 2,
                 }
 
         display_spans: dict[tuple[int, int], dict[str, object]] = {}
         display_spans[(1, 1)] = {"colspan": 8, "centered": True}
         display_spans[(2, 1)] = {"colspan": 3, "centered": True}
         display_spans[(2, 4)] = {"colspan": 2, "centered": True}
-        display_spans[(12, 1)] = {"colspan": 6}
-        display_spans[(14, 1)] = {"colspan": 6}
-        for blank_row_number in range(22, 27):
-            display_spans[(blank_row_number, 1)] = {"colspan": 8}
-        for stock_row_number in range(27, 33):
-            display_spans[(stock_row_number, 1)] = {"colspan": 2}
-            display_spans[(stock_row_number, 7)] = {"colspan": 2, "centered": True}
+        display_spans[(21, 1)] = {"colspan": 8}
+        display_spans[(25, 1)] = {"colspan": 8, "centered": True}
+        for stock_row_number in range(26, 32):
+            display_spans[(stock_row_number, 1)] = {"colspan": 3}
+            display_spans[(stock_row_number, 4)] = {"colspan": 5, "centered": True}
+        for screenshot_row_number in range(32, 36):
+            display_spans[(screenshot_row_number, 1)] = {"colspan": 8, "centered": True}
+        if keyword_header_row:
+            for keyword_row_number in range(keyword_header_row, keyword_header_row + keyword_rows_count + 1):
+                display_spans[(keyword_row_number, 1)] = {"colspan": 2, "centered": True}  # Частота
+                display_spans[(keyword_row_number, 3)] = {"colspan": 2, "centered": True}  # Позиция ОРГАНИЧЕСКАЯ
+                display_spans[(keyword_row_number, 5)] = {"colspan": 2, "centered": True}  # Позиция БУСТОВАЯ
+                display_spans[(keyword_row_number, 7)] = {"colspan": 2, "centered": True}  # CTR (%)
         if overview_row:
             display_spans[(overview_row, 1)] = {"colspan": 8, "centered": True}
-            display_spans[(overview_row + 1, 2)] = {"colspan": 5}
+            display_spans[(overview_row + 1, 1)] = {"colspan": 2}
+            display_spans[(overview_row + 1, 3)] = {"colspan": 2, "centered": True}
+            display_spans[(overview_row + 1, 5)] = {"colspan": 2, "centered": True}
+            display_spans[(overview_row + 1, 7)] = {"colspan": 2, "centered": True}
             for overview_field_row in range(overview_row + 2, overview_row + 6):
-                display_spans[(overview_field_row, 1)] = {"colspan": 2}
-                display_spans[(overview_field_row, 7)] = {"colspan": 2}
+                display_spans[(overview_field_row, 1)] = {"colspan": 4}
+                display_spans[(overview_field_row, 5)] = {"colspan": 4}
             display_spans[(overview_row + 6, 1)] = {"colspan": 8, "centered": True}
-            for action_field_row in range(overview_row + 7, overview_row + 10):
-                display_spans[(action_field_row, 1)] = {"colspan": 2}
-            display_spans[(overview_row + 10, 1)] = {"colspan": 8, "centered": True}
+            for action_field_row in range(overview_row + 7, overview_row + 9):
+                display_spans[(action_field_row, 1)] = {"colspan": 3}
+                display_spans[(action_field_row, 4)] = {"colspan": 2, "centered": True}
+                display_spans[(action_field_row, 7)] = {"colspan": 2, "centered": True}
+            display_spans[(overview_row + 9, 1)] = {"colspan": 8, "centered": True}
+            for comment_row_number in range(overview_row + 10, overview_row + 14):
+                display_spans[(comment_row_number, 1)] = {"colspan": 8}
         block_dates = active_sheet.get("block_dates") or []
         product_id = active_sheet.get("product_id")
         block_span = BLOCK_WIDTH + BLOCK_GAP
@@ -1604,8 +1634,9 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
     select_defaults = {
         "promo_status": "Не участвуем",
         "negative_feedback": "Без изменений",
+        "price_change_status": "Нет",
     }
-    note_decimal_fields = {"spp_percent", "seller_price", "wb_price"}
+    note_decimal_fields = {"spp_percent", "seller_price", "wb_price", "ads_budget", "price_change_amount"}
     note_text_fields = {"comment"}
     economics_decimal_fields = {"buyout_percent", "unit_cost", "logistics_cost"}
     keyword_int_fields = {"keyword_frequency"}
@@ -1823,10 +1854,24 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
         ]
     elif field in bool_fields:
         normalized = str(raw_value or "").strip().lower()
-        resolved_bool = normalized in {"1", "true", "yes", "on", "да"}
+        if field == "price_changed":
+            resolved_bool = normalized not in {"", "0", "false", "no", "off", "нет"}
+        else:
+            resolved_bool = normalized in {"1", "true", "yes", "on", "да"}
         setattr(note, field, resolved_bool)
         display_value = "Да" if resolved_bool else "Нет"
         note_update_fields = [field, "updated_at"]
+        if field == "price_changed":
+            note.price_change_status = "Повысили" if resolved_bool else "Нет"
+            note_update_fields = [field, "price_change_status", "updated_at"]
+    elif field == "price_change_status":
+        resolved_text = str(raw_value or "").strip() or select_defaults[field]
+        if resolved_text not in {"Нет", "Повысили", "Понизили"}:
+            return JsonResponse({"ok": False, "detail": "Некорректное изменение цены."}, status=400)
+        note.price_change_status = resolved_text
+        note.price_changed = resolved_text != "Нет"
+        display_value = resolved_text
+        note_update_fields = ["price_change_status", "price_changed", "updated_at"]
     elif field in select_defaults:
         resolved_text = str(raw_value or "").strip() or select_defaults[field]
         setattr(note, field, resolved_text[:255])
@@ -1914,46 +1959,6 @@ def _update_table_note_cell_v2(request: HttpRequest) -> JsonResponse:
             "product_id": product_id,
         }
     )
-
-    bool_fields = {
-        "unified_enabled",
-        "manual_search_enabled",
-        "manual_shelves_enabled",
-        "price_changed",
-    }
-    select_defaults = {
-        "promo_status": "Не участвуем",
-        "negative_feedback": "Без изменений",
-    }
-
-    if field in product_text_fields:
-        resolved = str(raw_value or "").strip()
-        setattr(product, field, resolved[:255])
-        product.save(update_fields=[field, "updated_at"])
-        display_value = resolved[:255]
-    elif field in bool_fields:
-        normalized = str(raw_value or "").strip().lower()
-        resolved = normalized in {"1", "true", "yes", "on", "да"}
-        setattr(note, field, resolved)
-        display_value = "Да" if resolved else "Нет"
-    elif field in select_defaults:
-        resolved = str(raw_value or "").strip() or select_defaults[field]
-        setattr(note, field, resolved[:255])
-        display_value = resolved[:255]
-    else:
-        return JsonResponse({"ok": False, "detail": "Поле не поддерживается."}, status=400)
-
-    note.save(update_fields=[field, "updated_at"])
-    return JsonResponse(
-        {
-            "ok": True,
-            "field": field,
-            "value": display_value,
-            "note_date": note_date.isoformat(),
-            "product_id": product_id,
-        }
-    )
-
 
 def export_product_csv(request: HttpRequest, pk: int) -> HttpResponse:
     product = get_object_or_404(Product, pk=pk)

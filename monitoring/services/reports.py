@@ -1011,31 +1011,21 @@ def build_product_report(
             "share": blocks["unified_catalog"].traffic_share(traffic_totals[CampaignMonitoringGroup.UNIFIED]),
         },
         {
-            "label": "Руч. поиск",
+            "label": "РС Поиск",
             "cell": blocks["manual_search"],
             "share": blocks["manual_search"].traffic_share(manual_search_total.impressions),
         },
         {
-            "label": "Руч. полки",
+            "label": "РС Каталог",
+            "cell": blocks["manual_catalog"],
+            "share": blocks["manual_catalog"].traffic_share(manual_search_total.impressions),
+        },
+        {
+            "label": "РС Полки",
             "cell": blocks["manual_shelves"],
             "share": blocks["manual_shelves"].traffic_share(traffic_totals[CampaignMonitoringGroup.MANUAL_SHELVES]),
         },
     ]
-    if any(
-        [
-            blocks["manual_catalog"].impressions,
-            blocks["manual_catalog"].clicks,
-            blocks["manual_catalog"].orders,
-            blocks["manual_catalog"].spend,
-        ]
-    ):
-        traffic_cards.append(
-            {
-                "label": "Руч. каталог",
-                "cell": blocks["manual_catalog"],
-                "share": blocks["manual_catalog"].traffic_share(manual_search_total.impressions),
-            }
-        )
     insights = {
         "ad_orders_share": safe_divide(total_ad.orders * 100, overall_orders),
         "organic_orders_share": safe_divide(organic["order_count"] * 100, overall_orders),
@@ -1075,22 +1065,6 @@ def build_product_report(
                 "detail": "Кампании у товара есть, но по выбранной дате статистика не сохранена.",
             }
         )
-    if any(
-        [
-            blocks["manual_catalog"].impressions,
-            blocks["manual_catalog"].clicks,
-            blocks["manual_catalog"].orders,
-            blocks["manual_catalog"].spend,
-        ]
-    ):
-        alerts.append(
-            {
-                "tone": "info",
-                "title": "Есть данные по ручному каталогу",
-                "detail": "Они включены в общие итоги и быстрый срез по зонам, но в шаблонной матрице не выделены отдельной колонкой.",
-            }
-        )
-
     history = (
         list(preloaded_history)
         if preloaded_history is not None

@@ -5,9 +5,9 @@ from django.db import models
 
 class CampaignMonitoringGroup(models.TextChoices):
     UNIFIED = "unified", "Единая ставка"
-    MANUAL_SEARCH = "manual_search", "Руч. поиск"
-    MANUAL_SHELVES = "manual_shelves", "Руч. полки"
-    MANUAL_CATALOG = "manual_catalog", "Руч. каталог"
+    MANUAL_SEARCH = "manual_search", "РС Поиск"
+    MANUAL_SHELVES = "manual_shelves", "РС Полки"
+    MANUAL_CATALOG = "manual_catalog", "РС Каталог"
     OTHER = "other", "Другое"
 
 
@@ -362,12 +362,15 @@ class DailyProductNote(TimeStampedModel):
     promo_status = models.CharField(max_length=255, blank=True, verbose_name="Акция")
     negative_feedback = models.CharField(max_length=255, blank=True, verbose_name="Негативные отзывы")
     unified_enabled = models.BooleanField(default=False, verbose_name="Включили РК единая ставка")
-    manual_search_enabled = models.BooleanField(default=False, verbose_name="Включили РК руч. поиск")
-    manual_shelves_enabled = models.BooleanField(default=False, verbose_name="Включили РК руч. полки")
+    manual_search_enabled = models.BooleanField(default=False, verbose_name="Включили РК РС Поиск")
+    manual_shelves_enabled = models.BooleanField(default=False, verbose_name="Включили РК РС Полки")
+    ads_budget = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name="Бюджет рекламы")
     price_changed = models.BooleanField(default=False, verbose_name="Меняли цену")
+    price_change_status = models.CharField(max_length=32, blank=True, default="", verbose_name="Изменение цены")
+    price_change_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name="Изменение цены, руб.")
     comment = models.TextField(blank=True, verbose_name="Комментарий")
     keywords = models.JSONField(default=list, blank=True, verbose_name="Ключи")
-    keyword_rows_count = models.PositiveSmallIntegerField(default=3, verbose_name="Строк ключей")
+    keyword_rows_count = models.PositiveSmallIntegerField(default=0, verbose_name="Строк ключей")
 
     class Meta:
         ordering = ["-note_date", "product_id"]

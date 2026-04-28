@@ -101,14 +101,17 @@
             CONVERSION_ORDER: 14,
             ORDER_SUM: 15,
             BUYOUTS: 16,
-            BUYOUT_PERCENT: 17,
-            COST_ORDER: 18,
-            COST_CART: 19,
-            DRR_ORDERS: 20,
-            DRR_SALES: 21,
-            STOCK_TOTAL: 27,
-            AVG_STOCK_DROP: 31,
-            DAYS_UNTIL_ZERO: 32,
+            COST_ORDER: 17,
+            COST_CART: 18,
+            DRR_ORDERS: 19,
+            DRR_SALES: 20,
+            PROFIT: 21,
+            BUYOUT_PERCENT: 22,
+            UNIT_COST: 23,
+            LOGISTICS: 24,
+            STOCK_TOTAL: 26,
+            AVG_STOCK_DROP: 30,
+            DAYS_UNTIL_ZERO: 31,
         };
         const COL = {
             SEARCH: 1,
@@ -120,6 +123,7 @@
             OVERALL: 7,
             ORG: 8,
             INPUT_MAIN: 1,
+            OVERVIEW_VALUE: 5,
             STOCK: 7,
         };
 
@@ -161,6 +165,19 @@
                 }
             });
             return max + 1;
+        };
+
+        const findRowByLabel = (block, inBlockCol, label) => {
+            const normalizedLabel = String(label || "").trim().toLowerCase();
+            const cells = table.querySelectorAll(`td[data-block="${block}"][data-in-block-col="${inBlockCol}"]`);
+            for (const cell of cells) {
+                const text = (cell.textContent || "").trim().toLowerCase();
+                if (text === normalizedLabel) {
+                    const row = Number.parseInt(cell.dataset.row || "", 10);
+                    return Number.isFinite(row) ? row : null;
+                }
+            }
+            return null;
         };
 
         const recalcBlock = (blockIndex) => {
@@ -225,6 +242,30 @@
 
             const drrSalesCell = formatRatioCell(totalAdSpend, buyouts, { percent: true, blankWhenZeroNumerator: true });
             setCellText(ROW.DRR_SALES, blockIndex, COL.OVERALL, drrSalesCell);
+
+            const sellerPriceRow = findRowByLabel(blockIndex, COL.INPUT_MAIN, "Цена WBSELLER (наша)");
+            const sellerPrice = sellerPriceRow ? readNumber(sellerPriceRow, blockIndex, COL.OVERVIEW_VALUE) : null;
+            const unitCost = readNumber(ROW.UNIT_COST, blockIndex, COL.INPUT_MAIN) || 0;
+            const logistics = readNumber(ROW.LOGISTICS, blockIndex, COL.INPUT_MAIN) || 0;
+            const drrSales = readNumber(ROW.DRR_SALES, blockIndex, COL.OVERALL);
+            const drrFraction = Number.isFinite(drrSales) && Math.abs(drrSales) > 1 ? drrSales / 100 : drrSales;
+            const logisticsAdjustment = buyoutFraction ? (logistics / buyoutFraction) - 50 : null;
+            const profit = (
+                Number.isFinite(sellerPrice)
+                && sellerPrice !== 0
+                && Number.isFinite(drrFraction)
+                && Number.isFinite(logisticsAdjustment)
+                && Number.isFinite(orders)
+            )
+                ? (
+                    sellerPrice
+                    - unitCost
+                    - (sellerPrice * drrFraction)
+                    - (sellerPrice * 0.25)
+                    - logisticsAdjustment
+                ) * orders * buyoutFraction
+                : null;
+            setCellText(ROW.PROFIT, blockIndex, COL.INPUT_MAIN, Number.isFinite(profit) ? formatDecimalValue(profit) : "-");
         };
 
         const recalcAll = () => {
@@ -508,6 +549,9 @@
                     setSelectPending(select, true);
                     const result = await saveCell(updateUrl, payload);
                     const serverValue = result && typeof result.value !== "undefined" ? String(result.value ?? "") : select.value;
+                    if (Array.from(select.options).some((option) => option.value === serverValue)) {
+                        select.value = serverValue;
+                    }
                     select.dataset.previousValue = serverValue;
                     showStatus("Сохранено", "success");
                 } catch (error) {

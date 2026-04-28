@@ -53,15 +53,19 @@ def seed_demo_dataset() -> None:
     )
     manual_search, _ = Campaign.objects.update_or_create(
         external_id=28150155,
-        defaults={"name": "Руч. поиск", "monitoring_group": CampaignMonitoringGroup.MANUAL_SEARCH},
+        defaults={"name": "РС Поиск", "monitoring_group": CampaignMonitoringGroup.MANUAL_SEARCH},
     )
     manual_shelves, _ = Campaign.objects.update_or_create(
         external_id=28150156,
-        defaults={"name": "Руч. полки", "monitoring_group": CampaignMonitoringGroup.MANUAL_SHELVES},
+        defaults={"name": "РС Полки", "monitoring_group": CampaignMonitoringGroup.MANUAL_SHELVES},
+    )
+    manual_catalog, _ = Campaign.objects.update_or_create(
+        external_id=28150157,
+        defaults={"name": "РС Каталог", "monitoring_group": CampaignMonitoringGroup.MANUAL_CATALOG},
     )
 
     for product in (first_product, second_product):
-        for campaign in (unified, manual_search, manual_shelves):
+        for campaign in (unified, manual_search, manual_catalog, manual_shelves):
             ProductCampaign.objects.get_or_create(product=product, campaign=campaign)
 
     for product in (first_product, second_product):
@@ -146,6 +150,9 @@ def seed_demo_dataset() -> None:
                 "unified_enabled": True,
                 "manual_search_enabled": False,
                 "manual_shelves_enabled": False,
+                "ads_budget": Decimal("10000.00"),
+                "price_change_status": "Нет",
+                "price_change_amount": Decimal("0.00"),
                 "comment": "Демо-сценарий: держим органику и наблюдаем за остатком.",
             },
         )
@@ -155,6 +162,7 @@ def seed_demo_dataset() -> None:
             (unified, CampaignZone.RECOMMENDATION, 960 - offset * 40, 76 - offset * 3, 3, Decimal("1250.00") - Decimal(offset * 30), Decimal("11200.00") - Decimal(offset * 450)),
             (unified, CampaignZone.CATALOG, 720 - offset * 35, 48 - offset * 2, 2, Decimal("840.00") - Decimal(offset * 25), Decimal("6900.00") - Decimal(offset * 300)),
             (manual_search, CampaignZone.SEARCH, 670 - offset * 28, 58 - offset * 2, 2, Decimal("980.00") - Decimal(offset * 20), Decimal("8900.00") - Decimal(offset * 280)),
+            (manual_catalog, CampaignZone.CATALOG, 410 - offset * 18, 33 - offset, 1, Decimal("610.00") - Decimal(offset * 14), Decimal("5200.00") - Decimal(offset * 160)),
             (manual_shelves, CampaignZone.RECOMMENDATION, 320 - offset * 16, 29 - offset, 1, Decimal("420.00") - Decimal(offset * 10), Decimal("4300.00") - Decimal(offset * 120)),
         ):
             DailyCampaignProductStat.objects.update_or_create(
