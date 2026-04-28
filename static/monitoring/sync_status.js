@@ -31,6 +31,14 @@
         return DATE_TIME_FORMATTER.format(parsed);
     }
 
+    function formatDurationHms(totalSeconds) {
+        const normalizedSeconds = Math.max(0, Math.ceil(Number(totalSeconds || 0)));
+        const hours = Math.floor(normalizedSeconds / 3600);
+        const minutes = Math.floor((normalizedSeconds % 3600) / 60);
+        const seconds = normalizedSeconds % 60;
+        return `${hours} ч ${minutes} мин ${seconds} сек`;
+    }
+
     function chipClassByStatus(status) {
         if (status === "success") {
             return "success";
@@ -96,9 +104,10 @@
             if (!this.messageNode || !this.countdownMessage) {
                 return;
             }
+            const remainingText = formatDurationHms(remaining);
             const nextText = this.countdownMessage
-                .replace(/Жд[её]м\s+\d+\s+сек/i, `Ждём ${remaining} сек`)
-                .replace(/через\s+\d+\s+сек/i, `через ${remaining} сек`);
+                .replace(/Жд[её]м\s+(?:\d+\s+ч\s+)?(?:\d+\s+мин\s+)?\d+\s+сек/i, `Ждём ${remainingText}`)
+                .replace(/через\s+(?:\d+\s+ч\s+)?(?:\d+\s+мин\s+)?\d+\s+сек/i, `через ${remainingText}`);
             this.messageNode.textContent = nextText;
         }
 
@@ -107,10 +116,11 @@
             if (!source) {
                 return "";
             }
-            if (/Жд[её]м\s+\d+\s+сек/i.test(source) || /через\s+\d+\s+сек/i.test(source)) {
+            const countdownPattern = /(?:Жд[её]м|через)\s+(?:\d+\s+ч\s+)?(?:\d+\s+мин\s+)?\d+\s+сек/i;
+            if (countdownPattern.test(source)) {
                 return source;
             }
-            return `${source} Ждём 0 сек.`;
+            return `${source} Ждём 0 ч 0 мин 0 сек.`;
         }
 
         updateCountdown() {
@@ -249,7 +259,7 @@
                 if (hasSyncCooldown) {
                     this.startCountdown(
                         cooldown.retry_until,
-                        cooldown.message || "WB API временно ограничил синхронизацию. Повторить можно через 0 сек."
+                        cooldown.message || "WB API временно ограничил синхронизацию. Повторить можно через 0 ч 0 мин 0 сек."
                     );
                 } else if (this.messageNode) {
                     this.stopCountdown();
@@ -291,7 +301,7 @@
             } else if (hasSyncCooldown) {
                 this.startCountdown(
                     cooldown.retry_until,
-                    cooldown.message || "WB API временно ограничил синхронизацию. Повторить можно через 0 сек."
+                    cooldown.message || "WB API временно ограничил синхронизацию. Повторить можно через 0 ч 0 мин 0 сек."
                 );
             } else {
                 this.stopCountdown();

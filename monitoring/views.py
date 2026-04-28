@@ -240,6 +240,13 @@ def _sync_product_note_keywords(
     DailyProductNote.objects.bulk_update(notes, ["keywords", "keyword_rows_count", "updated_at"])
 
 
+def _format_duration_hms(total_seconds: int) -> str:
+    seconds = max(0, int(total_seconds or 0))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours} ч {minutes} мин {seconds} сек"
+
+
 def _current_wb_sync_cooldown() -> dict[str, object]:
     now = timezone.now()
     record = (
@@ -257,11 +264,13 @@ def _current_wb_sync_cooldown() -> dict[str, object]:
         }
 
     remaining_seconds = max(1, int((record.next_request_at - now).total_seconds()))
+    remaining_display = _format_duration_hms(remaining_seconds)
     retry_local = timezone.localtime(record.next_request_at)
     source = f"{record.method} {record.path}"
     return {
         "is_blocked": True,
         "remaining_seconds": remaining_seconds,
+        "remaining_display": remaining_display,
         "retry_until": record.next_request_at.isoformat(),
         "source": source,
         "detail": record.last_detail or "",
@@ -270,7 +279,7 @@ def _current_wb_sync_cooldown() -> dict[str, object]:
         "retry_at_display": retry_local.strftime("%d.%m.%Y %H:%M:%S"),
         "message": (
             f"WB лимит активен: {source}. "
-            f"Следующая полная синхронизация будет доступна через {remaining_seconds} сек "
+            f"Следующая полная синхронизация будет доступна через {remaining_display} "
             f"(после {retry_local:%d.%m.%Y %H:%M:%S})."
         ),
     }
