@@ -839,7 +839,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 second_value = str(row[1] if len(row) > 1 else "").strip()
                 if first_value == "Ключи":
                     keyword_header_row = row_index
-                if second_value == "Обзор:":
+                if first_value == "Обзор:" or second_value == "Обзор:":
                     overview_row = row_index
             if keyword_header_row and overview_row and overview_row > keyword_header_row:
                 keyword_rows_count = max(0, overview_row - keyword_header_row - 1)
@@ -884,7 +884,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 "colspan": 2,
             },
             (row_after_keywords(45), 7): {"type": "input", "field": "price_change_amount", "placeholder": "0,00", "colspan": 2, "centered": True},
-            (row_after_keywords(47), 1): {"type": "textarea", "field": "comment", "placeholder": "Комментарий", "rowspan": 4},
+            (row_after_keywords(47), 0): {"type": "textarea", "field": "comment", "placeholder": "Комментарий", "rowspan": 4},
         }
         if keyword_header_row:
             editable_controls[(keyword_header_row, 0)] = {
@@ -944,22 +944,22 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 display_spans[(keyword_row_number, 4)] = {"colspan": 2, "centered": True}
                 display_spans[(keyword_row_number, 7)] = {"colspan": 2, "centered": True}
         if overview_row:
-            display_spans[(overview_row, 1)] = {"colspan": 8, "centered": True}
-            display_spans[(overview_row + 1, 1)] = {"colspan": 2}
+            display_spans[(overview_row, 0)] = {"colspan": 9, "centered": True}
+            display_spans[(overview_row + 1, 0)] = {"colspan": 3}
             display_spans[(overview_row + 1, 3)] = {"colspan": 2, "centered": True}
             display_spans[(overview_row + 1, 5)] = {"colspan": 2, "centered": True}
             display_spans[(overview_row + 1, 7)] = {"colspan": 2, "centered": True}
             for overview_field_row in range(overview_row + 2, overview_row + 6):
-                display_spans[(overview_field_row, 1)] = {"colspan": 4}
+                display_spans[(overview_field_row, 0)] = {"colspan": 5}
                 display_spans[(overview_field_row, 5)] = {"colspan": 4}
-            display_spans[(overview_row + 6, 1)] = {"colspan": 8, "centered": True}
+            display_spans[(overview_row + 6, 0)] = {"colspan": 9, "centered": True}
             for action_field_row in range(overview_row + 7, overview_row + 9):
-                display_spans[(action_field_row, 1)] = {"colspan": 3}
+                display_spans[(action_field_row, 0)] = {"colspan": 4}
                 display_spans[(action_field_row, 4)] = {"colspan": 2, "centered": True}
                 display_spans[(action_field_row, 7)] = {"colspan": 2, "centered": True}
-            display_spans[(overview_row + 9, 1)] = {"colspan": 8, "centered": True}
+            display_spans[(overview_row + 9, 0)] = {"colspan": 9, "centered": True}
             for comment_row_number in range(overview_row + 10, overview_row + 14):
-                display_spans[(comment_row_number, 1)] = {"colspan": 8}
+                display_spans[(comment_row_number, 0)] = {"colspan": 9}
         block_dates = active_sheet.get("block_dates") or []
         product_id = active_sheet.get("product_id")
         active_product = Product.objects.filter(pk=product_id).first() if product_id else None
@@ -1155,6 +1155,22 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                     and in_block_col == 0
                     and colspan > 1
                 )
+                control_type = str(control.get("type") or "") if control else ""
+                control_field = str(control.get("field") or "") if control else ""
+                has_sticky_label_content = bool(str(value or "").strip()) or control_type == "keyword_rows" or (
+                    control_type == "input" and control_field == "keyword_query"
+                )
+                sticky_label_excluded_rows = {"section-header", "overview-field", "action-field", "comment-row"}
+                is_label_col = (
+                    active_sheet["kind"] == "product"
+                    and in_block_col == 0
+                    and not is_repeat_label_col
+                    and not is_full_block_span
+                    and not is_stock_section_span
+                    and has_sticky_label_content
+                    and row_style_key not in sticky_label_excluded_rows
+                )
+
                 prepared_cells.append(
                     {
                         "value": value,
@@ -1164,8 +1180,8 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                         "is_gap_col": is_gap_col,
                         "is_block_start": active_sheet["kind"] == "product" and in_block_col == 0,
                         "is_spacer_col": False,
-                        "is_label_col": active_sheet["kind"] == "product" and in_block_col == 0 and not is_repeat_label_col and not is_full_block_span and not is_stock_section_span,
-                        "is_repeat_label_col": is_repeat_label_col and not is_full_block_span and not is_stock_section_span,
+                        "is_label_col": is_label_col,
+                        "is_repeat_label_col": is_repeat_label_col and colspan == 1 and not is_full_block_span and not is_stock_section_span,
                         "control": control,
                         "colspan": colspan,
                         "rowspan": rowspan,

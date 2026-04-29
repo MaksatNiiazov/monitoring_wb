@@ -736,6 +736,8 @@ def build_product_monitoring_rows_display(
     _normalize_keyword_rows_count(reports)
 
     block_height = _block_height(reports[0]["keyword_rows"]) if reports else BASE_BLOCK_HEIGHT
+    keyword_count = len(reports[0]["keyword_rows"]) if reports else 0
+    footer_start_offset = 36 + keyword_count
     total_width = resolved_history_days * BLOCK_WIDTH + max(resolved_history_days - 1, 0) * BLOCK_GAP
     matrix = [["" for _ in range(total_width)] for _ in range(block_height)]
 
@@ -748,7 +750,8 @@ def build_product_monitoring_rows_display(
                 break
             for col_offset, value in enumerate(block_row):
                 keep_repeated_stock_label = 24 <= row_offset <= 31
-                if index > 0 and col_offset == 0 and not keep_repeated_stock_label:
+                keep_repeated_footer_label = row_offset >= footer_start_offset
+                if index > 0 and col_offset == 0 and not (keep_repeated_stock_label or keep_repeated_footer_label):
                     value = ""
                 target_col = start_col + col_offset
                 if target_col >= total_width:
