@@ -532,7 +532,7 @@ def _build_product_stock_popup_payload_for_date(*, product: Product, stock_date:
     )
 
 
-def _build_stock_mini_table_payload_for_date(*, product: Product, stock_date: date, limit: int = 4) -> dict[str, object]:
+def _build_stock_mini_table_payload_for_date(*, product: Product, stock_date: date, limit: int = 6) -> dict[str, object]:
     visible_warehouse_names = product.visible_warehouse_names()
     preferred_warehouse_names = {
         normalize_warehouse_name(warehouse_name)

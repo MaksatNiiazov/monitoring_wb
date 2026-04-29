@@ -650,8 +650,10 @@
             if (Object.prototype.hasOwnProperty.call(options, "caption")) {
                 this.data.emptyCaption = options.caption;
             }
-            this.stage.innerHTML = `<div class="chart-empty">${this.data.emptyText || "Данных пока недостаточно для построения графика."}</div>`;
-            this.caption.textContent = this.data.emptyCaption || "Сначала выполните синхронизацию и сформируйте срез за выбранный период.";
+            const hasEmptyText = typeof this.data.emptyText !== "undefined" && this.data.emptyText !== null;
+            const hasEmptyCaption = typeof this.data.emptyCaption !== "undefined" && this.data.emptyCaption !== null;
+            this.stage.innerHTML = `<div class="chart-empty">${hasEmptyText ? this.data.emptyText : "Данных пока недостаточно для построения графика."}</div>`;
+            this.caption.textContent = hasEmptyCaption ? this.data.emptyCaption : "Сначала выполните синхронизацию и сформируйте срез за выбранный период.";
             this.legend.innerHTML = "";
             this.syncButtons();
             this.data.emptyText = originalEmptyText;

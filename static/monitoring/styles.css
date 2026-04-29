@@ -3449,18 +3449,30 @@ body.is-modal-open {
     vertical-align: top;
 }
 
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini {
+    min-height: 0;
+    max-height: 70px;
+    height: auto;
+    align-items: flex-start;
+}
+
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table {
+    font-size: 6.2pt;
+    line-height: 0.9;
+}
+
 .monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table th,
 .monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table td {
     min-width: 0;
     width: auto;
     max-width: none;
     height: auto;
-    padding: 1px 3px;
+    padding: 0 2px;
     border: 1px solid var(--sheet-border);
     background: #ffffff;
-    font-size: 8.5pt;
+    font-size: 6.2pt;
     letter-spacing: 0;
-    line-height: 1.05;
+    line-height: 0.9;
     text-transform: none;
 }
 
@@ -4192,6 +4204,14 @@ th {
 .chart-widget[data-chart-active-mode="campaigns"] .chart-caption,
 .chart-widget[data-chart-active-mode="campaigns"] .chart-legend {
     grid-column: 1 / -1;
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-caption {
+    grid-row: 4;
+}
+
+.chart-widget[data-chart-active-mode="campaigns"] .chart-legend {
+    grid-row: 5;
 }
 
 .chart-series-toggle {
