@@ -495,16 +495,19 @@ def build_day_block(
         ["Процент выкупа %", _fraction(economics.buyout_percent), "", "", "", "", "", "", ""],
         ["Себестоимость", _money(economics.unit_cost, optional=True), "", "", "", "", "", "", ""],
         ["Логистика", _money(economics.logistics_cost, optional=True), "", "", "", "", "", "", ""],
-        ["", "Остатки:", "", "", "", "", "", "", ""],
-        ["", "Остатки на складах WB", "", "", _int(stock.total_stock if stock else 0), "", "", "", ""],
-        ["", "Едут к клиенту", "", "", _int(stock.in_way_to_client if stock else 0), "", "", "", ""],
-        ["", "Возвращаются на склад", "", "", _int(stock.in_way_from_client if stock else 0), "", "", "", ""],
-        ["", "Ср. кол-во заказов/день", "", "", average_orders_formula(), "", "", "", ""],
-        ["", "Ср. убыль остатков/день", "", "", average_stock_drop_value(), "", "", "", ""],
-        ["", "Дней до АУТА", "", "", days_until_zero_value(), "", "", "", ""],
+        ["Остатки:", "", "", "", "", "", "", "", ""],
+        ["Остатки на складах WB", "", "", "", _int(stock.total_stock if stock else 0), "", "", "", ""],
+        ["Едут к клиенту", "", "", "", _int(stock.in_way_to_client if stock else 0), "", "", "", ""],
+        ["Возвращаются на склад", "", "", "", _int(stock.in_way_from_client if stock else 0), "", "", "", ""],
+        ["Ср. кол-во заказов/день", "", "", "", average_orders_formula(), "", "", "", ""],
+        ["Ср. убыль остатков/день", "", "", "", average_stock_drop_value(), "", "", "", ""],
+        ["Дней до АУТА", "", "", "", days_until_zero_value(), "", "", "", ""],
+        ["Остатки по складам", "", "", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", ""],
     ]
-    rows.append(["Ключи", "Частота", "Позиция ОРГАНИЧЕСКАЯ", "Позиция БУСТОВАЯ", "CTR (%)"])
+    rows.append(["Ключи", "Частота", "Позиция ОРГАНИЧЕСКАЯ", "", "Позиция БУСТОВАЯ", "", "", "CTR (%)", ""])
     for keyword_row in report.get("keyword_rows") or []:
         has_data = bool(keyword_row.get("has_data"))
         rows.append(
@@ -512,8 +515,12 @@ def build_day_block(
                 keyword_row.get("query_text") or "",
                 _int(keyword_row.get("frequency"), optional=not has_data),
                 _money(keyword_row.get("organic_position"), optional=not has_data),
+                "",
                 _money(keyword_row.get("boosted_position"), optional=not has_data),
+                "",
+                "",
                 _fraction(keyword_row.get("boosted_ctr"), optional=not has_data),
+                "",
             ]
         )
     rows.extend(
@@ -699,7 +706,8 @@ def build_product_monitoring_rows(*, product: Product, reference_date: date, his
             if row_offset >= block_height:
                 break
             for col_offset, value in enumerate(block_row):
-                if index > 0 and col_offset == 0:
+                keep_repeated_stock_label = 24 <= row_offset <= 31
+                if index > 0 and col_offset == 0 and not keep_repeated_stock_label:
                     value = ""
                 matrix[row_offset][start_col + col_offset - 1] = value
     return matrix
@@ -739,7 +747,8 @@ def build_product_monitoring_rows_display(
             if row_offset >= block_height:
                 break
             for col_offset, value in enumerate(block_row):
-                if index > 0 and col_offset == 0:
+                keep_repeated_stock_label = 24 <= row_offset <= 31
+                if index > 0 and col_offset == 0 and not keep_repeated_stock_label:
                     value = ""
                 target_col = start_col + col_offset
                 if target_col >= total_width:
@@ -994,12 +1003,13 @@ def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> N
         merge(1, 1, 8)
         merge(2, 1, 3)
         merge(2, 4, 5)
-        for row_idx in range(21, 26):
+        for row_idx in range(21, 25):
             merge(row_idx, 1, 8)
+        merge(25, 0, 8)
         for row_idx in range(26, 32):
-            merge(row_idx, 1, 3)
+            merge(row_idx, 0, 3)
             merge(row_idx, 4, 8)
-        merge(32, 1, 8, 35)
+        merge(32, 0, 8, 35)
         for row_idx in range(keyword_header_row, overview_row):
             merge(row_idx, 2, 3)
             merge(row_idx, 4, 5)
@@ -1018,8 +1028,7 @@ def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> N
             merge(row_idx, 4, 5)
             merge(row_idx, 7, 8)
         merge(comments_row, 1, 8)
-        for row_idx in range(comments_row + 1, comments_row + 5):
-            merge(row_idx, 1, 8)
+        merge(comments_row + 1, 1, 8, comments_row + 4)
 
         validation_specs = [
             (overview_row + 1, 5, '"Без изменений,Вырос на,Упал на"'),

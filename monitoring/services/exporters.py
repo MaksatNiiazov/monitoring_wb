@@ -429,16 +429,19 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
         ["Процент выкупа %", format_percent(percent_points(economics.buyout_percent)), "", "", "", "", "", "", ""],
         ["Себестоимость", format_optional_decimal(economics.unit_cost), "", "", "", "", "", "", ""],
         ["Логистика", format_optional_decimal(economics.logistics_cost), "", "", "", "", "", "", ""],
-        ["", "Остатки:", "", "", "", "", "", "", ""],
-        ["", "Остатки на складах WB", "", "", format_int(stock.total_stock if stock else 0), "", "", "", ""],
-        ["", "Едут к клиенту", "", "", format_int(stock.in_way_to_client if stock else 0), "", "", "", ""],
-        ["", "Возвращаются на склад", "", "", format_int(stock.in_way_from_client if stock else 0), "", "", "", ""],
-        ["", "Ср. кол-во заказов/день", "", "", format_decimal(report["avg_orders_per_day"]), "", "", "", ""],
-        ["", "Ср. убыль остатков/день", "", "", format_optional_decimal(report["avg_stock_drop_per_day"]), "", "", "", ""],
-        ["", "Дней до АУТА", "", "", format_optional_decimal(report["days_until_zero_from_stock_drop"]), "", "", "", ""],
+        ["Остатки:", "", "", "", "", "", "", "", ""],
+        ["Остатки на складах WB", "", "", "", format_int(stock.total_stock if stock else 0), "", "", "", ""],
+        ["Едут к клиенту", "", "", "", format_int(stock.in_way_to_client if stock else 0), "", "", "", ""],
+        ["Возвращаются на склад", "", "", "", format_int(stock.in_way_from_client if stock else 0), "", "", "", ""],
+        ["Ср. кол-во заказов/день", "", "", "", format_decimal(report["avg_orders_per_day"]), "", "", "", ""],
+        ["Ср. убыль остатков/день", "", "", "", format_optional_decimal(report["avg_stock_drop_per_day"]), "", "", "", ""],
+        ["Дней до АУТА", "", "", "", format_optional_decimal(report["days_until_zero_from_stock_drop"]), "", "", "", ""],
+        ["Остатки по складам", "", "", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", ""],
     ]
-    rows.append(["Ключи", "Частота", "Позиция ОРГАНИЧЕСКАЯ", "Позиция БУСТОВАЯ", "CTR (%)"])
+    rows.append(["Ключи", "Частота", "Позиция ОРГАНИЧЕСКАЯ", "", "Позиция БУСТОВАЯ", "", "", "CTR (%)", ""])
     for keyword_row in report.get("keyword_rows") or []:
         has_data = bool(keyword_row.get("has_data"))
         rows.append(
@@ -446,8 +449,12 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
                 keyword_row.get("query_text") or "",
                 format_keyword_int(keyword_row.get("frequency"), has_data=has_data),
                 format_keyword_decimal(keyword_row.get("organic_position"), has_data=has_data),
+                "",
                 format_keyword_decimal(keyword_row.get("boosted_position"), has_data=has_data),
+                "",
+                "",
                 format_percent(keyword_row.get("boosted_ctr")) if has_data else "",
+                "",
             ]
         )
     rows.extend(

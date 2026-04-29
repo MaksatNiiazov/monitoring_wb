@@ -532,6 +532,71 @@ def _build_product_stock_popup_payload_for_date(*, product: Product, stock_date:
     )
 
 
+def _build_stock_mini_table_payload_for_date(*, product: Product, stock_date: date, limit: int = 4) -> dict[str, object]:
+    visible_warehouse_names = product.visible_warehouse_names()
+    preferred_warehouse_names = {
+        normalize_warehouse_name(warehouse_name)
+        for warehouse_name in visible_warehouse_names
+    }
+    warehouse_rows = []
+    warehouse_queryset = (
+        DailyWarehouseStock.objects.filter(
+            product=product,
+            stats_date=stock_date,
+        )
+        .select_related("warehouse")
+        .order_by("warehouse__name")
+    )
+    for warehouse_row in warehouse_queryset:
+        warehouse_name = warehouse_row.warehouse.name
+        if preferred_warehouse_names:
+            if normalize_warehouse_name(warehouse_name) not in preferred_warehouse_names:
+                continue
+        elif not warehouse_row.warehouse.is_visible_in_monitoring:
+            continue
+        warehouse_rows.append(
+            {
+                "warehouse": warehouse_name,
+                "stock": int(warehouse_row.stock_count or 0),
+                "to_client": int(warehouse_row.in_way_to_client or 0),
+                "from_client": int(warehouse_row.in_way_from_client or 0),
+            }
+        )
+
+    warehouse_rows.sort(key=lambda item: (-int(item["stock"]), str(item["warehouse"])))
+    total_stock = sum(int(item["stock"]) for item in warehouse_rows)
+    total_to_client = sum(int(item["to_client"]) for item in warehouse_rows)
+    total_from_client = sum(int(item["from_client"]) for item in warehouse_rows)
+
+    if not warehouse_rows:
+        stock_row = DailyProductStock.objects.filter(
+            product=product,
+            stats_date=stock_date,
+        ).first()
+        if stock_row is not None:
+            total_stock = int(stock_row.total_stock or 0)
+            total_to_client = int(stock_row.in_way_to_client or 0)
+            total_from_client = int(stock_row.in_way_from_client or 0)
+            warehouse_rows.append(
+                {
+                    "warehouse": "Итого WB",
+                    "stock": total_stock,
+                    "to_client": total_to_client,
+                    "from_client": total_from_client,
+                }
+            )
+
+    visible_rows = warehouse_rows[: max(1, int(limit or 1))]
+    return {
+        "rows": visible_rows,
+        "total_stock": total_stock,
+        "total_to_client": total_to_client,
+        "total_from_client": total_from_client,
+        "more_count": max(0, len(warehouse_rows) - len(visible_rows)),
+        "empty_message": "Нет данных по складам",
+    }
+
+
 def _resolve_daily_keyword_stat(
     *,
     product: Product,
@@ -794,7 +859,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
             },
             (23, 1): {"type": "input", "field": "unit_cost", "placeholder": "0,00", "span_to_block_end": True, "centered": True},
             (24, 1): {"type": "input", "field": "logistics_cost", "placeholder": "0,00", "span_to_block_end": True, "centered": True},
-            (26, 4): {"type": "stock_popup"},
+            (32, 0): {"type": "stock_mini_table", "colspan": 9, "rowspan": 4},
             (row_after_keywords(38), 3): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%", "colspan": 2},
             (row_after_keywords(39), 5): {"type": "input", "field": "seller_price", "placeholder": "0,00", "colspan": 4},
             (row_after_keywords(40), 5): {"type": "input", "field": "wb_price", "placeholder": "0,00", "colspan": 4},
@@ -819,7 +884,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 "colspan": 2,
             },
             (row_after_keywords(45), 7): {"type": "input", "field": "price_change_amount", "placeholder": "0,00", "colspan": 2, "centered": True},
-            (row_after_keywords(47), 1): {"type": "textarea", "field": "comment", "placeholder": "Комментарий"},
+            (row_after_keywords(47), 1): {"type": "textarea", "field": "comment", "placeholder": "Комментарий", "rowspan": 4},
         }
         if keyword_header_row:
             editable_controls[(keyword_header_row, 0)] = {
@@ -867,18 +932,17 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         display_spans[(2, 1)] = {"colspan": 3, "centered": True}
         display_spans[(2, 4)] = {"colspan": 2, "centered": True}
         display_spans[(21, 1)] = {"colspan": 8}
-        display_spans[(25, 1)] = {"colspan": 8, "centered": True}
+        display_spans[(25, 0)] = {"colspan": 9, "centered": True}
         for stock_row_number in range(26, 32):
-            display_spans[(stock_row_number, 1)] = {"colspan": 3}
+            display_spans[(stock_row_number, 0)] = {"colspan": 4}
             display_spans[(stock_row_number, 4)] = {"colspan": 5, "centered": True}
         for screenshot_row_number in range(32, 36):
-            display_spans[(screenshot_row_number, 1)] = {"colspan": 8, "centered": True}
+            display_spans[(screenshot_row_number, 0)] = {"colspan": 9, "centered": True}
         if keyword_header_row:
             for keyword_row_number in range(keyword_header_row, keyword_header_row + keyword_rows_count + 1):
-                display_spans[(keyword_row_number, 1)] = {"colspan": 2, "centered": True}  # Частота
-                display_spans[(keyword_row_number, 3)] = {"colspan": 2, "centered": True}  # Позиция ОРГАНИЧЕСКАЯ
-                display_spans[(keyword_row_number, 5)] = {"colspan": 2, "centered": True}  # Позиция БУСТОВАЯ
-                display_spans[(keyword_row_number, 7)] = {"colspan": 2, "centered": True}  # CTR (%)
+                display_spans[(keyword_row_number, 2)] = {"colspan": 2, "centered": True}
+                display_spans[(keyword_row_number, 4)] = {"colspan": 2, "centered": True}
+                display_spans[(keyword_row_number, 7)] = {"colspan": 2, "centered": True}
         if overview_row:
             display_spans[(overview_row, 1)] = {"colspan": 8, "centered": True}
             display_spans[(overview_row + 1, 1)] = {"colspan": 2}
@@ -898,9 +962,11 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 display_spans[(comment_row_number, 1)] = {"colspan": 8}
         block_dates = active_sheet.get("block_dates") or []
         product_id = active_sheet.get("product_id")
+        active_product = Product.objects.filter(pk=product_id).first() if product_id else None
         block_span = BLOCK_WIDTH + BLOCK_GAP
         label_anchor_block_index = 0 if block_dates else -1
         prepared_rows: list[dict] = []
+        covered_cells: set[tuple[int, int]] = set()
         for row_index, row in enumerate(active_sheet["rows"]):
             prepared_cells: list[dict] = []
             row_number = row_index + 1
@@ -913,6 +979,9 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
 
             column_index = 0
             while column_index < len(row):
+                if (row_number, column_index) in covered_cells:
+                    column_index += 1
+                    continue
                 value = row[column_index]
                 block_index = column_index // block_span
                 in_block_col = column_index % block_span
@@ -931,6 +1000,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 )
                 control = None
                 colspan = 1
+                rowspan = 1
                 centered_value = False
 
                 if active_sheet["kind"] == "product" and product_id and not is_gap_col:
@@ -1024,12 +1094,45 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                             }
                             if in_block_col < BLOCK_WIDTH:
                                 colspan = max(1, BLOCK_WIDTH - in_block_col)
+                        elif control_type == "stock_mini_table":
+                            control = {
+                                "type": "stock_mini_table",
+                                "stock_date": note_date.isoformat(),
+                                "stock_date_label": note_date.strftime("%d.%m.%Y"),
+                                "payload_url": (
+                                    f"{reverse('monitoring:table_stock_popup_payload')}"
+                                    f"?product_id={product_id}&stats_date={note_date.isoformat()}"
+                                ),
+                                **_build_stock_mini_table_payload_for_date(
+                                    product=active_product,
+                                    stock_date=note_date,
+                                ),
+                            } if active_product is not None else {
+                                "type": "stock_mini_table",
+                                "stock_date": note_date.isoformat(),
+                                "stock_date_label": note_date.strftime("%d.%m.%Y"),
+                                "payload_url": "",
+                                "rows": [],
+                                "total_stock": 0,
+                                "total_to_client": 0,
+                                "total_from_client": 0,
+                                "more_count": 0,
+                                "empty_message": "Нет данных по складам",
+                            }
+                            if in_block_col < BLOCK_WIDTH:
+                                colspan = max(1, BLOCK_WIDTH - in_block_col)
                         explicit_colspan = control_spec.get("colspan")
                         if control and explicit_colspan and in_block_col < BLOCK_WIDTH:
                             try:
                                 colspan = max(1, min(BLOCK_WIDTH - in_block_col, int(explicit_colspan)))
                             except (TypeError, ValueError):
                                 colspan = 1
+                        explicit_rowspan = control_spec.get("rowspan")
+                        if control and explicit_rowspan:
+                            try:
+                                rowspan = max(1, int(explicit_rowspan))
+                            except (TypeError, ValueError):
+                                rowspan = 1
                 elif display_span_spec and in_block_col < BLOCK_WIDTH:
                     explicit_colspan = display_span_spec.get("colspan")
                     if explicit_colspan:
@@ -1041,6 +1144,17 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                         colspan = max(1, BLOCK_WIDTH - in_block_col)
                     centered_value = bool(display_span_spec.get("centered"))
 
+                is_full_block_span = (
+                    active_sheet["kind"] == "product"
+                    and in_block_col == 0
+                    and colspan >= BLOCK_WIDTH
+                )
+                is_stock_section_span = (
+                    active_sheet["kind"] == "product"
+                    and row_style_key in {"stock", "stock-header", "stock-image"}
+                    and in_block_col == 0
+                    and colspan > 1
+                )
                 prepared_cells.append(
                     {
                         "value": value,
@@ -1050,16 +1164,22 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                         "is_gap_col": is_gap_col,
                         "is_block_start": active_sheet["kind"] == "product" and in_block_col == 0,
                         "is_spacer_col": False,
-                        "is_label_col": active_sheet["kind"] == "product" and in_block_col == 0 and not is_repeat_label_col,
-                        "is_repeat_label_col": is_repeat_label_col,
+                        "is_label_col": active_sheet["kind"] == "product" and in_block_col == 0 and not is_repeat_label_col and not is_full_block_span and not is_stock_section_span,
+                        "is_repeat_label_col": is_repeat_label_col and not is_full_block_span and not is_stock_section_span,
                         "control": control,
                         "colspan": colspan,
+                        "rowspan": rowspan,
                         "is_comment_span": bool(control and control.get("type") == "textarea" and colspan > 1),
                         "is_stock_span": bool(control and control.get("type") == "stock_popup" and colspan > 1),
+                        "is_stock_mini_span": bool(control and control.get("type") == "stock_mini_table" and colspan > 1),
                         "is_input_span": bool(control and control.get("type") == "input" and colspan > 1),
                         "is_centered_value_span": bool(centered_value and colspan > 1),
                     }
                 )
+                if rowspan > 1:
+                    for covered_row_number in range(row_number + 1, row_number + rowspan):
+                        for covered_column_index in range(column_index, column_index + colspan):
+                            covered_cells.add((covered_row_number, covered_column_index))
                 column_index += colspan
             prepared_rows.append(
                 {
