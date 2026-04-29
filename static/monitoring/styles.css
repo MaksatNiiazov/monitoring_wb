@@ -3082,6 +3082,10 @@ body.is-modal-open {
     --sheet-border: #000000;
     --sheet-status-green: #0b7a52;
     --sheet-status-red: #c00000;
+    --sheet-edit-bg: #f2f5f8;
+    --sheet-edit-hover: #e7edf3;
+    --sheet-edit-border: #8ca0b3;
+    --sheet-edit-accent: #6f7f8f;
     font-family: Arial, sans-serif;
 }
 
@@ -3338,6 +3342,43 @@ body.is-modal-open {
     box-shadow: none;
 }
 
+.monitoring-grid-table.is-product .grid-input,
+.monitoring-grid-table.is-product .grid-select:not(.grid-status-select),
+.monitoring-grid-table.is-product .grid-choice {
+    background:
+        linear-gradient(90deg, var(--sheet-edit-accent) 0 3px, var(--sheet-edit-bg) 3px 100%);
+    box-shadow: inset 0 0 0 1px rgba(140, 160, 179, 0.7);
+}
+
+.monitoring-grid-table.is-product .grid-input,
+.monitoring-grid-table.is-product .grid-input-textarea {
+    cursor: text;
+}
+
+.monitoring-grid-table.is-product .grid-select,
+.monitoring-grid-table.is-product .grid-choice,
+.monitoring-grid-table.is-product .grid-choice-btn {
+    cursor: pointer;
+}
+
+.monitoring-grid-table.is-product .grid-input:hover,
+.monitoring-grid-table.is-product .grid-select:not(.grid-status-select):hover,
+.monitoring-grid-table.is-product .grid-choice:hover {
+    background:
+        linear-gradient(90deg, var(--sheet-edit-accent) 0 3px, var(--sheet-edit-hover) 3px 100%);
+    box-shadow: inset 0 0 0 1px rgba(99, 115, 132, 0.86);
+}
+
+.monitoring-grid-table.is-product .grid-input:focus,
+.monitoring-grid-table.is-product .grid-select:focus,
+.monitoring-grid-table.is-product .grid-choice:focus-within {
+    outline: 2px solid rgba(11, 122, 82, 0.36);
+    outline-offset: -2px;
+    box-shadow:
+        inset 0 0 0 1px rgba(11, 122, 82, 0.88),
+        0 0 0 1px rgba(11, 122, 82, 0.18);
+}
+
 .monitoring-grid-table.is-product .grid-select {
     width: 100%;
     height: 100%;
@@ -3421,6 +3462,10 @@ body.is-modal-open {
 .monitoring-grid-table.is-product .grid-input {
     padding: 0 1px;
     text-align: inherit;
+}
+
+.monitoring-grid-table.is-product .grid-input.grid-input-centered {
+    text-align: center;
 }
 
 .monitoring-grid-table.is-product .grid-input-textarea {
