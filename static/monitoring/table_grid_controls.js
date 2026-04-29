@@ -82,6 +82,41 @@
         return percent ? formatPercentValue(value * 100) : formatDecimalValue(value);
     }
 
+    const POSITIVE_STATUS_VALUES = new Set(["вырос на", "не участвуем", "без изменений", "да", "повысили"]);
+    const NEGATIVE_STATUS_VALUES = new Set(["упал на", "участвуем", "поступили", "нет", "понизили"]);
+
+    function normalizeStatusValue(value) {
+        return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+    }
+
+    function resolveStatusTone(value) {
+        const normalized = normalizeStatusValue(value);
+        if (POSITIVE_STATUS_VALUES.has(normalized)) {
+            return "positive";
+        }
+        if (NEGATIVE_STATUS_VALUES.has(normalized)) {
+            return "negative";
+        }
+        return "";
+    }
+
+    function decorateStatusSelect(select) {
+        if (!select || !select.matches(".grid-select")) {
+            return;
+        }
+        const tone = resolveStatusTone(select.value);
+        select.classList.toggle("grid-status-select", Boolean(tone));
+        if (tone) {
+            select.dataset.statusTone = tone;
+        } else {
+            delete select.dataset.statusTone;
+        }
+    }
+
+    function initStatusSelects(tableWrap) {
+        tableWrap.querySelectorAll(".grid-select").forEach((select) => decorateStatusSelect(select));
+    }
+
     function initLiveCalculations(tableWrap) {
         const table = tableWrap.querySelector("table");
         if (!table) {
@@ -539,6 +574,7 @@
             const select = event.target.closest("[data-note-control='select']");
             if (select && !select.classList.contains("is-pending")) {
                 const previous = select.dataset.previousValue ?? select.value;
+                decorateStatusSelect(select);
                 const payload = {
                     product_id: select.dataset.productId,
                     note_date: select.dataset.noteDate,
@@ -553,9 +589,11 @@
                         select.value = serverValue;
                     }
                     select.dataset.previousValue = serverValue;
+                    decorateStatusSelect(select);
                     showStatus("Сохранено", "success");
                 } catch (error) {
                     select.value = previous;
+                    decorateStatusSelect(select);
                     showStatus(`Ошибка сохранения: ${error.message}`, "error");
                 } finally {
                     setSelectPending(select, false);
@@ -1773,6 +1811,7 @@
         if (updateUrl) {
             initInlineControls(tableWrap, updateUrl);
         }
+        initStatusSelects(tableWrap);
         initLiveCalculations(tableWrap);
         initDensityToggle(tableWrap);
         initFullscreenToggle(tableWrap);

@@ -46,6 +46,8 @@
         "#9333ea",
         "#16a34a",
     ];
+    const DEFAULT_MULTI_SERIES = ["stock", "orders", "spend", "profit"];
+    const DEFAULT_CAMPAIGN_METRICS = ["spend", "orders", "carts"];
 
     function formatValue(value, format) {
         const number = Number(value || 0);
@@ -347,6 +349,32 @@
             return [];
         }
 
+        resolveDefaultSeries(viewData, seriesOrder, initialMetric) {
+            const mode = this.resolveMode(viewData);
+            const providedDefaults = Array.isArray(viewData.defaultSeries)
+                ? viewData.defaultSeries
+                : [];
+            const preferredDefaults = mode === "campaigns" ? DEFAULT_CAMPAIGN_METRICS : DEFAULT_MULTI_SERIES;
+            const filterKeys = (keys) => {
+                const seenKeys = new Set();
+                return keys.filter((key) => {
+                    if (!key || seenKeys.has(key)) {
+                        return false;
+                    }
+                    seenKeys.add(key);
+                    if (mode === "campaigns") {
+                        return Boolean(this.getAvailableMetricMap(viewData)?.[key]);
+                    }
+                    return Boolean(this.getAvailableSeries(viewData, initialMetric)?.[key]);
+                });
+            };
+            const defaultKeys = filterKeys(providedDefaults.length ? providedDefaults : preferredDefaults);
+            if (defaultKeys.length) {
+                return defaultKeys;
+            }
+            return filterKeys(seriesOrder).slice(0, 1);
+        }
+
         ensureViewState(viewKey) {
             if (this.viewStates[viewKey]) {
                 return this.viewStates[viewKey];
@@ -357,9 +385,7 @@
             const seriesOrder = this.resolveMode(viewData) === "campaigns"
                 ? metricOrder
                 : this.getSeriesOrder(viewData, initialMetric);
-            const defaultSeries = Array.isArray(viewData.defaultSeries)
-                ? viewData.defaultSeries
-                : seriesOrder;
+            const defaultSeries = this.resolveDefaultSeries(viewData, seriesOrder, initialMetric);
             this.viewStates[viewKey] = {
                 metric: initialMetric,
                 type: this.resolveMode(viewData) === "multi" || this.resolveMode(viewData) === "campaigns"

@@ -753,6 +753,29 @@ def _table_row_style_key(
     return ""
 
 
+def _table_status_tone(value: object) -> str:
+    normalized = " ".join(str(value or "").strip().lower().split())
+    positive_values = {
+        "вырос на",
+        "не участвуем",
+        "без изменений",
+        "да",
+        "повысили",
+    }
+    negative_values = {
+        "упал на",
+        "участвуем",
+        "поступили",
+        "нет",
+        "понизили",
+    }
+    if normalized in positive_values:
+        return "positive"
+    if normalized in negative_values:
+        return "negative"
+    return ""
+
+
 def dashboard(request: HttpRequest) -> HttpResponse:
     target = reverse("monitoring:table")
     query_string = request.META.get("QUERY_STRING", "").strip()
@@ -1032,13 +1055,15 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                             options = [str(option) for option in control_spec.get("options", []) if str(option)]
                             if current_value and current_value not in options:
                                 options = [current_value, *options]
+                            resolved_value = current_value or options[0]
                             control = {
                                 "type": "select",
                                 "field": field_name,
-                                "value": current_value or options[0],
+                                "value": resolved_value,
                                 "options": options,
                                 "note_date": note_date.isoformat(),
                                 "product_id": product_id,
+                                "status_tone": _table_status_tone(resolved_value),
                             }
                         elif control_type == "input":
                             current_value = str(value or "").strip()
@@ -1190,6 +1215,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                         "is_stock_mini_span": bool(control and control.get("type") == "stock_mini_table" and colspan > 1),
                         "is_input_span": bool(control and control.get("type") == "input" and colspan > 1),
                         "is_centered_value_span": bool(centered_value and colspan > 1),
+                        "value_tone": "" if control else _table_status_tone(value),
                     }
                 )
                 if rowspan > 1:

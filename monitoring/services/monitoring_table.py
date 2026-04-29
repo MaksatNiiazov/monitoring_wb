@@ -525,17 +525,17 @@ def build_day_block(
         )
     rows.extend(
         [
-            ["", "Обзор:", "", "", "", "", "", "", ""],
-            ["", "СПП", "", _fraction(note.spp_percent, optional=True), "", spp_delta_label, "", spp_delta_value, ""],
-            ["", "Цена WBSELLER (наша)", "", "", "", _money(note.seller_price, optional=True), "", "", ""],
-            ["", "Цена WB (на сайте)", "", "", "", _money(note.wb_price, optional=True), "", "", ""],
-            ["", "Акция", "", "", "", promo_status_value, "", "", ""],
-            ["", "Негативные отзывы", "", "", "", negative_feedback_value, "", "", ""],
-            ["", "Действия:", "", "", "", "", "", "", ""],
-            ["", "Включили рекламу?", "", "", ads_enabled_value, "", "", _money(getattr(note, "ads_budget", 0), optional=True), ""],
-            ["", "Меняли цену?(WBSeller)", "", "", price_change_status_value, "", "", _money(getattr(note, "price_change_amount", 0), optional=True), ""],
-            ["", "Комментарии:", "", "", "", "", "", "", ""],
-            ["", note.comment, "", "", "", "", "", "", ""],
+            ["Обзор:", "", "", "", "", "", "", "", ""],
+            ["СПП", "", "", _fraction(note.spp_percent, optional=True), "", spp_delta_label, "", spp_delta_value, ""],
+            ["Цена WBSELLER (наша)", "", "", "", "", _money(note.seller_price, optional=True), "", "", ""],
+            ["Цена WB (на сайте)", "", "", "", "", _money(note.wb_price, optional=True), "", "", ""],
+            ["Акция", "", "", "", "", promo_status_value, "", "", ""],
+            ["Негативные отзывы", "", "", "", "", negative_feedback_value, "", "", ""],
+            ["Действия:", "", "", "", "", "", "", "", ""],
+            ["Включили рекламу?", "", "", "", ads_enabled_value, "", "", _money(getattr(note, "ads_budget", 0), optional=True), ""],
+            ["Меняли цену?(WBSeller)", "", "", "", price_change_status_value, "", "", _money(getattr(note, "price_change_amount", 0), optional=True), ""],
+            ["Комментарии:", "", "", "", "", "", "", "", ""],
+            [note.comment, "", "", "", "", "", "", "", ""],
             ["", "", "", "", "", "", "", "", ""],
             ["", "", "", "", "", "", "", "", ""],
             ["", "", "", "", "", "", "", "", ""],
@@ -1017,21 +1017,21 @@ def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> N
             merge(row_idx, 2, 3)
             merge(row_idx, 4, 5)
             merge(row_idx, 7, 8)
-        merge(overview_row, 1, 8)
-        merge(overview_row + 1, 1, 2)
+        merge(overview_row, 0, 8)
+        merge(overview_row + 1, 0, 2)
         merge(overview_row + 1, 3, 4)
         merge(overview_row + 1, 5, 6)
         merge(overview_row + 1, 7, 8)
         for row_idx in range(overview_row + 2, overview_row + 6):
-            merge(row_idx, 1, 4)
+            merge(row_idx, 0, 4)
             merge(row_idx, 5, 8)
-        merge(actions_row, 1, 8)
+        merge(actions_row, 0, 8)
         for row_idx in range(actions_row + 1, actions_row + 3):
-            merge(row_idx, 1, 3)
+            merge(row_idx, 0, 3)
             merge(row_idx, 4, 5)
             merge(row_idx, 7, 8)
-        merge(comments_row, 1, 8)
-        merge(comments_row + 1, 1, 8, comments_row + 4)
+        merge(comments_row, 0, 8)
+        merge(comments_row + 1, 0, 8, comments_row + 4)
 
         validation_specs = [
             (overview_row + 1, 5, '"Без изменений,Вырос на,Упал на"'),

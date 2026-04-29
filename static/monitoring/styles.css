@@ -3080,6 +3080,8 @@ body.is-modal-open {
     --sheet-cart-blue: #4285f4;
     --sheet-order-orange: #ff9900;
     --sheet-border: #000000;
+    --sheet-status-green: #0b7a52;
+    --sheet-status-red: #c00000;
     font-family: Arial, sans-serif;
 }
 
@@ -3280,7 +3282,7 @@ body.is-modal-open {
     border-right: 3px solid var(--sheet-border);
 }
 
-.monitoring-grid-table.is-product tr.table-row-style-overview-field td[data-in-block-col="1"] {
+.monitoring-grid-table.is-product tr.table-row-style-overview-field td[data-in-block-col="0"] {
     font-weight: 700;
     text-align: left;
 }
@@ -3289,10 +3291,10 @@ body.is-modal-open {
 .monitoring-grid-table.is-product tr.table-row-style-overview-field td[data-in-block-col="3"],
 .monitoring-grid-table.is-product tr.table-row-style-overview-field td[data-in-block-col="5"],
 .monitoring-grid-table.is-product tr.table-row-style-overview-field td[data-in-block-col="7"],
-.monitoring-grid-table.is-product tr.table-row-style-action-field td[data-in-block-col="1"],
+.monitoring-grid-table.is-product tr.table-row-style-action-field td[data-in-block-col="0"],
 .monitoring-grid-table.is-product tr.table-row-style-action-field td[data-in-block-col="4"],
 .monitoring-grid-table.is-product tr.table-row-style-action-field td[data-in-block-col="7"],
-.monitoring-grid-table.is-product tr.table-row-style-comment-row td[data-in-block-col="1"] {
+.monitoring-grid-table.is-product tr.table-row-style-comment-row td[data-in-block-col="0"] {
     --cell-bg: var(--sheet-input-gray);
 }
 
@@ -3304,12 +3306,12 @@ body.is-modal-open {
     font-weight: 700;
 }
 
-.monitoring-grid-table.is-product tr.table-row-style-action-field td[data-in-block-col="1"] {
+.monitoring-grid-table.is-product tr.table-row-style-action-field td[data-in-block-col="0"] {
     font-weight: 700;
     text-align: left;
 }
 
-.monitoring-grid-table.is-product tr.table-row-style-comment-row td[data-in-block-col="1"] {
+.monitoring-grid-table.is-product tr.table-row-style-comment-row td[data-in-block-col="0"] {
     min-width: 0;
     width: auto;
     max-width: none;
@@ -3343,6 +3345,77 @@ body.is-modal-open {
     font-weight: 700;
     text-align: center;
     text-align-last: center;
+}
+
+.monitoring-grid-table.is-product .grid-status-select,
+.monitoring-grid-table.is-product .grid-status-pill {
+    display: block;
+    box-sizing: border-box;
+    width: calc(100% - 12px);
+    max-width: 100%;
+    min-height: 16px;
+    height: 16px;
+    margin: 1px auto;
+    border: 0;
+    border-radius: 9px;
+    color: #ffffff;
+    font-family: Arial, sans-serif;
+    font-size: 10pt;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    text-align-last: center;
+    white-space: nowrap;
+}
+
+.monitoring-grid-table.is-product .grid-status-pill {
+    position: relative;
+    padding: 0 18px 0 8px;
+}
+
+.monitoring-grid-table.is-product .grid-status-pill::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #ffffff;
+    transform: translateY(-35%);
+    pointer-events: none;
+}
+
+.monitoring-grid-table.is-product .grid-status-select {
+    padding: 0 18px 0 8px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image:
+        linear-gradient(45deg, transparent 50%, #ffffff 50%),
+        linear-gradient(135deg, #ffffff 50%, transparent 50%);
+    background-position:
+        calc(100% - 12px) 50%,
+        calc(100% - 8px) 50%;
+    background-size: 4px 4px, 4px 4px;
+    background-repeat: no-repeat;
+}
+
+.monitoring-grid-table.is-product .grid-status-select[data-status-tone="positive"],
+.monitoring-grid-table.is-product .grid-status-pill[data-status-tone="positive"] {
+    background-color: var(--sheet-status-green);
+}
+
+.monitoring-grid-table.is-product .grid-status-select[data-status-tone="negative"],
+.monitoring-grid-table.is-product .grid-status-pill[data-status-tone="negative"] {
+    background-color: var(--sheet-status-red);
+}
+
+.monitoring-grid-table.is-product .grid-status-select option {
+    background: #ffffff;
+    color: #000000;
+    font-weight: 400;
 }
 
 .monitoring-grid-table.is-product .grid-input {

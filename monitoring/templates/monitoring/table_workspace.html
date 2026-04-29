@@ -296,11 +296,12 @@
                                         </div>
                                     {% elif cell.control and cell.control.type == "select" %}
                                         <select
-                                            class="grid-select"
+                                            class="grid-select{% if cell.control.status_tone %} grid-status-select{% endif %}"
                                             data-note-control="select"
                                             data-product-id="{{ cell.control.product_id }}"
                                             data-note-date="{{ cell.control.note_date }}"
                                             data-field="{{ cell.control.field }}"
+                                            {% if cell.control.status_tone %}data-status-tone="{{ cell.control.status_tone }}"{% endif %}
                                         >
                                             {% for option in cell.control.options %}
                                                 <option value="{{ option }}" {% if option == cell.control.value %}selected{% endif %}>{{ option }}</option>
@@ -357,7 +358,10 @@
                                                 </span>
                                             </span>
                                         {% else %}
-                                            <span {% if cell.is_label_col %}data-row-label{% endif %}>{{ cell.value|default_if_none:"" }}</span>
+                                            <span
+                                                {% if cell.is_label_col %}data-row-label{% endif %}
+                                                {% if cell.value_tone %}class="grid-status-pill" data-status-tone="{{ cell.value_tone }}"{% endif %}
+                                            >{{ cell.value|default_if_none:"" }}</span>
                                         {% endif %}
                                     {% endif %}
                                 </td>
