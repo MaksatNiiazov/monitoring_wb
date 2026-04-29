@@ -896,6 +896,12 @@
         });
 
         document.addEventListener("keydown", (event) => {
+            const keyboardOpenTrigger = event.target.closest("[data-modal-open][role='button']");
+            if (keyboardOpenTrigger && (event.key === "Enter" || event.key === " ")) {
+                event.preventDefault();
+                keyboardOpenTrigger.click();
+                return;
+            }
             if (event.key !== "Escape") {
                 return;
             }

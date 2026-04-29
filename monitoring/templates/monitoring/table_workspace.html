@@ -118,10 +118,11 @@
                             {% for cell in row.cells %}
                                 <td
                                     {% if cell.colspan and cell.colspan > 1 %}colspan="{{ cell.colspan }}"{% endif %}
+                                    {% if cell.rowspan and cell.rowspan > 1 %}rowspan="{{ cell.rowspan }}"{% endif %}
                                     data-row="{{ cell.row_index }}"
                                     data-block="{{ cell.block_index }}"
                                     data-in-block-col="{{ cell.in_block_col }}"
-                                    class="{% if cell.is_gap_col %}is-gap-col{% endif %}{% if cell.is_block_start %} is-block-start{% endif %}{% if cell.is_spacer_col %} is-spacer-col{% endif %}{% if cell.is_label_col %} is-label-col{% endif %}{% if cell.is_repeat_label_col %} is-repeat-label-col{% endif %}{% if cell.control %} is-control-cell{% endif %}{% if cell.is_comment_span %} is-comment-span{% endif %}{% if cell.is_stock_span %} is-stock-span{% endif %}{% if cell.is_input_span %} is-input-span{% endif %}{% if cell.is_centered_value_span %} is-centered-value-span{% endif %}"
+                                    class="{% if cell.is_gap_col %}is-gap-col{% endif %}{% if cell.is_block_start %} is-block-start{% endif %}{% if cell.is_spacer_col %} is-spacer-col{% endif %}{% if cell.is_label_col %} is-label-col{% endif %}{% if cell.is_repeat_label_col %} is-repeat-label-col{% endif %}{% if cell.control %} is-control-cell{% endif %}{% if cell.is_comment_span %} is-comment-span{% endif %}{% if cell.is_stock_span or cell.is_stock_mini_span %} is-stock-span{% endif %}{% if cell.is_stock_mini_span %} is-stock-mini-span{% endif %}{% if cell.is_input_span %} is-input-span{% endif %}{% if cell.is_centered_value_span %} is-centered-value-span{% endif %}"
                                 >
                                     {% if cell.control and cell.control.type == "stock_popup" %}
                                         <button
@@ -137,6 +138,50 @@
                                                 {{ cell.control.summary_text }}
                                             </span>
                                         </button>
+                                    {% elif cell.control and cell.control.type == "stock_mini_table" %}
+                                        <div
+                                            class="grid-stock-mini"
+                                            role="button"
+                                            tabindex="0"
+                                            data-stock-popup-button
+                                            data-modal-open="table-modal-stocks"
+                                            data-stock-date="{{ cell.control.stock_date_label }}"
+                                            data-stock-url="{{ cell.control.payload_url }}"
+                                            aria-label="Открыть остатки по складам за {{ cell.control.stock_date_label }}"
+                                        >
+                                            {% if cell.control.rows %}
+                                                <table class="grid-stock-mini-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Склад</th>
+                                                            <th>Ост.</th>
+                                                            <th>К клиенту</th>
+                                                            <th>Возврат</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {% for stock_row in cell.control.rows %}
+                                                            <tr>
+                                                                <td>{{ stock_row.warehouse }}</td>
+                                                                <td>{{ stock_row.stock }}</td>
+                                                                <td>{{ stock_row.to_client }}</td>
+                                                                <td>{{ stock_row.from_client }}</td>
+                                                            </tr>
+                                                        {% endfor %}
+                                                    </tbody>
+                                                    <tfoot>
+                                                        <tr>
+                                                            <td>{% if cell.control.more_count %}+{{ cell.control.more_count }}{% else %}Итого{% endif %}</td>
+                                                            <td>{{ cell.control.total_stock }}</td>
+                                                            <td>{{ cell.control.total_to_client }}</td>
+                                                            <td>{{ cell.control.total_from_client }}</td>
+                                                        </tr>
+                                                    </tfoot>
+                                                </table>
+                                            {% else %}
+                                                <span class="grid-stock-mini-empty">{{ cell.control.empty_message }}</span>
+                                            {% endif %}
+                                        </div>
                                     {% elif cell.control and cell.control.type == "keyword_rows" %}
                                         <div class="grid-keyword-header">
                                             <span class="grid-keyword-title">{{ cell.value|default_if_none:"" }}</span>

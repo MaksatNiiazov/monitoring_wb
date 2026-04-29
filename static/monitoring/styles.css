@@ -2453,6 +2453,12 @@ body.is-modal-open {
     max-width: none;
 }
 
+.monitoring-grid-table td.is-stock-mini-span {
+    min-width: 0;
+    width: auto;
+    max-width: none;
+}
+
 .monitoring-grid-table td.is-input-span {
     min-width: 0;
     width: auto;
@@ -2495,6 +2501,83 @@ body.is-modal-open {
     color: var(--muted);
     font-weight: 700;
     line-height: 1.2;
+}
+
+.grid-stock-mini {
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+    min-height: 76px;
+    height: 100%;
+    overflow: hidden;
+    background: #ffffff;
+    cursor: pointer;
+}
+
+.grid-stock-mini:hover,
+.grid-stock-mini:focus-visible {
+    outline: 2px solid rgba(15, 106, 92, 0.34);
+    outline-offset: -2px;
+    background: rgba(232, 244, 240, 0.74);
+}
+
+.grid-stock-mini-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    color: #000000;
+    font-family: Arial, sans-serif;
+    font-size: 8.5pt;
+    letter-spacing: 0;
+    line-height: 1.05;
+    text-transform: none;
+}
+
+.grid-stock-mini-table th,
+.grid-stock-mini-table td {
+    height: auto;
+    min-width: 0;
+    width: auto;
+    max-width: none;
+    padding: 1px 3px;
+    border: 1px solid var(--sheet-border);
+    background: #ffffff;
+    letter-spacing: 0;
+    text-transform: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.grid-stock-mini-table th {
+    background: var(--sheet-stock);
+    font-weight: 700;
+    text-align: center;
+}
+
+.grid-stock-mini-table td:first-child,
+.grid-stock-mini-table th:first-child {
+    width: 42%;
+    text-align: left;
+}
+
+.grid-stock-mini-table td:not(:first-child),
+.grid-stock-mini-table th:not(:first-child) {
+    text-align: right;
+}
+
+.grid-stock-mini-table tfoot td {
+    background: var(--sheet-gray);
+    font-weight: 700;
+}
+
+.grid-stock-mini-empty {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    min-height: 76px;
+    color: #666666;
+    font-weight: 700;
 }
 
 .monitoring-grid-table tr.is-row-match td {
@@ -3152,13 +3235,13 @@ body.is-modal-open {
     text-align: center;
 }
 
-.monitoring-grid-table.is-product tr.table-row-style-stock td[data-in-block-col="1"],
+.monitoring-grid-table.is-product tr.table-row-style-stock td[data-in-block-col="0"],
 .monitoring-grid-table.is-product tr.table-row-style-stock td[data-in-block-col="4"] {
     --cell-bg: var(--sheet-stock);
     font-weight: 700;
 }
 
-.monitoring-grid-table.is-product tr.table-row-style-stock td[data-in-block-col="1"] {
+.monitoring-grid-table.is-product tr.table-row-style-stock td[data-in-block-col="0"] {
     text-align: left;
 }
 
@@ -3230,7 +3313,7 @@ body.is-modal-open {
     min-width: 0;
     width: auto;
     max-width: none;
-    height: 19px;
+    height: 84px;
     text-align: left;
     vertical-align: top;
 }
@@ -3272,6 +3355,62 @@ body.is-modal-open {
     height: 18px;
     padding: 1px 2px;
     resize: none;
+}
+
+.monitoring-grid-table.is-product td.is-comment-span {
+    padding: 0;
+    vertical-align: top;
+}
+
+.monitoring-grid-table.is-product td.is-comment-span .grid-input-textarea {
+    display: block;
+    min-height: 78px;
+    height: 100%;
+    padding: 3px 4px;
+    line-height: 1.2;
+    resize: vertical;
+}
+
+.monitoring-grid-table.is-product td.is-stock-mini-span {
+    padding: 0;
+    vertical-align: top;
+}
+
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table th,
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table td {
+    min-width: 0;
+    width: auto;
+    max-width: none;
+    height: auto;
+    padding: 1px 3px;
+    border: 1px solid var(--sheet-border);
+    background: #ffffff;
+    font-size: 8.5pt;
+    letter-spacing: 0;
+    line-height: 1.05;
+    text-transform: none;
+}
+
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table th {
+    background: var(--sheet-stock);
+    font-weight: 700;
+    text-align: center;
+}
+
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table td:first-child,
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table th:first-child {
+    width: 42%;
+    text-align: left;
+}
+
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table td:not(:first-child),
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table th:not(:first-child) {
+    text-align: right;
+}
+
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table tfoot td {
+    background: var(--sheet-gray);
+    font-weight: 700;
 }
 
 .monitoring-grid-table.is-product .grid-choice {
