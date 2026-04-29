@@ -38,13 +38,29 @@
         if (!text || text === "-" || text === "—") {
             return null;
         }
-        const cleaned = text
-            .replace(/\u00a0/g, "")
-            .replace(/\s/g, "")
-            .replace(/руб\.?/gi, "")
+        let cleaned = text
+            .toLowerCase()
+            .replace(/[−—–]/g, "-")
             .replace(/₽/g, "")
+            .replace(/(?:руб(?:\.|лей|ля|ль)?|р\.?)/gi, "")
             .replace(/%/g, "")
-            .replace(/,/g, ".");
+            .replace(/['`]/g, "")
+            .replace(/[\s\u00a0\u202f]+/g, "");
+        if (!cleaned) {
+            return null;
+        }
+        if (cleaned.includes(",") && cleaned.includes(".")) {
+            if (cleaned.lastIndexOf(",") > cleaned.lastIndexOf(".")) {
+                cleaned = cleaned.replace(/\./g, "").replace(/,/g, ".");
+            } else {
+                cleaned = cleaned.replace(/,/g, "");
+            }
+        } else {
+            cleaned = cleaned.replace(/,/g, ".");
+        }
+        if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(cleaned)) {
+            return null;
+        }
         const value = Number.parseFloat(cleaned);
         return Number.isFinite(value) ? value : null;
     }

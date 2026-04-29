@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -109,16 +110,23 @@ def _parse_decimal_input(raw_value: str | int | bool | None) -> Decimal:
     text = str(raw_value or "").strip()
     if text in {"", "-", "—", "–"}:
         return Decimal("0")
-    normalized = (
-        text.replace("\u00a0", "")
-        .replace(" ", "")
-        .replace("₽", "")
-        .replace("руб.", "")
-        .replace("руб", "")
-        .replace("р.", "")
-        .replace("%", "")
-        .replace(",", ".")
-    )
+    normalized = text.casefold()
+    normalized = normalized.replace("−", "-").replace("—", "-").replace("–", "-")
+    normalized = normalized.replace("₽", "")
+    normalized = re.sub(r"(?:руб(?:\.|лей|ля|ль)?|р\.?)", "", normalized)
+    normalized = normalized.replace("%", "").replace("'", "").replace("`", "")
+    normalized = re.sub(r"[\s\u00a0\u202f]+", "", normalized)
+    if not normalized:
+        return Decimal("0")
+    if "," in normalized and "." in normalized:
+        if normalized.rfind(",") > normalized.rfind("."):
+            normalized = normalized.replace(".", "").replace(",", ".")
+        else:
+            normalized = normalized.replace(",", "")
+    else:
+        normalized = normalized.replace(",", ".")
+    if not re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)", normalized):
+        raise ValueError("invalid decimal")
     try:
         return Decimal(normalized)
     except InvalidOperation as exc:

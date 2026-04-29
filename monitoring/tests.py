@@ -1407,7 +1407,7 @@ class WBClientTests(TestCase):
 
         with patch("monitoring.services.wb_client.requests.request", side_effect=responses) as request_mock:
             with patch("monitoring.services.wb_client.time.sleep") as sleep_mock:
-                client = AnalyticsWBClient(token="test-token")
+                client = AnalyticsWBClient(token="test-token-" + "x" * 32)
                 client.min_interval_seconds = 0
                 result = client.get_sales_funnel_history(
                     nm_ids=[123],
@@ -1439,10 +1439,11 @@ class WBClientTests(TestCase):
 
         with patch("monitoring.services.wb_client.requests.request", side_effect=[response, response]):
             with patch("monitoring.services.wb_client.time.sleep"):
-                client = AnalyticsWBClient(token="test-token")
+                client = AnalyticsWBClient(token="test-token-" + "x" * 32)
                 client.min_interval_seconds = 0
                 client.max_retries = 2
-                with self.assertRaisesMessage(WBApiError, "Wildberries РІСЂРµРјРµРЅРЅРѕ РѕРіСЂР°РЅРёС‡РёР» Р·Р°РїСЂРѕСЃС‹ РїРѕ РєР°Р±РёРЅРµС‚Сѓ"):
+                client.update_shared_rate_limit_on_429 = False
+                with self.assertRaisesMessage(WBApiError, "WB API 429/461 (Global Rate Limit)"):
                     client.get_sales_funnel_history(
                         nm_ids=[123],
                         start_date=date(2026, 3, 16),
@@ -2371,6 +2372,27 @@ class TableInlineNoteUpdateTests(TestCase):
 
         self.note.refresh_from_db()
         self.assertEqual(self.note.spp_percent, Decimal("29.00"))
+
+    def test_table_note_cell_accepts_formatted_decimal_note_field(self) -> None:
+        response = self.client.post(
+            "/table/note-cell/",
+            data=json.dumps(
+                {
+                    "product_id": self.product.id,
+                    "note_date": "2026-03-18",
+                    "field": "seller_price",
+                    "value": "Р.10\u202f000,50 ₽",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["value"], "10000,5")
+
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.seller_price, Decimal("10000.50"))
 
     def test_table_note_cell_updates_economics_for_selected_date(self) -> None:
         response = self.client.post(
