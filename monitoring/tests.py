@@ -871,7 +871,7 @@ class SyncTests(TestCase):
             payload={},
         )
 
-        with self.assertRaisesMessage(SyncServiceError, "РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ СѓР¶Рµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ"):
+        with self.assertRaisesMessage(SyncServiceError, "Синхронизация уже выполняется"):
             run_sync(reference_date=date(2026, 3, 17), overwrite=True)
 
     def test_build_product_stock_payload_from_sizes_sums_nested_metrics(self) -> None:
@@ -1236,6 +1236,16 @@ class SyncTests(TestCase):
                                 "addToWishlistCount": 0,
                             },
                             {
+                                "date": end_date.isoformat(),
+                                "openCount": end_date.day,
+                                "cartCount": 1,
+                                "orderCount": 1,
+                                "orderSum": "100",
+                                "buyoutCount": 1,
+                                "buyoutSum": "100",
+                                "addToWishlistCount": 0,
+                            },
+                            {
                                 "date": "2026-03-01",
                                 "openCount": 777,
                                 "cartCount": 0,
@@ -1331,8 +1341,8 @@ class SyncTests(TestCase):
         self.assertFalse(DailyProductMetrics.objects.filter(product=product, stats_date=date(2026, 3, 1)).exists())
 
     def test_run_sync_range_skips_days_with_wb_api_day_limit(self) -> None:
-        def fake_single_day(*, reference_date, **kwargs):
-            if reference_date == date(2026, 3, 9):
+        def fake_single_day(*, reference_date, range_start, range_end, days_count, **kwargs):
+            if range_start == date(2026, 3, 9):
                 raise SyncServiceError(
                     "WB API 400: code=400, message={Invalid request body validate: invalid start day: excess limit on days}"
                 )
@@ -1344,8 +1354,11 @@ class SyncTests(TestCase):
                 message="ok",
                 payload={
                     "stats_date": reference_date.isoformat(),
+                    "stats_date_from": range_start.isoformat(),
+                    "stats_date_to": range_end.isoformat(),
+                    "days_count": days_count,
                     "stock_date": reference_date.isoformat(),
-                    "progress": {"percent": 100, "stage": "Р—Р°РІРµСЂС€РµРЅРѕ", "detail": "ok"},
+                    "progress": {"percent": 100, "stage": "Завершено", "detail": "ok"},
                 },
             )
 
@@ -1358,7 +1371,7 @@ class SyncTests(TestCase):
 
         self.assertEqual(log.status, SyncStatus.SUCCESS)
         self.assertEqual(log.payload.get("skipped_dates_due_api_limit"), ["2026-03-09"])
-        self.assertIn("РџСЂРѕРїСѓС‰РµРЅРѕ РґР°С‚ РёР·-Р·Р° РѕРіСЂР°РЅРёС‡РµРЅРёСЏ WB Analytics", log.message)
+        self.assertIn("Пропущено дат из-за ограничения WB Analytics", log.message)
 
     def test_run_sync_range_raises_if_all_days_outside_wb_api_window(self) -> None:
         with patch(
@@ -1367,7 +1380,7 @@ class SyncTests(TestCase):
                 "WB API 400: code=400, message={Invalid request body validate: invalid start day: excess limit on days}"
             ),
         ):
-            with self.assertRaisesMessage(SyncServiceError, "С†РµР»РёРєРѕРј РІРЅРµ РґРѕРїСѓСЃС‚РёРјРѕРіРѕ РѕРєРЅР° API"):
+            with self.assertRaisesMessage(SyncServiceError, "целиком вне допустимого окна API"):
                 run_sync(
                     date_from=date(2026, 3, 9),
                     date_to=date(2026, 3, 10),
@@ -2102,6 +2115,14 @@ class CampaignViewTests(TestCase):
 
 
 class SyncViewsTests(TestCase):
+    def test_table_sync_form_renders_date_inputs_in_browser_format(self) -> None:
+        response = self.client.get("/table/?reference_date=2026-04-29&history_days=1")
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode("utf-8")
+        self.assertIn('name="date_from" value="2026-04-29"', html)
+        self.assertIn('name="date_to" value="2026-04-29"', html)
+        self.assertNotIn('value="29.04.2026"', html)
+
     def test_sync_status_returns_idle_payload_when_no_logs(self) -> None:
         response = self.client.get("/sync/status/")
         self.assertEqual(response.status_code, 200)
@@ -2161,7 +2182,7 @@ class SyncViewsTests(TestCase):
         self.assertEqual(log.status, SyncStatus.CANCELED)
         self.assertIsNotNone(log.finished_at)
         self.assertTrue(log.payload.get("cancel_requested"))
-        self.assertEqual((log.payload.get("progress") or {}).get("stage"), "РћС‚РјРµРЅРµРЅРѕ")
+        self.assertEqual((log.payload.get("progress") or {}).get("stage"), "Отменено")
 
     def test_sync_cancel_returns_info_when_no_running_sync(self) -> None:
         response = self.client.post(

@@ -1228,14 +1228,50 @@ def run_sync(
     if not sync_dates:
         raise SyncServiceError("Не удалось определить даты синхронизации.")
 
-    return _run_sync_single_day(
-        product_ids=product_ids,
-        reference_date=sync_dates[-1].stats_date,
-        range_start=range_start,
-        range_end=range_end,
-        days_count=len(sync_dates),
-        overwrite=overwrite,
-        kind=kind,
+    skipped_dates_due_api_limit: list[date] = []
+    current_range_start = range_start
+    while current_range_start <= range_end:
+        current_sync_dates = iter_sync_dates(date_from=current_range_start, date_to=range_end)
+        try:
+            log = _run_sync_single_day(
+                product_ids=product_ids,
+                reference_date=range_end,
+                range_start=current_range_start,
+                range_end=range_end,
+                days_count=len(current_sync_dates),
+                overwrite=overwrite,
+                kind=kind,
+            )
+        except SyncServiceError as exc:
+            if not is_wb_start_day_limit_error(str(exc)):
+                raise
+            skipped_dates_due_api_limit.append(current_range_start)
+            _sync_console(
+                "WB Analytics не принимает начало диапазона "
+                f"{current_range_start.isoformat()}. Сдвигаем старт на следующий день."
+            )
+            current_range_start += timedelta(days=1)
+            continue
+
+        if skipped_dates_due_api_limit:
+            payload = dict(log.payload or {})
+            payload["original_stats_date_from"] = range_start.isoformat()
+            payload["skipped_dates_due_api_limit"] = [
+                skipped_date.isoformat()
+                for skipped_date in skipped_dates_due_api_limit
+            ]
+            log.payload = payload
+            skip_note = (
+                "Пропущено дат из-за ограничения WB Analytics: "
+                f"{len(skipped_dates_due_api_limit)}."
+            )
+            log.message = f"{log.message or ''} {skip_note}".strip()
+            log.save(update_fields=["payload", "message", "updated_at"])
+        return log
+
+    raise SyncServiceError(
+        "Выбранный диапазон целиком вне допустимого окна API WB Analytics. "
+        "Выберите более свежие даты."
     )
 
 

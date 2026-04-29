@@ -50,7 +50,9 @@ class StyledFormMixin:
             if isinstance(widget, forms.NumberInput):
                 widget.attrs.setdefault("inputmode", "decimal")
             if isinstance(widget, forms.DateInput):
-                widget.attrs.setdefault("type", "date")
+                widget.input_type = "date"
+                widget.attrs.pop("type", None)
+                widget.format = "%Y-%m-%d"
             if isinstance(widget, forms.SelectMultiple):
                 widget.attrs.setdefault("size", 6)
 
