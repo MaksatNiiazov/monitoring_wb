@@ -2525,11 +2525,11 @@ body.is-modal-open {
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
-    color: #000000;
-    font-family: Arial, sans-serif;
-    font-size: 8.5pt;
+    color: #14121a;
+    font-family: inherit;
+    font-size: 0.75rem;
     letter-spacing: 0;
-    line-height: 1.05;
+    line-height: 1.25;
     text-transform: none;
 }
 
@@ -2539,8 +2539,8 @@ body.is-modal-open {
     min-width: 0;
     width: auto;
     max-width: none;
-    padding: 1px 3px;
-    border: 1px solid var(--sheet-border);
+    padding: 3px 6px;
+    border: 1px solid rgba(20, 33, 42, 0.15);
     background: #ffffff;
     letter-spacing: 0;
     text-transform: none;
