@@ -60,6 +60,19 @@ API_FAMILY_PROMOTION = "promotion"
 API_FAMILY_PRICES = "prices"
 API_FAMILY_STATISTICS = "statistics"
 API_FAMILY_FEEDBACKS = "feedbacks"
+RATE_LIMIT_SECTION_HINTS = {
+    "sales_funnel_history": "Воронка продаж: показы, корзины, заказы, выкупы",
+    "product_stocks": "Остатки по товарам",
+    "product_sizes": "Остатки и склады по размерам",
+    "campaign_stats": "Реклама: расходы, корзины и заказы РК",
+    "campaign_metadata": "Метаданные рекламных кампаний",
+    "boosted_keywords": "Ключевые запросы РК",
+    "prices": "Цены из WB Prices",
+    "supplier_orders": "Заказы поставщика: СПП, Цена WBSELLER, Цена WB",
+    "organic_keywords": "Органика по ключам",
+    "product_enrichment": "Обзор по товарам",
+    "feedbacks": "Негативные отзывы",
+}
 
 
 def _sync_console(message: str) -> None:
@@ -1319,6 +1332,7 @@ def _run_sync_single_day(
         f"days_count={max(1, days_count)} overwrite={overwrite}"
     )
     optional_errors: list[str] = []
+    skipped_sections: list[str] = []
     limited_api_families: set[str] = set()
 
     def _family_limited(family: str) -> bool:
@@ -1329,6 +1343,9 @@ def _run_sync_single_day(
         warning = f"{source} rate limit: {str(exc)[:120]}"
         if warning not in optional_errors:
             optional_errors.append(warning)
+        skipped_section = RATE_LIMIT_SECTION_HINTS.get(source, source)
+        if skipped_section not in skipped_sections:
+            skipped_sections.append(skipped_section)
         _sync_console(f"WB API family limited family={family} source={source}. Further calls in this family are skipped.")
 
     try:
@@ -1954,9 +1971,11 @@ def _run_sync_single_day(
         success_stage = "Завершено"
         if limited_api_families:
             success_stage = "Завершено частично"
+            skipped_note = f" Не обновились: {', '.join(skipped_sections)}." if skipped_sections else ""
             success_detail = (
                 "Синхронизация завершена частично: часть WB API была ограничена 429/461, "
                 "поэтому эти разделы пропущены без повторного спама запросами."
+                f"{skipped_note}"
             )
         final_payload = {
             **(log.payload or {}),
@@ -1969,6 +1988,8 @@ def _run_sync_single_day(
         }
         if optional_errors:
             final_payload["warnings"] = optional_errors
+        if skipped_sections:
+            final_payload["skipped_sections"] = skipped_sections
         if limited_api_families:
             final_payload["wb_limited_families"] = sorted(limited_api_families)
             final_payload["partial_sync"] = True

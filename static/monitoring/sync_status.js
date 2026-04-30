@@ -245,6 +245,8 @@
         render(data) {
             const cooldown = (data && data.sync_cooldown) || {};
             const hasSyncCooldown = Boolean(cooldown.is_blocked && cooldown.retry_until);
+            const skippedSections = Array.isArray(data && data.skipped_sections) ? data.skipped_sections : [];
+            const skippedText = skippedSections.length ? ` Не обновились: ${skippedSections.join(", ")}.` : "";
             if (!data || !data.has_sync) {
                 this.isRunning = false;
                 if (this.titleNode) {
@@ -254,7 +256,7 @@
                 }
                 this.setChip("idle", hasSyncCooldown ? "WB лимит" : "Ожидание");
                 this.setIndicatorState("idle");
-                this.setSyncButtonsDisabled(hasSyncCooldown, "WB лимит: ждём");
+                this.setSyncButtonsDisabled(false);
                 this.setCancelButtonsState({ isRunning: false, canCancel: false, cancelRequested: false });
                 if (hasSyncCooldown) {
                     this.startCountdown(
@@ -279,8 +281,10 @@
             const detail = progress.detail || "";
             const message = data.message || detail || "";
             const hasRetryCountdown = Boolean(progress.retry_until && data.is_running);
+            const isPartialSync = Boolean(data.partial_sync);
+            const visibleSkippedText = message.includes("Не обновились:") ? "" : skippedText;
             this.isRunning = Boolean(data.is_running);
-            const shouldDisableSync = Boolean(data.is_running || hasSyncCooldown);
+            const shouldDisableSync = Boolean(data.is_running);
 
             if (this.titleNode) {
                 this.titleNode.textContent = `${data.kind_display}: ${data.status_display}`;
@@ -289,7 +293,7 @@
             this.setIndicatorState(data.status);
             this.setSyncButtonsDisabled(
                 shouldDisableSync,
-                data.is_running ? "Синхронизация выполняется..." : "WB лимит: ждём"
+                "Синхронизация выполняется..."
             );
             this.setCancelButtonsState({
                 isRunning: Boolean(data.is_running),
@@ -299,14 +303,18 @@
             if (hasRetryCountdown) {
                 this.startCountdown(progress.retry_until, message);
             } else if (hasSyncCooldown) {
+                const cooldownMessage = cooldown.message || "WB API временно ограничил синхронизацию. Повторить можно через 0 ч 0 мин 0 сек.";
+                const partialMessage = isPartialSync
+                    ? `${message || "Синхронизация завершена частично."}${visibleSkippedText} ${cooldownMessage}`
+                    : cooldownMessage;
                 this.startCountdown(
                     cooldown.retry_until,
-                    cooldown.message || "WB API временно ограничил синхронизацию. Повторить можно через 0 ч 0 мин 0 сек."
+                    partialMessage
                 );
             } else {
                 this.stopCountdown();
                 if (this.messageNode) {
-                    this.messageNode.textContent = message || "Статус обновлён.";
+                    this.messageNode.textContent = `${message || "Статус обновлён."}${visibleSkippedText}`;
                 }
             }
 

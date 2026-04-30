@@ -67,6 +67,7 @@ from .services.reports import (
     resolve_product_economics,
 )
 from .services.sync import (
+    RATE_LIMIT_SECTION_HINTS,
     get_running_sync,
     mark_stale_running_syncs,
     request_cancel_running_sync,
@@ -305,6 +306,19 @@ def _warn_about_wb_sync_cooldown(request: HttpRequest) -> bool:
         ),
     )
     return True
+
+
+def _warn_about_partial_wb_sync(request: HttpRequest) -> None:
+    cooldown = _current_wb_sync_cooldown()
+    if not cooldown.get("is_blocked"):
+        return
+    messages.warning(
+        request,
+        (
+            f"{cooldown.get('message')} Запуск разрешён: система обновит доступные разделы, "
+            "а ограниченный WB endpoint пропустит без спама запросами."
+        ),
+    )
 
 
 def _parse_stock_int(raw_value: object) -> int:
@@ -1519,8 +1533,7 @@ def sync_all(request: HttpRequest) -> HttpResponse:
             "Синхронизация уже запущена. Дождитесь завершения текущего обновления и повторите позже.",
         )
         return redirect("monitoring:dashboard")
-    if _warn_about_wb_sync_cooldown(request):
-        return redirect("monitoring:dashboard")
+    _warn_about_partial_wb_sync(request)
 
     selected_products = list(form.cleaned_data.get("product_ids") or [])
     product_ids = [product.id for product in selected_products] if selected_products else None
@@ -1596,9 +1609,8 @@ def sync_product(request: HttpRequest, pk: int) -> HttpResponse:
             request,
             "Синхронизация уже выполняется. Новый запуск будет доступен после завершения текущего.",
         )
-    elif _warn_about_wb_sync_cooldown(request):
-        pass
     else:
+        _warn_about_partial_wb_sync(request)
         run_sync_in_background(
             product_ids=[product.id],
             date_from=form.cleaned_data["date_from"],
@@ -1655,6 +1667,24 @@ def sync_cancel(request: HttpRequest) -> JsonResponse | HttpResponse:
     return redirect(request.META.get("HTTP_REFERER") or reverse("monitoring:dashboard"))
 
 
+def _sync_skipped_sections(payload: dict) -> list[str]:
+    skipped_sections = payload.get("skipped_sections")
+    if isinstance(skipped_sections, list):
+        return [str(section) for section in skipped_sections if str(section).strip()]
+
+    warnings = payload.get("warnings")
+    if not isinstance(warnings, list):
+        return []
+
+    derived_sections: list[str] = []
+    for warning in warnings:
+        warning_text = str(warning)
+        for source, label in RATE_LIMIT_SECTION_HINTS.items():
+            if source in warning_text and label not in derived_sections:
+                derived_sections.append(label)
+    return derived_sections
+
+
 def sync_status(request: HttpRequest) -> JsonResponse:
     mark_stale_running_syncs()
     log = get_running_sync() or SyncLog.objects.order_by("-created_at").first()
@@ -1678,6 +1708,7 @@ def sync_status(request: HttpRequest) -> JsonResponse:
         )
 
     payload = log.payload if isinstance(log.payload, dict) else {}
+    skipped_sections = _sync_skipped_sections(payload)
     progress = payload.get("progress") if isinstance(payload.get("progress"), dict) else {}
     is_running = log.status == SyncStatus.RUNNING and log.finished_at is None
     cancel_requested = bool(payload.get("cancel_requested"))
@@ -1704,6 +1735,10 @@ def sync_status(request: HttpRequest) -> JsonResponse:
             "target_date_from": payload.get("stats_date_from"),
             "target_date_to": payload.get("stats_date_to"),
             "days_count": payload.get("days_count") or 1,
+            "partial_sync": bool(payload.get("partial_sync")),
+            "skipped_sections": skipped_sections,
+            "warnings": payload.get("warnings") or [],
+            "wb_limited_families": payload.get("wb_limited_families") or [],
             "created_at": log.created_at.isoformat() if log.created_at else None,
             "finished_at": log.finished_at.isoformat() if log.finished_at else None,
             "progress": {
