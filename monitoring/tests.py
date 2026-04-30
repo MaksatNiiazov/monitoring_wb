@@ -2124,6 +2124,13 @@ class SyncViewsTests(TestCase):
         self.assertIn('name="date_to" value="2026-04-29"', html)
         self.assertNotIn('value="29.04.2026"', html)
 
+    def test_table_sync_form_caps_default_range_to_wb_window(self) -> None:
+        response = self.client.get("/table/?reference_date=2026-04-29&history_days=14")
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode("utf-8")
+        self.assertIn('name="date_from" value="2026-04-23"', html)
+        self.assertIn('name="date_to" value="2026-04-29"', html)
+
     def test_sync_status_returns_idle_payload_when_no_logs(self) -> None:
         response = self.client.get("/sync/status/")
         self.assertEqual(response.status_code, 200)

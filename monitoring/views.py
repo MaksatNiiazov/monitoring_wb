@@ -804,6 +804,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
     filters_form.fields["reference_date"].widget = django_forms.HiddenInput()
     filters_form.fields["history_days"].widget = django_forms.HiddenInput()
     table_period_start = reference_date - timedelta(days=max(history_days - 1, 0))
+    sync_period_start = max(table_period_start, reference_date - timedelta(days=6))
 
     requested_sheet = (request.GET.get("sheet") or "").strip()
     products_count = Product.objects.filter(is_active=True).count()
@@ -1248,7 +1249,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         "sync_form": SyncForm(
             initial={
                 "reference_date": reference_date,
-                "date_from": reference_date,
+                "date_from": sync_period_start,
                 "date_to": reference_date,
             }
         ),

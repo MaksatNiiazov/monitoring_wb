@@ -829,11 +829,8 @@ def build_product_report(
         return MetricCell(), clone_metric_cell(total), MetricCell()
 
     def resolve_search_catalog_group_cells(group: str) -> tuple[MetricCell, MetricCell]:
-        legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
-        legacy_catalog = legacy_cells.get((group, CampaignZone.CATALOG), MetricCell())
-        legacy_recommendation = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
-        search = add_metric_cells(legacy_search, legacy_recommendation)
-        return search, clone_metric_cell(legacy_catalog)
+        total = group_totals.get(group, MetricCell())
+        return clone_metric_cell(total), MetricCell()
 
     unified_search, unified_shelves, unified_catalog = resolve_unified_group_cells()
     manual_search_search, manual_search_catalog = resolve_search_catalog_group_cells(
