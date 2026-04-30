@@ -3529,12 +3529,17 @@ body.is-modal-open {
 
 .monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table td:first-child,
 .monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table th:first-child {
-    width: 42%;
+    width: auto;
     text-align: left;
 }
 
-.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table td:not(:first-child),
-.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table th:not(:first-child) {
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table td,
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table th {
+    text-align: left;
+}
+
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table td.is-numeric,
+.monitoring-grid-table.is-product tr.table-row-style-stock-image .grid-stock-mini-table th.is-numeric {
     text-align: right;
 }
 

@@ -16,7 +16,6 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 from monitoring.models import (
     DailyCampaignProductStat,
-    DailyCampaignSearchClusterStat,
     DailyProductKeywordStat,
     DailyProductMetrics,
     DailyProductNote,
@@ -603,13 +602,6 @@ def _build_prefetched_product_report_context(*, product: Product, stock_dates: l
         .values_list("query_text", flat=True)
     )
 
-    search_cluster_stats_by_date: dict[date, list[DailyCampaignSearchClusterStat]] = defaultdict(list)
-    for row in DailyCampaignSearchClusterStat.objects.filter(
-        product=product,
-        stats_date__in=normalized_dates,
-    ).select_related("campaign"):
-        search_cluster_stats_by_date[row.stats_date].append(row)
-
     economics_versions = list(
         ProductEconomicsVersion.objects.filter(
             product=product,
@@ -666,7 +658,6 @@ def _build_prefetched_product_report_context(*, product: Product, stock_dates: l
         "preloaded_campaign_stats": campaign_stats_by_date,
         "preloaded_keyword_stats": keyword_stats_by_date,
         "preloaded_product_keywords": product_keywords,
-        "preloaded_search_cluster_stats": search_cluster_stats_by_date,
         "preloaded_economics": economics_by_date,
         "preloaded_visible_warehouse_names": visible_warehouse_names,
         "preloaded_active_campaign_exists": active_campaign_exists,

@@ -33,7 +33,7 @@ from monitoring.models import (
     SyncStatus,
     Warehouse,
 )
-from monitoring.services.reports import decimalize, map_app_type_to_zone, normalize_search_text, quantize_money
+from monitoring.services.reports import decimalize, default_zone_for_campaign_group, normalize_search_text, quantize_money
 from monitoring.services.wb_client import (
     AnalyticsWBClient,
     FeedbacksWBClient,
@@ -708,6 +708,7 @@ def upsert_warehouse_stocks(
 def _aggregate_campaign_day_stats(
     day_payload: dict[str, Any],
     *,
+    campaign_group: str,
     product_map: dict[int, Product],
     linked_product_ids: set[int],
 ) -> dict[tuple[int, str], dict[str, Any]]:
@@ -717,6 +718,7 @@ def _aggregate_campaign_day_stats(
     Это даёт правильные данные по Корзинам, Заказам и Заказам (руб.) для Единой Ставки.
     """
     product_aggregated: dict[tuple[int, str], dict[str, Any]] = {}
+    zone = default_zone_for_campaign_group(campaign_group)
 
     def _item_nm_id(item: dict[str, Any]) -> int | None:
         for key in ("nmId", "nmID", "nm_id", "nmid"):
@@ -755,7 +757,6 @@ def _aggregate_campaign_day_stats(
 
     for app_payload in day_payload.get("apps", []):
         app_type = app_payload.get("appType")
-        zone = map_app_type_to_zone(app_type)
         for item in app_payload.get("nms", []) or []:
             nm_id = _item_nm_id(item)
             if nm_id is None:
@@ -775,8 +776,7 @@ def _aggregate_campaign_day_stats(
     # Сначала суммируем ВСЕ товары по зонам (все nmId в кампании)
     for app_payload in day_payload.get("apps", []):
         app_type = app_payload.get("appType")
-        zone = map_app_type_to_zone(app_type)
-        
+
         if zone not in zone_totals:
             zone_totals[zone] = {
                 "impressions": 0,
@@ -906,7 +906,10 @@ def upsert_campaign_stats(
             ).delete()
 
         aggregated = _aggregate_campaign_day_stats(
-            day_payload, product_map=product_map, linked_product_ids=linked_product_ids
+            day_payload,
+            campaign_group=campaign.monitoring_group,
+            product_map=product_map,
+            linked_product_ids=linked_product_ids,
         )
         _save_campaign_stats(aggregated, campaign=campaign, stats_date=stats_date, overwrite=overwrite)
 

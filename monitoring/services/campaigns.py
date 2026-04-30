@@ -5,7 +5,14 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from monitoring.models import Campaign, CampaignZone, DailyCampaignProductStat, DailyCampaignSearchClusterStat, Product
-from monitoring.services.reports import MetricCell, decimalize, metric_cell_from_search_clusters, quantize_money, safe_divide
+from monitoring.services.reports import (
+    MetricCell,
+    decimalize,
+    metric_cell_from_search_clusters,
+    normalize_campaign_stat_zone,
+    quantize_money,
+    safe_divide,
+)
 
 ZERO = Decimal("0")
 
@@ -155,11 +162,12 @@ def build_campaign_detail_context(*, campaign: Campaign, date_from: date, date_t
     product_cluster_cells: dict[int, MetricCell] = defaultdict(MetricCell)
 
     for row in stats_rows:
+        normalized_zone = normalize_campaign_stat_zone(row.campaign.monitoring_group, row.zone)
         total_cell.add(row)
         day_cells[row.stats_date].add(row)
-        zone_cells[row.zone].add(row)
+        zone_cells[normalized_zone].add(row)
         product_cells[row.product_id].add(row)
-        product_zone_cells[row.product_id][row.zone].add(row)
+        product_zone_cells[row.product_id][normalized_zone].add(row)
 
     for row in cluster_rows:
         day_cluster_cells[row.stats_date].impressions += int(row.impressions or 0)

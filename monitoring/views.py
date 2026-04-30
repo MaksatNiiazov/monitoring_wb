@@ -555,67 +555,41 @@ def _build_product_stock_popup_payload_for_date(*, product: Product, stock_date:
 
 
 def _build_stock_mini_table_payload_for_date(*, product: Product, stock_date: date, limit: int = 6) -> dict[str, object]:
-    visible_warehouse_names = product.visible_warehouse_names()
-    preferred_warehouse_names = {
-        normalize_warehouse_name(warehouse_name)
-        for warehouse_name in visible_warehouse_names
-    }
-    warehouse_rows = []
-    warehouse_queryset = (
-        DailyWarehouseStock.objects.filter(
-            product=product,
-            stats_date=stock_date,
-        )
-        .select_related("warehouse")
-        .order_by("warehouse__name")
-    )
-    for warehouse_row in warehouse_queryset:
-        warehouse_name = warehouse_row.warehouse.name
-        if preferred_warehouse_names:
-            if normalize_warehouse_name(warehouse_name) not in preferred_warehouse_names:
-                continue
-        elif not warehouse_row.warehouse.is_visible_in_monitoring:
-            continue
-        warehouse_rows.append(
-            {
-                "warehouse": warehouse_name,
-                "stock": int(warehouse_row.stock_count or 0),
-                "to_client": int(warehouse_row.in_way_to_client or 0),
-                "from_client": int(warehouse_row.in_way_from_client or 0),
-            }
-        )
+    popup_payload = _build_product_stock_popup_payload_for_date(product=product, stock_date=stock_date)
+    try:
+        parsed_payload = json.loads(str(popup_payload.get("payload_json") or "{}"))
+    except (TypeError, ValueError):
+        parsed_payload = {}
 
-    warehouse_rows.sort(key=lambda item: (-int(item["stock"]), str(item["warehouse"])))
-    total_stock = sum(int(item["stock"]) for item in warehouse_rows)
-    total_to_client = sum(int(item["to_client"]) for item in warehouse_rows)
-    total_from_client = sum(int(item["from_client"]) for item in warehouse_rows)
-
-    if not warehouse_rows:
-        stock_row = DailyProductStock.objects.filter(
-            product=product,
-            stats_date=stock_date,
-        ).first()
-        if stock_row is not None:
-            total_stock = int(stock_row.total_stock or 0)
-            total_to_client = int(stock_row.in_way_to_client or 0)
-            total_from_client = int(stock_row.in_way_from_client or 0)
-            warehouse_rows.append(
+    columns = [column for column in parsed_payload.get("columns") or [] if isinstance(column, dict)]
+    rows = [row for row in parsed_payload.get("rows") or [] if isinstance(row, dict)]
+    visible_rows = [
+        {
+            **row,
+            "cells": [
                 {
-                    "warehouse": "Итого WB",
-                    "stock": total_stock,
-                    "to_client": total_to_client,
-                    "from_client": total_from_client,
+                    "value": (
+                        ""
+                        if bool(column.get("blank_zero"))
+                        and _parse_stock_int(row.get(str(column.get("id") or ""))) == 0
+                        else row.get(str(column.get("id") or ""))
+                    ),
+                    "numeric": bool(column.get("numeric")),
+                    "blank_zero": bool(column.get("blank_zero")),
                 }
-            )
+                for column in columns
+            ],
+        }
+        for row in rows[: max(1, int(limit or 1))]
+    ]
 
-    visible_rows = warehouse_rows[: max(1, int(limit or 1))]
     return {
+        "mode": str(parsed_payload.get("mode") or popup_payload.get("mode") or "flat"),
+        "columns": columns,
         "rows": visible_rows,
-        "total_stock": total_stock,
-        "total_to_client": total_to_client,
-        "total_from_client": total_from_client,
-        "more_count": max(0, len(warehouse_rows) - len(visible_rows)),
-        "empty_message": "Нет данных по складам",
+        "total_stock": _parse_stock_int(popup_payload.get("total")),
+        "more_count": max(0, len(rows) - len(visible_rows)),
+        "empty_message": str(parsed_payload.get("empty_message") or "Нет данных по складам"),
     }
 
 

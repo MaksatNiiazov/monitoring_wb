@@ -153,30 +153,27 @@
                                                 <table class="grid-stock-mini-table">
                                                     <thead>
                                                         <tr>
-                                                            <th>Склад</th>
-                                                            <th>Ост.</th>
-                                                            <th>К клиенту</th>
-                                                            <th>Возврат</th>
+                                                            {% for stock_column in cell.control.columns %}
+                                                                <th{% if stock_column.numeric %} class="is-numeric"{% endif %}>{{ stock_column.label }}</th>
+                                                            {% endfor %}
                                                         </tr>
                                                     </thead>
                                                     <tbody>
                                                         {% for stock_row in cell.control.rows %}
                                                             <tr>
-                                                                <td>{{ stock_row.warehouse }}</td>
-                                                                <td>{{ stock_row.stock }}</td>
-                                                                <td>{{ stock_row.to_client }}</td>
-                                                                <td>{{ stock_row.from_client }}</td>
+                                                                {% for stock_cell in stock_row.cells %}
+                                                                    <td{% if stock_cell.numeric %} class="is-numeric"{% endif %}>{{ stock_cell.value }}</td>
+                                                                {% endfor %}
                                                             </tr>
                                                         {% endfor %}
                                                     </tbody>
-                                                    <tfoot>
-                                                        <tr>
-                                                            <td>{% if cell.control.more_count %}+{{ cell.control.more_count }}{% else %}Итого{% endif %}</td>
-                                                            <td>{{ cell.control.total_stock }}</td>
-                                                            <td>{{ cell.control.total_to_client }}</td>
-                                                            <td>{{ cell.control.total_from_client }}</td>
-                                                        </tr>
-                                                    </tfoot>
+                                                    {% if cell.control.more_count %}
+                                                        <tfoot>
+                                                            <tr>
+                                                                <td colspan="{{ cell.control.columns|length }}">+{{ cell.control.more_count }}</td>
+                                                            </tr>
+                                                        </tfoot>
+                                                    {% endif %}
                                                 </table>
                                             {% else %}
                                                 <span class="grid-stock-mini-empty">{{ cell.control.empty_message }}</span>

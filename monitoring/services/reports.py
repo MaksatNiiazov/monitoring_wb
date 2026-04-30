@@ -4,10 +4,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from functools import lru_cache
 from typing import Any
 
-from django.conf import settings
 from django.db.models import Avg, Count, Max, Sum
 from django.utils import timezone
 
@@ -97,23 +95,26 @@ def latest_keyword_rows_count(product: Product) -> int:
     return max(int(value or 0), MIN_KEYWORD_ROWS)
 
 
-@lru_cache(maxsize=1)
-def parse_zone_map() -> dict[int, str]:
-    mapping: dict[int, str] = {}
-    for chunk in settings.WB_APP_TYPE_ZONE_MAP.split(","):
-        if ":" not in chunk:
-            continue
-        key, value = chunk.split(":", 1)
-        try:
-            mapping[int(key.strip())] = value.strip()
-        except ValueError:
-            continue
-    return mapping or {1: CampaignZone.RECOMMENDATION, 32: CampaignZone.SEARCH, 64: CampaignZone.CATALOG}
+def default_zone_for_campaign_group(group: str) -> str:
+    # WB /adv/v3/fullstats appType is a platform marker, not a placement zone.
+    # The monitoring zone must come from our campaign grouping unless WB exposes
+    # a real placement field.
+    if group == CampaignMonitoringGroup.UNIFIED:
+        return CampaignZone.RECOMMENDATION
+    if group == CampaignMonitoringGroup.MANUAL_SEARCH:
+        return CampaignZone.SEARCH
+    if group == CampaignMonitoringGroup.MANUAL_SHELVES:
+        return CampaignZone.RECOMMENDATION
+    if group == CampaignMonitoringGroup.MANUAL_CATALOG:
+        return CampaignZone.CATALOG
+    return CampaignZone.UNKNOWN
 
 
-def map_app_type_to_zone(app_type: int | None) -> str:
-    app_type = app_type or 0
-    return parse_zone_map().get(app_type, CampaignZone.UNKNOWN)
+def normalize_campaign_stat_zone(group: str, zone: str | None) -> str:
+    default_zone = default_zone_for_campaign_group(group)
+    if default_zone != CampaignZone.UNKNOWN:
+        return default_zone
+    return zone or CampaignZone.UNKNOWN
 
 
 @dataclass
@@ -812,23 +813,11 @@ def build_product_report(
 
     legacy_cells: dict[tuple[str, str], MetricCell] = {}
     for stat in campaign_stats:
-        key = (stat.campaign.monitoring_group, stat.zone)
-        legacy_cells.setdefault(key, MetricCell()).add(stat)
-
-    search_cluster_stats = (
-        list(preloaded_search_cluster_stats.get(stats_date) or [])
-        if preloaded_search_cluster_stats is not None
-        else list(
-            DailyCampaignSearchClusterStat.objects.filter(
-                product=product,
-                stats_date=stats_date,
-                campaign__products=product,
-            ).select_related("campaign")
+        key = (
+            stat.campaign.monitoring_group,
+            normalize_campaign_stat_zone(stat.campaign.monitoring_group, stat.zone),
         )
-    )
-    search_clusters_by_group: dict[str, list[DailyCampaignSearchClusterStat]] = defaultdict(list)
-    for row in search_cluster_stats:
-        search_clusters_by_group[row.campaign.monitoring_group].append(row)
+        legacy_cells.setdefault(key, MetricCell()).add(stat)
 
     group_totals: dict[str, MetricCell] = defaultdict(MetricCell)
     for stat in campaign_stats:
@@ -836,68 +825,15 @@ def build_product_report(
 
     def resolve_unified_group_cells() -> tuple[MetricCell, MetricCell, MetricCell]:
         group = CampaignMonitoringGroup.UNIFIED
-        cluster_rows = search_clusters_by_group.get(group, [])
         total = group_totals.get(group, MetricCell())
         return MetricCell(), clone_metric_cell(total), MetricCell()
-        legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
-        legacy_recommendation = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
-        legacy_catalog = legacy_cells.get((group, CampaignZone.CATALOG), MetricCell())
-        if not cluster_rows:
-            # Если кластеров нет - используем legacy
-            shelves = add_metric_cells(legacy_recommendation, legacy_catalog)
-            return legacy_search, shelves, MetricCell()
-
-        cluster = metric_cell_from_search_clusters(cluster_rows)
-        if not has_metric_cell_traffic(cluster):
-            return MetricCell(), clone_metric_cell(total), MetricCell()
-        
-        # Есть кластеры - используем пропорциональное распределение (Вариант 1)
-        # Пропорциональное распределение корзин/заказов по кликам кластера
-        search = apply_search_cluster_proportional(legacy_search, cluster_rows, total)
-        search = clamp_metric_cell_to_total(search, total)
-        
-        # Полки = все остальное (total - search)
-        non_search_total = subtract_metric_cells(total, search)
-        return search, non_search_total, MetricCell()
 
     def resolve_search_catalog_group_cells(group: str) -> tuple[MetricCell, MetricCell]:
-        cluster_rows = search_clusters_by_group.get(group, [])
-        total = group_totals.get(group, MetricCell())
         legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
         legacy_catalog = legacy_cells.get((group, CampaignZone.CATALOG), MetricCell())
         legacy_recommendation = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
-        
-        if not cluster_rows:
-            # Если кластеров нет - используем legacy (поиск + recommendation)
-            search = add_metric_cells(legacy_search, legacy_recommendation)
-            search = clamp_metric_cell_to_total(search, total)
-            catalog = subtract_metric_cells(total, search)
-            return search, catalog
-        
-        # Есть кластеры - гибрид:
-        # Трафик (impressions, clicks, spend) - из кластеров через apply_search_cluster_override
-        # Конверсии (carts, orders) - пропорциональное распределение
-        cluster = metric_cell_from_search_clusters(cluster_rows)
-        
-        # Базовый search: трафик из кластеров + конверсии из legacy max
-        search = apply_search_cluster_override(legacy_search, cluster_rows)
-        
-        # Заменяем конверсии на пропорциональное распределение от total
-        total_clicks = max(total.clicks, 1)
-        if cluster.clicks > 0:
-            ratio = Decimal(cluster.clicks) / Decimal(total_clicks)
-            search.carts = int(Decimal(total.carts) * ratio)
-            search.orders = int(Decimal(total.orders) * ratio)
-            search.units = int(Decimal(total.units) * ratio)
-            search.order_sum = decimalize(total.order_sum) * ratio
-        
-        # Добавляем recommendation
-        search = add_metric_cells(search, legacy_recommendation)
-        search = clamp_metric_cell_to_total(search, total)
-        
-        # Каталог = все остальное
-        catalog = subtract_metric_cells(total, search)
-        return search, catalog
+        search = add_metric_cells(legacy_search, legacy_recommendation)
+        return search, clone_metric_cell(legacy_catalog)
 
     unified_search, unified_shelves, unified_catalog = resolve_unified_group_cells()
     manual_search_search, manual_search_catalog = resolve_search_catalog_group_cells(
