@@ -386,7 +386,12 @@ def refresh_product_metadata(product: Product, *, analytics_client: AnalyticsWBC
     return product
 
 
-def _apply_campaign_metadata_payload(campaign: Campaign, payload: dict[str, Any]) -> Campaign:
+def _apply_campaign_metadata_payload(
+    campaign: Campaign,
+    payload: dict[str, Any],
+    *,
+    allowed_products_by_nm_id: dict[int, Product] | None = None,
+) -> Campaign:
     settings = payload.get("settings") or {}
     placements = settings.get("placements") or {}
     campaign.name = settings.get("name") or campaign.name
@@ -404,7 +409,16 @@ def _apply_campaign_metadata_payload(campaign: Campaign, payload: dict[str, Any]
         nm_id = nm_setting.get("nm_id")
         if not nm_id:
             continue
-        product, _ = Product.objects.get_or_create(nm_id=nm_id)
+        try:
+            normalized_nm_id = int(nm_id)
+        except (TypeError, ValueError):
+            continue
+        if allowed_products_by_nm_id is None:
+            product, _ = Product.objects.get_or_create(nm_id=normalized_nm_id)
+        else:
+            product = allowed_products_by_nm_id.get(normalized_nm_id)
+            if product is None:
+                continue
         update_product_from_payload(product, nm_setting)
         ProductCampaign.objects.get_or_create(product=product, campaign=campaign)
 
@@ -439,7 +453,11 @@ def refresh_campaigns_metadata(
             _apply_campaign_metadata_payload(campaign, payload)
 
 
-def refresh_available_campaigns_metadata(*, promotion_client: PromotionWBClient | None = None) -> list[Campaign]:
+def refresh_available_campaigns_metadata(
+    *,
+    products_by_nm_id: dict[int, Product],
+    promotion_client: PromotionWBClient | None = None,
+) -> list[Campaign]:
     promotion_client = promotion_client or PromotionWBClient()
     response = promotion_client.get_campaigns()
     campaigns: list[Campaign] = []
@@ -447,8 +465,16 @@ def refresh_available_campaigns_metadata(*, promotion_client: PromotionWBClient 
         external_id = payload.get("id")
         if not external_id:
             continue
+        nm_settings = payload.get("nm_settings") or []
+        linked_nm_ids = {
+            int(nm_setting.get("nm_id"))
+            for nm_setting in nm_settings
+            if str(nm_setting.get("nm_id") or "").isdigit()
+        }
+        if products_by_nm_id and not linked_nm_ids.intersection(products_by_nm_id):
+            continue
         campaign, _ = Campaign.objects.get_or_create(external_id=external_id)
-        campaigns.append(_apply_campaign_metadata_payload(campaign, payload))
+        campaigns.append(_apply_campaign_metadata_payload(campaign, payload, allowed_products_by_nm_id=products_by_nm_id))
     return campaigns
 
 
@@ -1410,7 +1436,10 @@ def _run_sync_single_day(
         product_map = {product.nm_id: product for product in products}
         tracked_product_ids = [product.id for product in products]
         try:
-            refresh_available_campaigns_metadata(promotion_client=configure_sync_wb_client(PromotionWBClient(), max_retries=1))
+            refresh_available_campaigns_metadata(
+                products_by_nm_id=product_map,
+                promotion_client=configure_sync_wb_client(PromotionWBClient(), max_retries=1),
+            )
         except WBApiError as exc:
             err_str = str(exc).lower()
             if is_wb_rate_limit_error(err_str):
