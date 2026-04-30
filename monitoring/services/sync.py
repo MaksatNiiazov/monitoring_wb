@@ -439,6 +439,19 @@ def refresh_campaigns_metadata(
             _apply_campaign_metadata_payload(campaign, payload)
 
 
+def refresh_available_campaigns_metadata(*, promotion_client: PromotionWBClient | None = None) -> list[Campaign]:
+    promotion_client = promotion_client or PromotionWBClient()
+    response = promotion_client.get_campaigns()
+    campaigns: list[Campaign] = []
+    for payload in response.get("adverts", []) or []:
+        external_id = payload.get("id")
+        if not external_id:
+            continue
+        campaign, _ = Campaign.objects.get_or_create(external_id=external_id)
+        campaigns.append(_apply_campaign_metadata_payload(campaign, payload))
+    return campaigns
+
+
 def _upsert(
     model,
     *,
@@ -1396,6 +1409,15 @@ def _run_sync_single_day(
 
         product_map = {product.nm_id: product for product in products}
         tracked_product_ids = [product.id for product in products]
+        try:
+            refresh_available_campaigns_metadata(promotion_client=configure_sync_wb_client(PromotionWBClient(), max_retries=1))
+        except WBApiError as exc:
+            err_str = str(exc).lower()
+            if is_wb_rate_limit_error(err_str):
+                _sync_console("ПРЕДУПРЕЖДЕНИЕ: WB API rate limit (429/461) на списке рекламных кампаний. Используем уже сохранённые РК.")
+                _record_rate_limit(API_FAMILY_PROMOTION, "campaign_metadata", exc)
+            else:
+                raise
         campaigns = list(Campaign.objects.filter(is_active=True, products__in=products).distinct())
         campaign_map = {campaign.external_id: campaign for campaign in campaigns}
         campaign_pairs = (
