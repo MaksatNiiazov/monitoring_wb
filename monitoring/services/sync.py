@@ -716,6 +716,59 @@ def _aggregate_campaign_day_stats(
     СУММИРУЕТ ВСЕ товары в зоне (как cmp.wildberries.ru), а не только известные продукты.
     Это даёт правильные данные по Корзинам, Заказам и Заказам (руб.) для Единой Ставки.
     """
+    product_aggregated: dict[tuple[int, str], dict[str, Any]] = {}
+
+    def _item_nm_id(item: dict[str, Any]) -> int | None:
+        for key in ("nmId", "nmID", "nm_id", "nmid"):
+            raw_value = item.get(key)
+            if raw_value is None:
+                continue
+            try:
+                return int(raw_value)
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _add_product_item(product: Product, zone: str, app_type: Any, item: dict[str, Any]) -> None:
+        key = (product.id, zone)
+        row = product_aggregated.setdefault(
+            key,
+            {
+                "impressions": 0,
+                "clicks": 0,
+                "spend": Decimal("0"),
+                "add_to_cart_count": 0,
+                "order_count": 0,
+                "units_ordered": 0,
+                "order_sum": Decimal("0"),
+                "raw_payload": [],
+            },
+        )
+        row["impressions"] += int(item.get("views") or 0)
+        row["clicks"] += int(item.get("clicks") or 0)
+        row["spend"] += decimalize(item.get("sum"))
+        row["add_to_cart_count"] += int(item.get("atbs") or 0)
+        row["order_count"] += int(item.get("orders") or 0)
+        row["units_ordered"] += int(item.get("shks") or 0)
+        row["order_sum"] += decimalize(item.get("sum_price"))
+        row["raw_payload"].append({"appType": app_type, "item": item})
+
+    for app_payload in day_payload.get("apps", []):
+        app_type = app_payload.get("appType")
+        zone = map_app_type_to_zone(app_type)
+        for item in app_payload.get("nms", []) or []:
+            nm_id = _item_nm_id(item)
+            if nm_id is None:
+                continue
+            product = product_map.get(nm_id)
+            if product is None:
+                continue
+            if linked_product_ids and product.id not in linked_product_ids:
+                continue
+            _add_product_item(product, zone, app_type, item)
+    if product_aggregated or len(product_map) != 1:
+        return product_aggregated
+
     aggregated: dict[tuple[int, str], dict[str, Any]] = {}
     zone_totals: dict[str, dict[str, Any]] = {}
     

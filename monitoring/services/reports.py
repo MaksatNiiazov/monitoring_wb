@@ -838,6 +838,7 @@ def build_product_report(
         group = CampaignMonitoringGroup.UNIFIED
         cluster_rows = search_clusters_by_group.get(group, [])
         total = group_totals.get(group, MetricCell())
+        return MetricCell(), clone_metric_cell(total), MetricCell()
         legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
         legacy_recommendation = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
         legacy_catalog = legacy_cells.get((group, CampaignZone.CATALOG), MetricCell())
