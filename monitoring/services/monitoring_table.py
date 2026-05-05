@@ -16,6 +16,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 from monitoring.models import (
     DailyCampaignProductStat,
+    DailyCampaignSearchClusterStat,
     DailyProductKeywordStat,
     DailyProductMetrics,
     DailyProductNote,
@@ -371,9 +372,10 @@ def build_day_block(
         drr_sales_ref = row_value_ref(20, 8)
         orders_ref = row_value_ref(13, 8)
         buyout_fraction = f"IF({buyout_percent_ref}>1,{buyout_percent_ref}/100,{buyout_percent_ref})"
+        drr_sales_fraction = f"IF({drr_sales_ref}>1,{drr_sales_ref}/100,{drr_sales_ref})"
         return (
             f'=IFERROR(IF({seller_price_ref}=0,0,'
-            f'(({seller_price_ref}-{unit_cost_ref}-({seller_price_ref}*({drr_sales_ref}/100)))'
+            f'(({seller_price_ref}-{unit_cost_ref}-({seller_price_ref}*({drr_sales_fraction})))'
             f'-({seller_price_ref}*25/100)-(({logistics_ref}/{buyout_fraction})-50))'
             f'*({orders_ref}*{buyout_fraction})),0)'
         )
@@ -596,6 +598,14 @@ def _build_prefetched_product_report_context(*, product: Product, stock_dates: l
         stats_date__in=normalized_dates,
     ).order_by("stats_date", "query_text"):
         keyword_stats_by_date[row.stats_date].append(row)
+
+    search_cluster_stats_by_date: dict[date, list[DailyCampaignSearchClusterStat]] = defaultdict(list)
+    for row in DailyCampaignSearchClusterStat.objects.filter(
+        product=product,
+        stats_date__in=normalized_dates,
+    ).select_related("campaign"):
+        search_cluster_stats_by_date[row.stats_date].append(row)
+
     product_keywords = list(
         ProductKeyword.objects.filter(product=product)
         .order_by("position", "query_text", "id")
@@ -657,6 +667,7 @@ def _build_prefetched_product_report_context(*, product: Product, stock_dates: l
         "preloaded_warehouse_rows": warehouse_rows_by_date,
         "preloaded_campaign_stats": campaign_stats_by_date,
         "preloaded_keyword_stats": keyword_stats_by_date,
+        "preloaded_search_cluster_stats": search_cluster_stats_by_date,
         "preloaded_product_keywords": product_keywords,
         "preloaded_economics": economics_by_date,
         "preloaded_visible_warehouse_names": visible_warehouse_names,

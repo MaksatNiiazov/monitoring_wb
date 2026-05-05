@@ -43,6 +43,7 @@ from monitoring.services.reporting_hub import build_reports_context
 from monitoring.services.reports import build_dashboard_context, build_product_report
 from monitoring.services.table_charts import build_table_timeline_context
 from monitoring.services.sync import (
+    _aggregate_campaign_day_stats,
     aggregate_offices_from_sizes,
     build_product_stock_payload_from_sizes,
     next_run_at,
@@ -184,7 +185,7 @@ class ReportingTests(TestCase):
         )
         rows = exporter_rows(report)
         self.assertEqual(rows[0][1], "17.03.2026")
-        self.assertEqual(rows[4][1], "2000")
+        self.assertEqual(rows[4][2], "2000")
         self.assertEqual(rows[4][7], "2000")
 
     def test_exporter_uses_overall_funnel_in_summary_column(self) -> None:
@@ -254,7 +255,7 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         rows = exporter_rows(report)
-        self.assertEqual(rows[8][1], "-")
+        self.assertEqual(rows[8][2], "-")
         self.assertEqual(rows[11][7], "-")
         self.assertEqual(rows[13][7], "-")
         self.assertEqual(rows[16][7], "-")
@@ -277,12 +278,12 @@ class ReportingTests(TestCase):
 
         rows = exporter_rows(report)
 
-        self.assertEqual(rows[14][1], "6000")
-        self.assertEqual(rows[15][1], "1440")
-        self.assertEqual(rows[16][1], "-")
-        self.assertEqual(rows[17][1], "-")
-        self.assertEqual(rows[18][1], "-")
-        self.assertEqual(rows[19][1], "-")
+        self.assertEqual(rows[14][2], "6000")
+        self.assertEqual(rows[15][2], "1440")
+        self.assertEqual(rows[16][2], "-")
+        self.assertEqual(rows[17][2], "-")
+        self.assertEqual(rows[18][2], "-")
+        self.assertEqual(rows[19][2], "-")
         self.assertEqual(rows[14][7], "10000")
         self.assertEqual(rows[15][7], "2400")
         self.assertEqual(rows[16][7], "-")
@@ -305,8 +306,8 @@ class ReportingTests(TestCase):
 
         rows = exporter_rows(report)
 
-        self.assertEqual(rows[18][1], "<0,01%")
-        self.assertEqual(rows[19][1], "<0,01%")
+        self.assertEqual(rows[18][2], "<0,01%")
+        self.assertEqual(rows[19][2], "<0,01%")
         self.assertEqual(rows[18][7], "<0,01%")
         self.assertEqual(rows[19][7], "<0,01%")
 
@@ -323,7 +324,7 @@ class ReportingTests(TestCase):
             stock_date=date(2026, 3, 17),
         )
         self.assertIn("insights", report)
-        self.assertEqual(len(report["traffic_cards"]), 5)
+        self.assertEqual(len(report["traffic_cards"]), 6)
 
     def test_product_report_does_not_return_negative_days_until_zero_from_stock_drop(self) -> None:
         DailyProductStock.objects.create(
@@ -350,7 +351,7 @@ class ReportingTests(TestCase):
         self.assertEqual(report["avg_stock_drop_per_day"], Decimal("-14.50"))
         self.assertEqual(report["days_until_zero_from_stock_drop"], Decimal("0"))
 
-    def test_product_report_uses_search_cluster_stats_for_zone_split(self) -> None:
+    def test_product_report_keeps_unified_campaign_in_shelves_when_cluster_stats_exist(self) -> None:
         DailyCampaignSearchClusterStat.objects.create(
             campaign=self.campaign,
             product=self.product,
@@ -370,19 +371,19 @@ class ReportingTests(TestCase):
         unified_search = report["blocks"]["unified_search"]
         unified_shelves = report["blocks"]["unified_shelves"]
 
-        self.assertEqual(unified_search.impressions, 200)
-        self.assertEqual(unified_search.clicks, 20)
-        self.assertEqual(unified_search.spend, Decimal("400.00"))
-        self.assertEqual(unified_search.carts, 20)
-        self.assertEqual(unified_search.orders, 6)
-        self.assertEqual(unified_search.order_sum, Decimal("6000.00"))
+        self.assertEqual(unified_search.impressions, 0)
+        self.assertEqual(unified_search.clicks, 0)
+        self.assertEqual(unified_search.spend, Decimal("0"))
+        self.assertEqual(unified_search.carts, 0)
+        self.assertEqual(unified_search.orders, 0)
+        self.assertEqual(unified_search.order_sum, Decimal("0"))
 
-        self.assertEqual(unified_shelves.impressions, 800)
-        self.assertEqual(unified_shelves.clicks, 80)
-        self.assertEqual(unified_shelves.spend, Decimal("1600.00"))
-        self.assertEqual(unified_shelves.carts, 0)
-        self.assertEqual(unified_shelves.orders, 0)
-        self.assertEqual(unified_shelves.order_sum, Decimal("0.00"))
+        self.assertEqual(unified_shelves.impressions, 1000)
+        self.assertEqual(unified_shelves.clicks, 100)
+        self.assertEqual(unified_shelves.spend, Decimal("2000.00"))
+        self.assertEqual(unified_shelves.carts, 20)
+        self.assertEqual(unified_shelves.orders, 6)
+        self.assertEqual(unified_shelves.order_sum, Decimal("6000.00"))
 
     def test_product_report_keeps_catalog_zone_when_cluster_stats_exist(self) -> None:
         DailyCampaignProductStat.objects.create(
@@ -431,18 +432,18 @@ class ReportingTests(TestCase):
         unified_shelves = report["blocks"]["unified_shelves"]
         unified_catalog = report["blocks"]["unified_catalog"]
 
-        self.assertEqual(unified_search.impressions, 200)
-        self.assertEqual(unified_search.clicks, 20)
-        self.assertEqual(unified_search.spend, Decimal("400.00"))
-        self.assertEqual(unified_search.carts, 20)
-        self.assertEqual(unified_search.orders, 6)
-        self.assertEqual(unified_search.order_sum, Decimal("6000.00"))
-        self.assertEqual(unified_shelves.impressions, 4300)
-        self.assertEqual(unified_shelves.clicks, 250)
-        self.assertEqual(unified_shelves.spend, Decimal("3900.00"))
-        self.assertEqual(unified_shelves.carts, 18)
-        self.assertEqual(unified_shelves.orders, 3)
-        self.assertEqual(unified_shelves.order_sum, Decimal("2700.00"))
+        self.assertEqual(unified_search.impressions, 0)
+        self.assertEqual(unified_search.clicks, 0)
+        self.assertEqual(unified_search.spend, Decimal("0"))
+        self.assertEqual(unified_search.carts, 0)
+        self.assertEqual(unified_search.orders, 0)
+        self.assertEqual(unified_search.order_sum, Decimal("0"))
+        self.assertEqual(unified_shelves.impressions, 4500)
+        self.assertEqual(unified_shelves.clicks, 270)
+        self.assertEqual(unified_shelves.spend, Decimal("4300.00"))
+        self.assertEqual(unified_shelves.carts, 38)
+        self.assertEqual(unified_shelves.orders, 9)
+        self.assertEqual(unified_shelves.order_sum, Decimal("8700.00"))
         self.assertEqual(unified_catalog.impressions, 0)
         self.assertEqual(unified_catalog.clicks, 0)
         self.assertEqual(unified_catalog.spend, Decimal("0.00"))
@@ -464,6 +465,138 @@ class ReportingTests(TestCase):
             unified_search.order_sum + unified_shelves.order_sum + unified_catalog.order_sum,
             Decimal("8700.00"),
         )
+
+    def test_product_report_splits_manual_search_catalog_from_search_clusters(self) -> None:
+        manual_search_campaign = Campaign.objects.create(
+            external_id=28150165,
+            name="Manual search split",
+            monitoring_group=CampaignMonitoringGroup.MANUAL_SEARCH,
+        )
+        manual_search_campaign.products.add(self.product)
+        DailyCampaignProductStat.objects.create(
+            campaign=manual_search_campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.SEARCH,
+            impressions=1000,
+            clicks=100,
+            spend=Decimal("1000.00"),
+            add_to_cart_count=50,
+            order_count=10,
+            units_ordered=10,
+            order_sum=Decimal("10000.00"),
+        )
+        DailyCampaignSearchClusterStat.objects.create(
+            campaign=manual_search_campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            impressions=700,
+            clicks=70,
+            spend=Decimal("700.00"),
+            add_to_cart_count=35,
+            order_count=7,
+            units_ordered=7,
+        )
+
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+
+        manual_search = report["blocks"]["manual_search"]
+        manual_catalog = report["blocks"]["manual_catalog"]
+        self.assertEqual(manual_search.impressions, 700)
+        self.assertEqual(manual_search.clicks, 70)
+        self.assertEqual(manual_search.spend, Decimal("700.00"))
+        self.assertEqual(manual_search.carts, 35)
+        self.assertEqual(manual_search.orders, 7)
+        self.assertEqual(manual_search.order_sum, Decimal("7000.00"))
+        self.assertEqual(manual_catalog.impressions, 300)
+        self.assertEqual(manual_catalog.clicks, 30)
+        self.assertEqual(manual_catalog.spend, Decimal("300.00"))
+        self.assertEqual(manual_catalog.carts, 15)
+        self.assertEqual(manual_catalog.orders, 3)
+        self.assertEqual(manual_catalog.order_sum, Decimal("3000.000"))
+
+    def test_product_report_uses_campaign_totals_with_item_catalog_residual(self) -> None:
+        manual_search_campaign = Campaign.objects.create(
+            external_id=28150166,
+            name="Manual search campaign total split",
+            monitoring_group=CampaignMonitoringGroup.MANUAL_SEARCH,
+        )
+        manual_search_campaign.products.add(self.product)
+        DailyCampaignProductStat.objects.create(
+            campaign=manual_search_campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            zone=CampaignZone.SEARCH,
+            impressions=1000,
+            clicks=100,
+            spend=Decimal("1000.00"),
+            add_to_cart_count=80,
+            order_count=20,
+            units_ordered=20,
+            order_sum=Decimal("20000.00"),
+            raw_payload={
+                "items": [
+                    {
+                        "appType": 32,
+                        "app": {
+                            "views": 1000,
+                            "clicks": 100,
+                            "sum": "1000.00",
+                            "atbs": 80,
+                            "orders": 20,
+                            "shks": 20,
+                            "sum_price": "20000.00",
+                        },
+                        "item": {
+                            "nmId": self.product.nm_id,
+                            "views": 1000,
+                            "clicks": 100,
+                            "sum": "1000.00",
+                            "atbs": 50,
+                            "orders": 10,
+                            "shks": 10,
+                            "sum_price": "10000.00",
+                        },
+                    }
+                ]
+            },
+        )
+        DailyCampaignSearchClusterStat.objects.create(
+            campaign=manual_search_campaign,
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            impressions=700,
+            clicks=70,
+            spend=Decimal("700.00"),
+            add_to_cart_count=35,
+            order_count=7,
+            units_ordered=7,
+        )
+
+        report = build_product_report(
+            product=self.product,
+            stats_date=date(2026, 3, 16),
+            stock_date=date(2026, 3, 17),
+        )
+
+        manual_search = report["blocks"]["manual_search"]
+        manual_catalog = report["blocks"]["manual_catalog"]
+        self.assertEqual(manual_search.impressions, 700)
+        self.assertEqual(manual_search.clicks, 70)
+        self.assertEqual(manual_search.spend, Decimal("700.00"))
+        self.assertEqual(manual_search.carts, 65)
+        self.assertEqual(manual_search.orders, 17)
+        self.assertEqual(manual_search.order_sum, Decimal("17000.00"))
+        self.assertEqual(manual_catalog.impressions, 300)
+        self.assertEqual(manual_catalog.clicks, 30)
+        self.assertEqual(manual_catalog.spend, Decimal("300.00"))
+        self.assertEqual(manual_catalog.carts, 15)
+        self.assertEqual(manual_catalog.orders, 3)
+        self.assertEqual(manual_catalog.order_sum, Decimal("3000.00"))
 
     def test_monitoring_day_block_uses_overall_totals_and_single_profit_cell(self) -> None:
         report = build_product_report(
@@ -497,7 +630,7 @@ class ReportingTests(TestCase):
         )
         block = build_day_block(report, start_row=1, start_col=1)
         self.assertNotIn("/100))", block[20][1])
-        self.assertIn("(I36*H20)", block[20][1])
+        self.assertIn("IF(H20>1,H20/100,H20)", block[20][1])
 
     def test_monitoring_day_block_uses_safe_divide_formulas_for_derived_metrics(self) -> None:
         report = build_product_report(
@@ -508,10 +641,10 @@ class ReportingTests(TestCase):
         block = build_day_block(report, start_row=1, start_col=1)
         self.assertTrue(block[11][7].startswith("=IFERROR(IF("))
         self.assertTrue(block[13][7].startswith("=IFERROR(IF("))
-        self.assertTrue(block[16][1].startswith("=IFERROR(IF("))
-        self.assertTrue(block[17][1].startswith("=IFERROR(IF("))
-        self.assertTrue(block[18][1].startswith("=IFERROR(IF("))
-        self.assertTrue(block[19][1].startswith("=IFERROR(IF("))
+        self.assertTrue(block[16][2].startswith("=IFERROR(IF("))
+        self.assertTrue(block[17][2].startswith("=IFERROR(IF("))
+        self.assertTrue(block[18][2].startswith("=IFERROR(IF("))
+        self.assertTrue(block[19][2].startswith("=IFERROR(IF("))
 
     def test_monitoring_day_block_hides_efficiency_metrics_when_spend_is_zero(self) -> None:
         report = build_product_report(
@@ -521,10 +654,10 @@ class ReportingTests(TestCase):
         )
         block = build_day_block(report, start_row=1, start_col=1)
 
-        self.assertIn('B5=0', block[16][1])
-        self.assertIn('B5=0', block[17][1])
-        self.assertIn('B5=0', block[18][1])
-        self.assertIn('B5=0', block[19][1])
+        self.assertIn('C5=0', block[16][2])
+        self.assertIn('C5=0', block[17][2])
+        self.assertIn('C5=0', block[18][2])
+        self.assertIn('C5=0', block[19][2])
         self.assertIn('H5=0', block[16][7])
         self.assertIn('H5=0', block[17][7])
         self.assertIn('H5=0', block[18][7])
@@ -601,9 +734,9 @@ class ReportingTests(TestCase):
         block = build_day_block(report, start_row=1, start_col=1)
         traffic_row = block[3]
 
-        self.assertAlmostEqual(traffic_row[1], 0.2222, places=4)
-        self.assertAlmostEqual(traffic_row[2], 0.1111, places=4)
-        self.assertAlmostEqual(traffic_row[3], 0.6667, places=4)
+        self.assertEqual(traffic_row[1], "")
+        self.assertEqual(traffic_row[2], 1.0)
+        self.assertEqual(traffic_row[3], "")
         self.assertEqual(traffic_row[4], 1.0)
         self.assertEqual(traffic_row[5], "")
         self.assertEqual(traffic_row[6], "")
@@ -680,9 +813,9 @@ class ReportingTests(TestCase):
         rows = exporter_rows(report)
         traffic_row = rows[3]
 
-        self.assertEqual(traffic_row[1], "22,22%")
-        self.assertEqual(traffic_row[2], "11,11%")
-        self.assertEqual(traffic_row[3], "66,67%")
+        self.assertEqual(traffic_row[1], "")
+        self.assertEqual(traffic_row[2], "100%")
+        self.assertEqual(traffic_row[3], "")
         self.assertEqual(traffic_row[4], "100%")
         self.assertEqual(traffic_row[5], "")
         self.assertEqual(traffic_row[6], "")
@@ -739,8 +872,8 @@ class ReportingTests(TestCase):
 
         self.assertEqual(report["table_blocks"]["manual"].clicks, 15)
         self.assertEqual(report["table_blocks"]["manual"].spend, Decimal("300.00"))
-        self.assertEqual(report["table_blocks"]["shelves"].clicks, 12)
-        self.assertEqual(report["table_blocks"]["shelves"].spend, Decimal("260.00"))
+        self.assertEqual(report["table_blocks"]["shelves"].clicks, 112)
+        self.assertEqual(report["table_blocks"]["shelves"].spend, Decimal("2260.00"))
         self.assertEqual(report["table_organic"]["open_count"], 93)
         self.assertEqual(report["table_organic"]["cart_count"], 15)
         self.assertEqual(report["table_organic"]["order_count"], 4)
@@ -890,6 +1023,61 @@ class SyncTests(TestCase):
         self.assertEqual(payload["metrics"]["toClientCount"], 5)
         self.assertEqual(payload["metrics"]["fromClientCount"], 5)
         self.assertEqual(payload["derivedFrom"], "sizes")
+
+    def test_aggregate_campaign_day_stats_uses_app_totals_for_single_linked_product(self) -> None:
+        payload = {
+            "apps": [
+                {
+                    "appType": 32,
+                    "views": 110,
+                    "clicks": 12,
+                    "sum": "60.00",
+                    "atbs": 7,
+                    "orders": 3,
+                    "shks": 4,
+                    "sum_price": "5000.00",
+                    "nms": [
+                        {
+                            "nmId": self.product.nm_id,
+                            "views": 100,
+                            "clicks": 10,
+                            "sum": "55.00",
+                            "atbs": 2,
+                            "orders": 1,
+                            "shks": 1,
+                            "sum_price": "1300.00",
+                        },
+                        {
+                            "nmId": 999999,
+                            "views": 10,
+                            "clicks": 2,
+                            "sum": "5.00",
+                            "atbs": 5,
+                            "orders": 2,
+                            "shks": 3,
+                            "sum_price": "3700.00",
+                        },
+                    ],
+                }
+            ]
+        }
+
+        aggregated = _aggregate_campaign_day_stats(
+            payload,
+            campaign_group=CampaignMonitoringGroup.UNIFIED,
+            product_map={self.product.nm_id: self.product},
+            linked_product_ids={self.product.id},
+        )
+
+        row = aggregated[(self.product.id, CampaignZone.RECOMMENDATION)]
+        self.assertEqual(row["impressions"], 110)
+        self.assertEqual(row["clicks"], 12)
+        self.assertEqual(row["spend"], Decimal("60.00"))
+        self.assertEqual(row["add_to_cart_count"], 7)
+        self.assertEqual(row["order_count"], 3)
+        self.assertEqual(row["units_ordered"], 4)
+        self.assertEqual(row["order_sum"], Decimal("5000.00"))
+        self.assertEqual(row["raw_payload"][0]["item"]["atbs"], 2)
 
     def test_aggregate_offices_from_sizes_merges_same_warehouse_across_sizes(self) -> None:
         offices = aggregate_offices_from_sizes(
@@ -1177,7 +1365,7 @@ class SyncTests(TestCase):
             campaign=campaign,
             product=product,
             stats_date=reference_date,
-            zone=CampaignZone.SEARCH,
+            zone=CampaignZone.RECOMMENDATION,
         )
         self.assertEqual(campaign_stat.impressions, 100)
         self.assertEqual(campaign_stat.clicks, 10)

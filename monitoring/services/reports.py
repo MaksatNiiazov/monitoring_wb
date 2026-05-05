@@ -198,6 +198,10 @@ def has_metric_cell_data(cell: MetricCell) -> bool:
     )
 
 
+def has_metric_cell_conversions(cell: MetricCell) -> bool:
+    return any([cell.carts, cell.orders, cell.units, decimalize(cell.order_sum)])
+
+
 def metric_cell_from_search_clusters(cluster_rows: list[DailyCampaignSearchClusterStat]) -> MetricCell:
     cell = MetricCell()
     for row in cluster_rows:
@@ -208,6 +212,23 @@ def metric_cell_from_search_clusters(cluster_rows: list[DailyCampaignSearchClust
         cell.orders += int(row.order_count or 0)
         cell.units += int(row.units_ordered or 0)
         cell.order_sum += decimalize(row.order_sum)
+    return cell
+
+
+def metric_cell_from_campaign_stat_raw_items(stat: DailyCampaignProductStat) -> MetricCell:
+    cell = MetricCell()
+    raw_payload = stat.raw_payload if isinstance(stat.raw_payload, dict) else {}
+    for entry in raw_payload.get("items") or []:
+        item = entry.get("item") if isinstance(entry, dict) else None
+        if not isinstance(item, dict):
+            continue
+        cell.impressions += int(item.get("views") or 0)
+        cell.clicks += int(item.get("clicks") or 0)
+        cell.spend += decimalize(item.get("sum"))
+        cell.carts += int(item.get("atbs") or 0)
+        cell.orders += int(item.get("orders") or 0)
+        cell.units += int(item.get("shks") or 0)
+        cell.order_sum += decimalize(item.get("sum_price"))
     return cell
 
 
@@ -234,25 +255,6 @@ def derive_order_sum_from_orders(source: MetricCell, target_orders: int) -> Deci
         return ZERO
     average_order_sum = safe_divide(decimalize(source.order_sum), source_orders)
     return quantize_money(average_order_sum * Decimal(target_orders))
-
-
-def apply_search_cluster_override(source: MetricCell, cluster_rows: list[DailyCampaignSearchClusterStat]) -> MetricCell:
-    cell = clone_metric_cell(source)
-    cluster = metric_cell_from_search_clusters(cluster_rows)
-    cell.impressions = cluster.impressions
-    cell.clicks = cluster.clicks
-    cell.spend = cluster.spend
-    # Search-cluster rows are reliable for traffic, but can lag behind on
-    # conversion metrics. Keep the legacy zone values as a floor so we do not
-    # erase carts/orders/order_sum from the product-stat slice.
-    cell.carts = max(cell.carts, cluster.carts)
-    cell.orders = max(cell.orders, cluster.orders)
-    cell.units = max(cell.units, cluster.units)
-    cell.order_sum = max(
-        decimalize(cell.order_sum),
-        derive_order_sum_from_orders(source, cluster.orders),
-    )
-    return cell
 
 
 def apply_search_cluster_proportional(
@@ -287,6 +289,88 @@ def apply_search_cluster_proportional(
         cell.order_sum = decimalize(source.order_sum)
     
     return cell
+
+
+def apply_search_cluster_actual_or_proportional(
+    cluster_rows: list[DailyCampaignSearchClusterStat],
+    total: MetricCell,
+) -> MetricCell:
+    cell = metric_cell_from_search_clusters(cluster_rows)
+    has_conversion_data = any([cell.carts, cell.orders, cell.units, decimalize(cell.order_sum)])
+    if has_conversion_data:
+        if decimalize(cell.order_sum) <= ZERO and cell.orders > 0:
+            cell.order_sum = derive_order_sum_from_orders(total, cell.orders)
+        return clamp_metric_cell_to_total(cell, total)
+
+    total_clicks = max(total.clicks, 1)
+    if cell.clicks > 0:
+        ratio = Decimal(cell.clicks) / Decimal(total_clicks)
+        cell.carts = int(Decimal(total.carts) * ratio)
+        cell.orders = int(Decimal(total.orders) * ratio)
+        cell.units = int(Decimal(total.units) * ratio)
+        cell.order_sum = quantize_money(decimalize(total.order_sum) * ratio)
+    return clamp_metric_cell_to_total(cell, total)
+
+
+def split_search_catalog_by_cluster_and_item_residual(
+    *,
+    cluster_rows: list[DailyCampaignSearchClusterStat],
+    total: MetricCell,
+    item_total: MetricCell,
+) -> tuple[MetricCell, MetricCell]:
+    cluster = metric_cell_from_search_clusters(cluster_rows)
+    if not has_metric_cell_traffic(cluster):
+        return clone_metric_cell(total), MetricCell()
+
+    search = clamp_metric_cell_to_total(cluster, total)
+    catalog = subtract_metric_cells(total, search)
+
+    cluster_for_residual = clone_metric_cell(search)
+    if decimalize(cluster_for_residual.order_sum) <= ZERO and cluster_for_residual.orders > 0:
+        source = item_total if has_metric_cell_conversions(item_total) else total
+        cluster_for_residual.order_sum = derive_order_sum_from_orders(source, cluster_for_residual.orders)
+
+    has_item_total = has_metric_cell_data(item_total)
+    total_exceeds_item = (
+        has_item_total
+        and (
+            total.carts > item_total.carts
+            or total.orders > item_total.orders
+            or total.units > item_total.units
+            or decimalize(total.order_sum) > decimalize(item_total.order_sum)
+        )
+    )
+
+    if total_exceeds_item:
+        # WB fullstats may put campaign-level conversions above the tracked nm row.
+        # Keep the item residual for catalog and assign the campaign delta to search;
+        # this matches the reference sheet much closer for carts/orders.
+        item_catalog = subtract_metric_cells(item_total, cluster_for_residual)
+        catalog.carts = max(0, min(item_catalog.carts, total.carts))
+        catalog.orders = max(0, min(item_catalog.orders, total.orders))
+        catalog.units = max(0, min(item_catalog.units, total.units))
+        catalog.order_sum = max(ZERO, min(decimalize(item_catalog.order_sum), decimalize(total.order_sum)))
+
+        search.carts = max(total.carts - catalog.carts, 0)
+        search.orders = max(total.orders - catalog.orders, 0)
+        search.units = max(total.units - catalog.units, 0)
+        search.order_sum = max(decimalize(total.order_sum) - decimalize(catalog.order_sum), ZERO)
+        return clamp_metric_cell_to_total(search, total), clamp_metric_cell_to_total(catalog, total)
+
+    if has_metric_cell_conversions(cluster_for_residual):
+        search.carts = cluster_for_residual.carts
+        search.orders = cluster_for_residual.orders
+        search.units = cluster_for_residual.units
+        search.order_sum = decimalize(cluster_for_residual.order_sum)
+        catalog.carts = max(total.carts - search.carts, 0)
+        catalog.orders = max(total.orders - search.orders, 0)
+        catalog.units = max(total.units - search.units, 0)
+        catalog.order_sum = max(decimalize(total.order_sum) - decimalize(search.order_sum), ZERO)
+        return clamp_metric_cell_to_total(search, total), clamp_metric_cell_to_total(catalog, total)
+
+    search = apply_search_cluster_actual_or_proportional(cluster_rows, total)
+    catalog = subtract_metric_cells(total, search)
+    return search, catalog
 
 
 def subtract_metric_cells(total: MetricCell, part: MetricCell) -> MetricCell:
@@ -819,9 +903,31 @@ def build_product_report(
         )
         legacy_cells.setdefault(key, MetricCell()).add(stat)
 
+    search_cluster_stats = (
+        list(preloaded_search_cluster_stats.get(stats_date) or [])
+        if preloaded_search_cluster_stats is not None
+        else list(
+            DailyCampaignSearchClusterStat.objects.filter(
+                product=product,
+                stats_date=stats_date,
+                campaign__products=product,
+            ).select_related("campaign")
+        )
+    )
+    search_clusters_by_group: dict[str, list[DailyCampaignSearchClusterStat]] = defaultdict(list)
+    for row in search_cluster_stats:
+        search_clusters_by_group[row.campaign.monitoring_group].append(row)
+
     group_totals: dict[str, MetricCell] = defaultdict(MetricCell)
     for stat in campaign_stats:
         group_totals[stat.campaign.monitoring_group].add(stat)
+
+    group_item_totals: dict[str, MetricCell] = defaultdict(MetricCell)
+    for stat in campaign_stats:
+        group_item_totals[stat.campaign.monitoring_group] = add_metric_cells(
+            group_item_totals[stat.campaign.monitoring_group],
+            metric_cell_from_campaign_stat_raw_items(stat),
+        )
 
     def resolve_unified_group_cells() -> tuple[MetricCell, MetricCell, MetricCell]:
         group = CampaignMonitoringGroup.UNIFIED
@@ -829,8 +935,23 @@ def build_product_report(
         return MetricCell(), clone_metric_cell(total), MetricCell()
 
     def resolve_search_catalog_group_cells(group: str) -> tuple[MetricCell, MetricCell]:
+        cluster_rows = search_clusters_by_group.get(group, [])
         total = group_totals.get(group, MetricCell())
-        return clone_metric_cell(total), MetricCell()
+        legacy_search = legacy_cells.get((group, CampaignZone.SEARCH), MetricCell())
+        legacy_recommendation = legacy_cells.get((group, CampaignZone.RECOMMENDATION), MetricCell())
+        if not cluster_rows:
+            search = add_metric_cells(legacy_search, legacy_recommendation)
+            search = clamp_metric_cell_to_total(search, total)
+            return search, subtract_metric_cells(total, search)
+
+        search, catalog = split_search_catalog_by_cluster_and_item_residual(
+            cluster_rows=cluster_rows,
+            total=total,
+            item_total=group_item_totals.get(group, MetricCell()),
+        )
+        search = add_metric_cells(search, legacy_recommendation)
+        search = clamp_metric_cell_to_total(search, total)
+        return search, subtract_metric_cells(total, search) if legacy_recommendation else catalog
 
     unified_search, unified_shelves, unified_catalog = resolve_unified_group_cells()
     manual_search_search, manual_search_catalog = resolve_search_catalog_group_cells(

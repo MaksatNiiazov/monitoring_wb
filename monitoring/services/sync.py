@@ -4,12 +4,12 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time as datetime_time, timedelta
 from decimal import Decimal
 from typing import Any, Callable
 import logging
 import threading
-import time
+import time as time_module
 import zlib
 
 from django.db import close_old_connections
@@ -78,6 +78,14 @@ RATE_LIMIT_SECTION_HINTS = {
 def _sync_console(message: str) -> None:
     timestamp = timezone.localtime().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[SYNC {timestamp}] {message}", flush=True)
+
+
+def _payload_value(payload: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            return value
+    return None
 
 
 @dataclass
@@ -731,33 +739,96 @@ def _aggregate_campaign_day_stats(
                 return None
         return None
 
+    def _empty_row() -> dict[str, Any]:
+        return {
+            "impressions": 0,
+            "clicks": 0,
+            "spend": Decimal("0"),
+            "add_to_cart_count": 0,
+            "order_count": 0,
+            "units_ordered": 0,
+            "order_sum": Decimal("0"),
+            "raw_payload": [],
+        }
+
+    def _add_payload_totals(row: dict[str, Any], payload: dict[str, Any]) -> None:
+        row["impressions"] += int(payload.get("views") or 0)
+        row["clicks"] += int(payload.get("clicks") or 0)
+        row["spend"] += decimalize(payload.get("sum"))
+        row["add_to_cart_count"] += int(payload.get("atbs") or 0)
+        row["order_count"] += int(payload.get("orders") or 0)
+        row["units_ordered"] += int(payload.get("shks") or 0)
+        row["order_sum"] += decimalize(payload.get("sum_price"))
+
     def _add_product_item(product: Product, zone: str, app_type: Any, item: dict[str, Any]) -> None:
         key = (product.id, zone)
-        row = product_aggregated.setdefault(
-            key,
-            {
-                "impressions": 0,
-                "clicks": 0,
-                "spend": Decimal("0"),
-                "add_to_cart_count": 0,
-                "order_count": 0,
-                "units_ordered": 0,
-                "order_sum": Decimal("0"),
-                "raw_payload": [],
-            },
-        )
-        row["impressions"] += int(item.get("views") or 0)
-        row["clicks"] += int(item.get("clicks") or 0)
-        row["spend"] += decimalize(item.get("sum"))
-        row["add_to_cart_count"] += int(item.get("atbs") or 0)
-        row["order_count"] += int(item.get("orders") or 0)
-        row["units_ordered"] += int(item.get("shks") or 0)
-        row["order_sum"] += decimalize(item.get("sum_price"))
+        row = product_aggregated.setdefault(key, _empty_row())
+        _add_payload_totals(row, item)
         row["raw_payload"].append({"appType": app_type, "item": item})
+
+    def _app_nm_items(app_payload: dict[str, Any]) -> list[dict[str, Any]]:
+        rows = app_payload.get("nms")
+        if rows is None:
+            rows = app_payload.get("nm")
+        return list(rows or [])
+
+    def _app_top_payload(app_payload: dict[str, Any]) -> dict[str, Any]:
+        metric_keys = ("views", "clicks", "sum", "atbs", "orders", "shks", "sum_price")
+        if any(key in app_payload for key in metric_keys):
+            return {key: app_payload.get(key) for key in metric_keys}
+
+        totals: dict[str, Any] = {
+            "views": 0,
+            "clicks": 0,
+            "sum": Decimal("0"),
+            "atbs": 0,
+            "orders": 0,
+            "shks": 0,
+            "sum_price": Decimal("0"),
+        }
+        for item in _app_nm_items(app_payload):
+            totals["views"] += int(item.get("views") or 0)
+            totals["clicks"] += int(item.get("clicks") or 0)
+            totals["sum"] += decimalize(item.get("sum"))
+            totals["atbs"] += int(item.get("atbs") or 0)
+            totals["orders"] += int(item.get("orders") or 0)
+            totals["shks"] += int(item.get("shks") or 0)
+            totals["sum_price"] += decimalize(item.get("sum_price"))
+        return {
+            **totals,
+            "sum": str(totals["sum"]),
+            "sum_price": str(totals["sum_price"]),
+        }
+
+    linked_products = [
+        product
+        for product in product_map.values()
+        if not linked_product_ids or product.id in linked_product_ids
+    ]
+    if len(linked_products) == 1:
+        product = linked_products[0]
+        key = (product.id, zone)
+        row = product_aggregated.setdefault(key, _empty_row())
+        for app_payload in day_payload.get("apps", []):
+            app_type = app_payload.get("appType")
+            top_payload = _app_top_payload(app_payload)
+            _add_payload_totals(row, top_payload)
+
+            matched_items = [
+                item
+                for item in _app_nm_items(app_payload)
+                if _item_nm_id(item) == product.nm_id
+            ]
+            if matched_items:
+                for item in matched_items:
+                    row["raw_payload"].append({"appType": app_type, "app": top_payload, "item": item})
+            else:
+                row["raw_payload"].append({"appType": app_type, "app": top_payload})
+        return product_aggregated
 
     for app_payload in day_payload.get("apps", []):
         app_type = app_payload.get("appType")
-        for item in app_payload.get("nms", []) or []:
+        for item in _app_nm_items(app_payload):
             nm_id = _item_nm_id(item)
             if nm_id is None:
                 continue
@@ -789,7 +860,7 @@ def _aggregate_campaign_day_stats(
                 "raw_payload": [],
             }
         
-        for item in app_payload.get("nms", []):
+        for item in _app_nm_items(app_payload):
             zone_totals[zone]["impressions"] += int(item.get("views") or 0)
             zone_totals[zone]["clicks"] += int(item.get("clicks") or 0)
             zone_totals[zone]["spend"] += decimalize(item.get("sum"))
@@ -1540,19 +1611,18 @@ def _run_sync_single_day(
                     if not nm_chunk:
                         continue
                     _sync_console(f"Запрос воронки: чанк {chunk_index}/{total_funnel_chunks} ({len(nm_chunk)} товаров)")
-                    import time
-                    start_time = time.monotonic()
+                    start_time = time_module.monotonic()
                     try:
                         chunk_rows = analytics_client.get_sales_funnel_history(
                             nm_ids=list(nm_chunk),
                             start_date=period_start,
                             end_date=period_end,
                         )
-                        elapsed = time.monotonic() - start_time
+                        elapsed = time_module.monotonic() - start_time
                         _sync_console(f"Воронка чанк {chunk_index}/{total_funnel_chunks} получено {len(chunk_rows)} строк за {elapsed:.1f}с")
                         funnel_rows.extend(chunk_rows)
                     except WBApiError as exc:
-                        elapsed = time.monotonic() - start_time
+                        elapsed = time_module.monotonic() - start_time
                         err_str = str(exc).lower()
                         # При 429/461 (rate limit / global limiter) продолжаем без данных воронки, чтобы не зависать
                         is_rate_limit = is_wb_rate_limit_error(err_str)
@@ -1591,7 +1661,7 @@ def _run_sync_single_day(
                     )
 
             # БЕЗОПАСНЫЙ РЕЖИМ: пауза между этапами для "отдыха" API
-            time.sleep(1.0)
+            time_module.sleep(1.0)
             _update_sync_progress(
                 log,
                 percent=28,
@@ -1698,7 +1768,7 @@ def _run_sync_single_day(
                     )
 
             # БЕЗОПАСНЫЙ РЕЖИМ: пауза перед рекламой (чувствительный API)
-            time.sleep(10.0)
+            time_module.sleep(10.0)
             _update_sync_progress(
                 log,
                 percent=45,
@@ -1885,18 +1955,20 @@ def _run_sync_single_day(
                                     },
                                 )
                                 product_bucket = boosted_keyword_aggregates[target_stats_date][product.id]
-                                views = int(stat.get("views") or 0)
-                                clicks = int(stat.get("clicks") or 0)
+                                views = int(_payload_value(stat, "views") or 0)
+                                clicks = int(_payload_value(stat, "clicks") or 0)
                                 pair_totals["impressions"] += views
                                 pair_totals["clicks"] += clicks
-                                pair_totals["spend"] += decimalize(stat.get("spend"))
-                                pair_totals["add_to_cart_count"] += int(stat.get("atbs") or 0)
-                                pair_totals["order_count"] += int(stat.get("orders") or 0)
-                                pair_totals["units_ordered"] += int(stat.get("shks") or 0)
-                                pair_totals["order_sum"] += decimalize(stat.get("sum_price"))
+                                pair_totals["spend"] += decimalize(_payload_value(stat, "spend", "sum"))
+                                pair_totals["add_to_cart_count"] += int(_payload_value(stat, "atbs") or 0)
+                                pair_totals["order_count"] += int(_payload_value(stat, "orders") or 0)
+                                pair_totals["units_ordered"] += int(_payload_value(stat, "shks") or 0)
+                                pair_totals["order_sum"] += decimalize(_payload_value(stat, "sum_price", "sumPrice"))
                                 pair_totals["raw_payload"].append(daily_stat)
 
-                                normalized_query = normalize_search_text(stat.get("normQuery") or "")
+                                normalized_query = normalize_search_text(
+                                    _payload_value(stat, "normQuery", "norm_query") or ""
+                                )
                                 if not normalized_query:
                                     continue
                                 entry = product_bucket.setdefault(
@@ -1910,7 +1982,9 @@ def _run_sync_single_day(
                                     },
                                 )
                                 weight = Decimal(views or 1)
-                                entry["weighted_position_sum"] += decimalize(stat.get("avgPos")) * weight
+                                entry["weighted_position_sum"] += decimalize(
+                                    _payload_value(stat, "avgPos", "avg_pos")
+                                ) * weight
                                 entry["weight"] += weight
                                 entry["views"] += views
                                 entry["clicks"] += clicks
@@ -1962,6 +2036,7 @@ def _run_sync_single_day(
                                     "add_to_cart_count": row.add_to_cart_count,
                                     "order_count": row.order_count,
                                     "units_ordered": row.units_ordered,
+                                    "order_sum": row.order_sum,
                                     "raw_payload": row.raw_payload,
                                 },
                             )
@@ -2151,7 +2226,7 @@ def _run_sync_single_day(
 
 
 def next_run_at(now: datetime, hour: int, minute: int) -> datetime:
-    candidate = datetime.combine(now.date(), time(hour=hour, minute=minute), tzinfo=now.tzinfo)
+    candidate = datetime.combine(now.date(), datetime_time(hour=hour, minute=minute), tzinfo=now.tzinfo)
     if candidate <= now:
         candidate += timedelta(days=1)
     return candidate
