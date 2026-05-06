@@ -64,6 +64,8 @@ class Product(TimeStampedModel):
         verbose_name_plural = "Товары"
 
     def __str__(self) -> str:
+        if self.vendor_code:
+            return f"{self.vendor_code} ({self.title or f'WB {self.nm_id}'})"
         return self.title or f"WB {self.nm_id}"
 
     def latest_economics(self):
