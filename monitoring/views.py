@@ -904,7 +904,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                 "colspan": 2,
             },
             (row_after_keywords(45), 7): {"type": "input", "field": "price_change_amount", "placeholder": "0,00", "colspan": 2, "centered": True},
-            (row_after_keywords(47), 0): {"type": "textarea", "field": "comment", "placeholder": "Комментарий", "rowspan": 4},
+            (row_after_keywords(47), 1): {"type": "textarea", "field": "comment", "placeholder": "Комментарий", "rowspan": 4},
         }
         if keyword_header_row:
             editable_controls[(keyword_header_row, 0)] = {
