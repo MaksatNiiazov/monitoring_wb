@@ -55,8 +55,10 @@ class MonitoringSheetPayload:
     block_dates: list[date] | None = None
 
 
+GRID_SIDE = Side(style="thin", color="D9E1EA")
 THIN_SIDE = Side(style="thin", color="000000")
 THIN_BORDER = Border(left=THIN_SIDE, right=THIN_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
+MEDIUM_SIDE = Side(style="medium", color="000000")
 BLOCK_EDGE_SIDE = Side(style="thick", color="000000")
 BLOCK_LEFT_BORDER = Border(left=BLOCK_EDGE_SIDE, right=THIN_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
 BLOCK_RIGHT_BORDER = Border(left=THIN_SIDE, right=BLOCK_EDGE_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
@@ -67,8 +69,10 @@ SECTION_FILL = PatternFill("solid", fgColor="EEF3F7")
 FORMULA_FILL = PatternFill("solid", fgColor="F1EAFE")
 META_FILL = PatternFill("solid", fgColor="F7F9FC")
 BLOCK_SEPARATOR_FILL = PatternFill("solid", fgColor="DDE5F2")
-HEADER_FONT = Font(color="FFFFFF", bold=True)
-SECTION_FONT = Font(color="15324D", bold=True)
+SHEET_FONT = Font(name="Arial")
+SHEET_BOLD_FONT = Font(name="Arial", bold=True)
+HEADER_FONT = Font(name="Arial", size=12, color="FFFFFF", bold=True)
+SECTION_FONT = Font(name="Arial", size=12, color="15324D", bold=True)
 
 
 def normalize_title(value: str) -> str:
@@ -509,6 +513,9 @@ def build_day_block(
         ["", "", "", "", "", "", "", "", ""],
     ]
     rows.append(["Ключи", "Частота", "Позиция ОРГАНИЧЕСКАЯ", "", "Позиция БУСТОВАЯ", "", "", "CTR (%)", ""])
+    for stock_row_idx in range(24, 32):
+        rows[stock_row_idx][1] = rows[stock_row_idx][0]
+        rows[stock_row_idx][0] = ""
     for keyword_row in report.get("keyword_rows") or []:
         has_data = bool(keyword_row.get("has_data"))
         rows.append(
@@ -542,6 +549,46 @@ def build_day_block(
             ["", "", "", "", "", "", "", "", ""],
         ]
     )
+    overview_idx = 36 + len(report.get("keyword_rows") or [])
+    if len(rows) > 35:
+        rows[35][6] = rows[35][7]
+        rows[35][7] = ""
+    for keyword_row_idx in range(36, min(overview_idx, len(rows))):
+        rows[keyword_row_idx][6] = rows[keyword_row_idx][7]
+        rows[keyword_row_idx][7] = ""
+    if len(rows) >= overview_idx + 14:
+        overview_row_values = rows[overview_idx]
+        rows[overview_idx] = ["", overview_row_values[0], "", "", "", "", "", "", ""]
+
+        spp_row_values = rows[overview_idx + 1]
+        rows[overview_idx + 1] = [
+            "",
+            spp_row_values[0],
+            "",
+            spp_row_values[3],
+            "",
+            spp_row_values[5],
+            "",
+            "",
+            spp_row_values[7],
+        ]
+
+        for row_offset in range(2, 6):
+            row_values = rows[overview_idx + row_offset]
+            rows[overview_idx + row_offset] = ["", row_values[0], "", "", "", row_values[5], "", "", ""]
+
+        actions_row_values = rows[overview_idx + 6]
+        rows[overview_idx + 6] = ["", actions_row_values[0], "", "", "", "", "", "", ""]
+
+        for row_offset in range(7, 9):
+            row_values = rows[overview_idx + row_offset]
+            rows[overview_idx + row_offset] = ["", row_values[0], "", "", row_values[4], "", "", row_values[7], ""]
+
+        comments_row_values = rows[overview_idx + 9]
+        rows[overview_idx + 9] = ["", comments_row_values[0], "", "", "", "", "", "", ""]
+        comment_text_values = rows[overview_idx + 10]
+        rows[overview_idx + 10] = ["", comment_text_values[0], "", "", "", "", "", "", ""]
+
     return rows
 
 
@@ -906,6 +953,80 @@ def _apply_dashboard_style(sheet) -> None:
                 cell.font = SECTION_FONT if cell.row == 6 else Font(bold=True)
 
 
+def _border(
+    *,
+    left: Side | None = None,
+    right: Side | None = None,
+    top: Side | None = None,
+    bottom: Side | None = None,
+) -> Border:
+    return Border(left=left, right=right, top=top, bottom=bottom)
+
+
+def _product_cell_border(
+    *,
+    row_idx: int,
+    col_offset: int,
+    keyword_header_row: int,
+    overview_row: int,
+    actions_row: int,
+    comments_row: int,
+) -> Border:
+    left = GRID_SIDE
+    right = GRID_SIDE
+    top = GRID_SIDE
+    bottom = GRID_SIDE
+
+    if col_offset == 0:
+        left = BLOCK_EDGE_SIDE
+    if col_offset == 1:
+        left = BLOCK_EDGE_SIDE
+    if col_offset == BLOCK_WIDTH - 1:
+        right = BLOCK_EDGE_SIDE
+    if col_offset == 3:
+        right = THIN_SIDE
+    if col_offset == 6:
+        left = THIN_SIDE
+    if col_offset == 7:
+        left = MEDIUM_SIDE
+        right = MEDIUM_SIDE
+
+    if row_idx in {1, 2}:
+        left = BLOCK_EDGE_SIDE
+        right = BLOCK_EDGE_SIDE
+        top = BLOCK_EDGE_SIDE
+        bottom = BLOCK_EDGE_SIDE
+    elif row_idx == 13 and col_offset > 0:
+        top = BLOCK_EDGE_SIDE
+        bottom = BLOCK_EDGE_SIDE
+    elif 21 <= row_idx <= 24:
+        left = BLOCK_EDGE_SIDE if col_offset in {0, 1} else None
+        right = BLOCK_EDGE_SIDE if col_offset == BLOCK_WIDTH - 1 else None
+        if col_offset == 0:
+            top = MEDIUM_SIDE if row_idx == 21 else GRID_SIDE
+            bottom = BLOCK_EDGE_SIDE if row_idx == 24 else GRID_SIDE
+        elif row_idx == 21:
+            top = MEDIUM_SIDE
+        elif row_idx == 22:
+            top = THIN_SIDE
+            bottom = THIN_SIDE
+        elif row_idx == 24:
+            top = THIN_SIDE
+            bottom = BLOCK_EDGE_SIDE
+    elif row_idx in {25, keyword_header_row, overview_row}:
+        top = BLOCK_EDGE_SIDE
+        if row_idx == 25 and col_offset == 1:
+            right = BLOCK_EDGE_SIDE
+    elif row_idx in {actions_row, comments_row}:
+        top = BLOCK_EDGE_SIDE
+        bottom = BLOCK_EDGE_SIDE if row_idx == comments_row else None
+
+    if row_idx in range(26, 32) and col_offset == 4:
+        left = MEDIUM_SIDE
+
+    return _border(left=left, right=right, top=top, bottom=bottom)
+
+
 def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> None:
     sheet.freeze_panes = "B1"
     keyword_offset = max(0, block_height - BASE_BLOCK_HEIGHT)
@@ -955,38 +1076,94 @@ def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> N
         for row_idx in range(1, block_height + 1):
             for col_offset in range(BLOCK_WIDTH):
                 cell = sheet.cell(row=row_idx, column=start_col + col_offset)
-                if col_offset == 0:
-                    cell.border = BLOCK_LEFT_BORDER
-                elif col_offset == BLOCK_WIDTH - 1:
-                    cell.border = BLOCK_RIGHT_BORDER
-                else:
-                    cell.border = THIN_BORDER
+                cell.border = _product_cell_border(
+                    row_idx=row_idx,
+                    col_offset=col_offset,
+                    keyword_header_row=keyword_header_row,
+                    overview_row=overview_row,
+                    actions_row=actions_row,
+                    comments_row=comments_row,
+                )
                 cell.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
 
-                if row_idx in dark_rows:
+                if (
+                    col_offset == 0
+                    and (row_idx == 25 or row_idx in {overview_row, actions_row, comments_row})
+                ):
+                    cell.fill = PatternFill(fill_type=None)
+                    cell.font = SHEET_FONT
+                elif row_idx in dark_rows:
                     cell.fill = HEADER_FILL
                     cell.font = HEADER_FONT
                 elif row_idx == 3 or row_idx in muted_rows or row_idx == 26:
                     cell.fill = SUBHEADER_FILL
-                    cell.font = Font(bold=col_offset == 0 or row_idx in {3, 21, 23, 26})
+                    cell.font = Font(
+                        name="Arial",
+                        size=12 if row_idx == 3 and col_offset == 0 else None,
+                        bold=col_offset == 0 or row_idx in {3, 21, 23, 26},
+                    )
                 elif row_idx in screenshot_rows:
                     cell.fill = PatternFill(fill_type=None)
-                    cell.font = Font(name="Arial")
+                    cell.font = SHEET_FONT
                 else:
                     cell.fill = PatternFill(fill_type=None)
-                    cell.font = Font(name="Arial", bold=col_offset == 0)
+                    cell.font = SHEET_BOLD_FONT if col_offset == 0 else SHEET_FONT
 
                 if row_idx in percent_rows:
-                    cell.number_format = "0.##%"
+                    cell.number_format = "0%"
+                    if row_idx in {12, 14}:
+                        cell.number_format = "0.00%"
+                    elif row_idx in {19, 20, overview_row + 1}:
+                        cell.number_format = "0.0%"
                 elif row_idx in money_rows:
-                    cell.number_format = "#,##0.##"
+                    cell.number_format = "#,##0.00"
                 elif row_idx in integer_rows:
                     cell.number_format = "#,##0"
                 elif row_idx in decimal_rows:
-                    cell.number_format = "#,##0.##"
+                    cell.number_format = "#,##0.0"
+
+                if row_idx == 4:
+                    cell.number_format = "0%"
+                elif row_idx in {5, 6, 8, 10, 11, 13, 15, 16, 21, 23, 24, 26, 27, 28}:
+                    cell.number_format = "#,##0"
+                elif row_idx == 7:
+                    cell.number_format = "#,##0.00"
+                elif row_idx == 9 or row_idx in {17, 18}:
+                    cell.number_format = "#,##0.0"
+                elif row_idx in {12, 14}:
+                    cell.number_format = "0%" if col_offset == 7 else "#,##0"
+                elif row_idx in {19, 20}:
+                    if col_offset in {1, 2, 3, 7}:
+                        cell.number_format = "0.0%"
+                    elif col_offset in {4, 5, 6}:
+                        cell.number_format = "#,##0.0"
+                    else:
+                        cell.number_format = "#,##0.00"
+                elif row_idx in {29, 30, 31}:
+                    cell.number_format = "#,##0.00"
+                elif row_idx == overview_row + 1:
+                    cell.number_format = "0.00%" if col_offset in {0, 3, 8} else "General"
+                if col_offset == 0 and row_idx in {21, 23, 24}:
+                    cell.number_format = "#,##0.00"
+                elif col_offset == 0 and row_idx == 22:
+                    cell.number_format = "General"
+                if keyword_header_row < row_idx < overview_row:
+                    cell.number_format = "0.0%" if col_offset == 6 else "General"
+                elif row_idx in {overview_row + 2, overview_row + 3}:
+                    cell.number_format = "#,##0" if col_offset == 5 else "General"
+                elif row_idx in {actions_row + 1, actions_row + 2}:
+                    cell.number_format = "#,##0" if col_offset == 7 else "General"
 
                 if row_idx == 21:
-                    cell.font = Font(name="Arial", size=14, bold=True, color="34A853")
+                    cell.font = (
+                        Font(name="Arial", size=14, bold=True, color="34A853")
+                        if col_offset > 0
+                        else SHEET_BOLD_FONT
+                    )
+                elif row_idx == 22 and col_offset > 0:
+                    cell.font = Font(name="Arial", size=12, bold=True)
+                elif row_idx in {23, 24} and col_offset > 0:
+                    cell.font = SHEET_FONT
                 elif row_idx in {5}:
                     cell.font = Font(name="Arial", bold=col_offset == 0, color="34A853")
                 elif row_idx in {11, 12}:
@@ -994,8 +1171,12 @@ def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> N
                 elif row_idx in {13, 14}:
                     cell.font = Font(name="Arial", bold=col_offset == 0 or row_idx == 14, color="FF9900")
 
-                if col_offset == 0 or row_idx in dark_rows:
+                if col_offset == 0:
                     cell.alignment = Alignment(vertical="center", horizontal="left", wrap_text=True)
+                elif row_idx in dark_rows or row_idx in {3, 22, 23, 24, 26, 27, 28, 29, 30, 31}:
+                    cell.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
+                elif 4 <= row_idx <= 21:
+                    cell.alignment = Alignment(vertical="center", horizontal="right", wrap_text=True)
 
         def merge(row_idx: int, first_offset: int, last_offset: int, end_row: int | None = None) -> None:
             sheet.merge_cells(
@@ -1010,30 +1191,29 @@ def _apply_product_sheet_style(sheet, history_days: int, block_height: int) -> N
         merge(2, 4, 5)
         for row_idx in range(21, 25):
             merge(row_idx, 1, 8)
-        merge(25, 0, 8)
+        merge(25, 1, 8)
         for row_idx in range(26, 32):
-            merge(row_idx, 0, 3)
+            merge(row_idx, 1, 3)
             merge(row_idx, 4, 8)
-        merge(32, 0, 8, 35)
+        merge(32, 1, 8, 35)
         for row_idx in range(keyword_header_row, overview_row):
             merge(row_idx, 2, 3)
             merge(row_idx, 4, 5)
-            merge(row_idx, 7, 8)
-        merge(overview_row, 0, 8)
-        merge(overview_row + 1, 0, 2)
+            merge(row_idx, 6, 8)
+        merge(overview_row, 1, 8)
+        merge(overview_row + 1, 1, 2)
         merge(overview_row + 1, 3, 4)
-        merge(overview_row + 1, 5, 6)
-        merge(overview_row + 1, 7, 8)
+        merge(overview_row + 1, 5, 7)
         for row_idx in range(overview_row + 2, overview_row + 6):
-            merge(row_idx, 0, 4)
+            merge(row_idx, 1, 4)
             merge(row_idx, 5, 8)
-        merge(actions_row, 0, 8)
+        merge(actions_row, 1, 8)
         for row_idx in range(actions_row + 1, actions_row + 3):
-            merge(row_idx, 0, 3)
-            merge(row_idx, 4, 5)
+            merge(row_idx, 1, 3)
+            merge(row_idx, 4, 6)
             merge(row_idx, 7, 8)
-        merge(comments_row, 0, 8)
-        merge(comments_row + 1, 0, 8, comments_row + 4)
+        merge(comments_row, 1, 8)
+        merge(comments_row + 1, 1, 8, comments_row + 4)
 
         validation_specs = [
             (overview_row + 1, 5, '"Без изменений,Вырос на,Упал на"'),

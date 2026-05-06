@@ -475,4 +475,48 @@ def exporter_rows(report: dict, previous_report: dict | None = None) -> list[lis
             ["", "", "", "", "", "", "", "", ""],
         ]
     )
+    for stock_row_idx in range(24, 32):
+        rows[stock_row_idx][1] = rows[stock_row_idx][0]
+        rows[stock_row_idx][0] = ""
+
+    overview_idx = 36 + len(report.get("keyword_rows") or [])
+    if len(rows) > 35:
+        rows[35][6] = rows[35][7]
+        rows[35][7] = ""
+    for keyword_row_idx in range(36, min(overview_idx, len(rows))):
+        rows[keyword_row_idx][6] = rows[keyword_row_idx][7]
+        rows[keyword_row_idx][7] = ""
+    if len(rows) >= overview_idx + 14:
+        overview_row_values = rows[overview_idx]
+        rows[overview_idx] = ["", overview_row_values[0], "", "", "", "", "", "", ""]
+
+        spp_row_values = rows[overview_idx + 1]
+        rows[overview_idx + 1] = [
+            "",
+            spp_row_values[0],
+            "",
+            spp_row_values[3],
+            "",
+            spp_row_values[5],
+            "",
+            "",
+            spp_row_values[7],
+        ]
+
+        for row_offset in range(2, 6):
+            row_values = rows[overview_idx + row_offset]
+            rows[overview_idx + row_offset] = ["", row_values[0], "", "", "", row_values[5], "", "", ""]
+
+        actions_row_values = rows[overview_idx + 6]
+        rows[overview_idx + 6] = ["", actions_row_values[0], "", "", "", "", "", "", ""]
+
+        for row_offset in range(7, 9):
+            row_values = rows[overview_idx + row_offset]
+            rows[overview_idx + row_offset] = ["", row_values[0], "", "", row_values[4], "", "", row_values[7], ""]
+
+        comments_row_values = rows[overview_idx + 9]
+        rows[overview_idx + 9] = ["", comments_row_values[0], "", "", "", "", "", "", ""]
+        comment_text_values = rows[overview_idx + 10]
+        rows[overview_idx + 10] = ["", comment_text_values[0], "", "", "", "", "", "", ""]
+
     return rows

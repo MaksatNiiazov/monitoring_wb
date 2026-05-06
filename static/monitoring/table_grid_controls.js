@@ -65,26 +65,32 @@
         return Number.isFinite(value) ? value : null;
     }
 
-    function formatDecimalValue(value) {
+    function formatDecimalValue(value, { decimals = 2, trim = true } = {}) {
         if (!Number.isFinite(value)) {
             return "";
         }
-        let text = value.toFixed(2);
-        text = text.replace(/\.?0+$/, "");
+        let text = value.toFixed(decimals);
+        if (trim) {
+            text = text.replace(/\.?0+$/, "");
+        }
         return text.replace(".", ",");
     }
 
-    function formatPercentValue(value) {
+    function formatPercentValue(value, { decimals = 2, trim = true } = {}) {
         if (!Number.isFinite(value)) {
             return "";
         }
         if (value !== 0 && Math.abs(value) < 0.01) {
             return value > 0 ? "<0,01%" : ">-0,01%";
         }
-        return `${formatDecimalValue(value)}%`;
+        return `${formatDecimalValue(value, { decimals, trim })}%`;
     }
 
-    function formatRatioCell(numerator, denominator, { percent = false, blankWhenZeroNumerator = false } = {}) {
+    function formatRatioCell(
+        numerator,
+        denominator,
+        { percent = false, blankWhenZeroNumerator = false, decimals = 2, trim = true } = {},
+    ) {
         if (!Number.isFinite(denominator) || denominator === 0) {
             return "-";
         }
@@ -95,7 +101,9 @@
             return "-";
         }
         const value = numerator / denominator;
-        return percent ? formatPercentValue(value * 100) : formatDecimalValue(value);
+        return percent
+            ? formatPercentValue(value * 100, { decimals, trim })
+            : formatDecimalValue(value, { decimals, trim });
     }
 
     const POSITIVE_STATUS_VALUES = new Set(["вырос на", "не участвуем", "без изменений", "да", "повысили"]);
@@ -255,43 +263,53 @@
                 ROW.CTR,
                 blockIndex,
                 COL.OVERALL,
-                formatRatioCell(totalAdClicks, totalAdImpressions, { percent: true }),
+                formatRatioCell(totalAdClicks * 100, totalAdImpressions, { decimals: 2 }),
             );
             setCellText(
                 ROW.CPM,
                 blockIndex,
                 COL.OVERALL,
-                formatRatioCell(totalAdSpend ? totalAdSpend * 1000 : totalAdSpend, totalAdImpressions),
+                formatRatioCell(totalAdSpend ? totalAdSpend * 1000 : totalAdSpend, totalAdImpressions, { decimals: 0 }),
             );
 
             setCellText(
                 ROW.CPC,
                 blockIndex,
                 COL.OVERALL,
-                formatRatioCell(totalAdSpend, totalAdClicks),
+                formatRatioCell(totalAdSpend, totalAdClicks, { decimals: 1 }),
             );
 
             const conversionCart = clicks ? (carts || 0) * 100 / clicks : null;
-            setCellText(ROW.CONVERSION_CART, blockIndex, COL.OVERALL, Number.isFinite(conversionCart) ? formatPercentValue(conversionCart) : "-");
+            setCellText(
+                ROW.CONVERSION_CART,
+                blockIndex,
+                COL.OVERALL,
+                Number.isFinite(conversionCart) ? formatPercentValue(conversionCart, { decimals: 0 }) : "-",
+            );
 
             const conversionOrder = carts ? (orders || 0) * 100 / carts : null;
-            setCellText(ROW.CONVERSION_ORDER, blockIndex, COL.OVERALL, Number.isFinite(conversionOrder) ? formatPercentValue(conversionOrder) : "-");
+            setCellText(
+                ROW.CONVERSION_ORDER,
+                blockIndex,
+                COL.OVERALL,
+                Number.isFinite(conversionOrder) ? formatPercentValue(conversionOrder, { decimals: 0 }) : "-",
+            );
 
             const buyoutPercent = readNumber(ROW.BUYOUT_PERCENT, blockIndex, COL.INPUT_MAIN) || 0;
             const buyoutFraction = Math.abs(buyoutPercent) > 1 ? buyoutPercent / 100 : buyoutPercent;
             const buyouts = orderSum && buyoutFraction ? orderSum * buyoutFraction : null;
-            setCellText(ROW.BUYOUTS, blockIndex, COL.OVERALL, Number.isFinite(buyouts) ? formatDecimalValue(buyouts) : "-");
+            setCellText(ROW.BUYOUTS, blockIndex, COL.OVERALL, Number.isFinite(buyouts) ? formatDecimalValue(buyouts, { decimals: 0 }) : "-");
 
-            const costOrderCell = formatRatioCell(totalAdSpend, orders, { blankWhenZeroNumerator: true });
+            const costOrderCell = formatRatioCell(totalAdSpend, orders, { decimals: 1, blankWhenZeroNumerator: true });
             setCellText(ROW.COST_ORDER, blockIndex, COL.OVERALL, costOrderCell);
 
-            const costCartCell = formatRatioCell(totalAdSpend, carts, { blankWhenZeroNumerator: true });
+            const costCartCell = formatRatioCell(totalAdSpend, carts, { decimals: 1, blankWhenZeroNumerator: true });
             setCellText(ROW.COST_CART, blockIndex, COL.OVERALL, costCartCell);
 
-            const drrOrdersCell = formatRatioCell(totalAdSpend, orderSum, { percent: true, blankWhenZeroNumerator: true });
+            const drrOrdersCell = formatRatioCell(totalAdSpend, orderSum, { percent: true, decimals: 1, blankWhenZeroNumerator: true });
             setCellText(ROW.DRR_ORDERS, blockIndex, COL.OVERALL, drrOrdersCell);
 
-            const drrSalesCell = formatRatioCell(totalAdSpend, buyouts, { percent: true, blankWhenZeroNumerator: true });
+            const drrSalesCell = formatRatioCell(totalAdSpend, buyouts, { percent: true, decimals: 1, blankWhenZeroNumerator: true });
             setCellText(ROW.DRR_SALES, blockIndex, COL.OVERALL, drrSalesCell);
 
             const sellerPriceRow = findRowByLabel(blockIndex, COL.INPUT_MAIN, "Цена WBSELLER (наша)");
@@ -316,7 +334,7 @@
                     - logisticsAdjustment
                 ) * orders * buyoutFraction
                 : null;
-            setCellText(ROW.PROFIT, blockIndex, COL.INPUT_MAIN, Number.isFinite(profit) ? formatDecimalValue(profit) : "-");
+            setCellText(ROW.PROFIT, blockIndex, COL.INPUT_MAIN, Number.isFinite(profit) ? formatDecimalValue(profit, { decimals: 0 }) : "-");
         };
 
         const recalcAll = () => {

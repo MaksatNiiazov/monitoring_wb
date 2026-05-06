@@ -879,7 +879,7 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
             },
             (23, 1): {"type": "input", "field": "unit_cost", "placeholder": "0,00", "span_to_block_end": True, "centered": True},
             (24, 1): {"type": "input", "field": "logistics_cost", "placeholder": "0,00", "span_to_block_end": True, "centered": True},
-            (32, 0): {"type": "stock_mini_table", "colspan": 9, "rowspan": 4},
+            (32, 1): {"type": "stock_mini_table", "colspan": 8, "rowspan": 4},
             (row_after_keywords(38), 3): {"type": "input", "field": "spp_percent", "percent": True, "placeholder": "%", "colspan": 2},
             (row_after_keywords(39), 5): {"type": "input", "field": "seller_price", "placeholder": "0,00", "colspan": 4},
             (row_after_keywords(40), 5): {"type": "input", "field": "wb_price", "placeholder": "0,00", "colspan": 4},
@@ -939,12 +939,12 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
                     "centered": True,
                     "colspan": 2,
                 }
-                editable_controls[(keyword_row_number, 7)] = {
+                editable_controls[(keyword_row_number, 6)] = {
                     "type": "input",
                     "field": "keyword_boosted_ctr",
                     "placeholder": "0,00",
                     "centered": True,
-                    "colspan": 2,
+                    "colspan": 3,
                 }
 
         display_spans: dict[tuple[int, int], dict[str, object]] = {}
@@ -952,34 +952,33 @@ def table_workspace(request: HttpRequest) -> HttpResponse:
         display_spans[(2, 1)] = {"colspan": 3, "centered": True}
         display_spans[(2, 4)] = {"colspan": 2, "centered": True}
         display_spans[(21, 1)] = {"colspan": 8}
-        display_spans[(25, 0)] = {"colspan": 9, "centered": True}
+        display_spans[(25, 1)] = {"colspan": 8, "centered": True}
         for stock_row_number in range(26, 32):
-            display_spans[(stock_row_number, 0)] = {"colspan": 4}
+            display_spans[(stock_row_number, 1)] = {"colspan": 3}
             display_spans[(stock_row_number, 4)] = {"colspan": 5, "centered": True}
         for screenshot_row_number in range(32, 36):
-            display_spans[(screenshot_row_number, 0)] = {"colspan": 9, "centered": True}
+            display_spans[(screenshot_row_number, 1)] = {"colspan": 8, "centered": True}
         if keyword_header_row:
             for keyword_row_number in range(keyword_header_row, keyword_header_row + keyword_rows_count + 1):
                 display_spans[(keyword_row_number, 2)] = {"colspan": 2, "centered": True}
                 display_spans[(keyword_row_number, 4)] = {"colspan": 2, "centered": True}
-                display_spans[(keyword_row_number, 7)] = {"colspan": 2, "centered": True}
+                display_spans[(keyword_row_number, 6)] = {"colspan": 3, "centered": True}
         if overview_row:
-            display_spans[(overview_row, 0)] = {"colspan": 9, "centered": True}
-            display_spans[(overview_row + 1, 0)] = {"colspan": 3}
+            display_spans[(overview_row, 1)] = {"colspan": 8, "centered": True}
+            display_spans[(overview_row + 1, 1)] = {"colspan": 2}
             display_spans[(overview_row + 1, 3)] = {"colspan": 2, "centered": True}
-            display_spans[(overview_row + 1, 5)] = {"colspan": 2, "centered": True}
-            display_spans[(overview_row + 1, 7)] = {"colspan": 2, "centered": True}
+            display_spans[(overview_row + 1, 5)] = {"colspan": 3, "centered": True}
             for overview_field_row in range(overview_row + 2, overview_row + 6):
-                display_spans[(overview_field_row, 0)] = {"colspan": 5}
+                display_spans[(overview_field_row, 1)] = {"colspan": 4}
                 display_spans[(overview_field_row, 5)] = {"colspan": 4}
-            display_spans[(overview_row + 6, 0)] = {"colspan": 9, "centered": True}
+            display_spans[(overview_row + 6, 1)] = {"colspan": 8, "centered": True}
             for action_field_row in range(overview_row + 7, overview_row + 9):
-                display_spans[(action_field_row, 0)] = {"colspan": 4}
-                display_spans[(action_field_row, 4)] = {"colspan": 2, "centered": True}
+                display_spans[(action_field_row, 1)] = {"colspan": 3}
+                display_spans[(action_field_row, 4)] = {"colspan": 3, "centered": True}
                 display_spans[(action_field_row, 7)] = {"colspan": 2, "centered": True}
-            display_spans[(overview_row + 9, 0)] = {"colspan": 9, "centered": True}
+            display_spans[(overview_row + 9, 1)] = {"colspan": 8, "centered": True}
             for comment_row_number in range(overview_row + 10, overview_row + 14):
-                display_spans[(comment_row_number, 0)] = {"colspan": 9}
+                display_spans[(comment_row_number, 1)] = {"colspan": 8}
         block_dates = active_sheet.get("block_dates") or []
         product_id = active_sheet.get("product_id")
         active_product = Product.objects.filter(pk=product_id).first() if product_id else None
