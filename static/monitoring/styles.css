@@ -3435,7 +3435,6 @@ body.is-modal-open {
 }
 
 .monitoring-grid-table.is-product .grid-input,
-.monitoring-grid-table.is-product .grid-select:not(.grid-status-select),
 .monitoring-grid-table.is-product .grid-choice {
     background: transparent;
     box-shadow: none;
@@ -3453,7 +3452,6 @@ body.is-modal-open {
 }
 
 .monitoring-grid-table.is-product .grid-input:hover,
-.monitoring-grid-table.is-product .grid-select:not(.grid-status-select):hover,
 .monitoring-grid-table.is-product .grid-choice:hover {
     background: transparent;
     box-shadow: none;
@@ -3468,17 +3466,33 @@ body.is-modal-open {
 }
 
 .monitoring-grid-table.is-product .grid-select {
-    width: 100%;
-    height: 100%;
-    padding: 0 2px;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    color: inherit;
+    --select-chip-bg: #ffffff;
+    --select-chip-border: var(--sheet-grid-border);
+    width: calc(100% - 8px);
+    max-width: 100%;
+    height: 17px;
+    min-height: 17px;
+    margin: 1px auto;
+    padding: 0 16px 0 6px;
+    border: 1px solid var(--select-chip-border);
+    border-radius: 8px;
+    background-color: var(--select-chip-bg);
+    background-image:
+        linear-gradient(45deg, transparent 50%, currentColor 50%),
+        linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position:
+        calc(100% - 10px) 50%,
+        calc(100% - 7px) 50%;
+    background-repeat: no-repeat;
+    background-size:
+        4px 4px,
+        4px 4px;
+    color: #000000;
     font-size: inherit;
-    font-weight: inherit;
-    text-align: inherit;
-    text-align-last: inherit;
+    font-weight: 700;
+    line-height: 15px;
+    text-align: center;
+    text-align-last: center;
     appearance: none;
     -webkit-appearance: none;
 }
@@ -3489,19 +3503,19 @@ body.is-modal-open {
     box-sizing: border-box;
     width: 100%;
     max-width: 100%;
-    min-height: 100%;
-    height: 100%;
-    margin: 0;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    color: inherit;
+    min-height: 17px;
+    height: 17px;
+    margin: 1px auto;
+    border: 1px solid var(--sheet-grid-border);
+    border-radius: 8px;
+    background-color: #ffffff;
+    color: #000000;
     font-family: Arial, sans-serif;
     font-size: inherit;
-    font-weight: inherit;
-    line-height: inherit;
-    text-align: inherit;
-    text-align-last: inherit;
+    font-weight: 700;
+    line-height: 15px;
+    text-align: center;
+    text-align-last: center;
     white-space: nowrap;
 }
 
@@ -3515,21 +3529,28 @@ body.is-modal-open {
 }
 
 .monitoring-grid-table.is-product .grid-status-select {
-    padding: 0 2px;
+    padding: 0 16px 0 6px;
     cursor: pointer;
     appearance: none;
     -webkit-appearance: none;
-    background: transparent;
 }
 
 .monitoring-grid-table.is-product .grid-status-select[data-status-tone="positive"],
 .monitoring-grid-table.is-product .grid-status-pill[data-status-tone="positive"] {
-    background-color: transparent;
+    --select-chip-bg: #d9ead3;
+    --select-chip-border: #9fc786;
+    border-color: var(--select-chip-border);
+    background-color: var(--select-chip-bg);
+    color: #274e13;
 }
 
 .monitoring-grid-table.is-product .grid-status-select[data-status-tone="negative"],
 .monitoring-grid-table.is-product .grid-status-pill[data-status-tone="negative"] {
-    background-color: transparent;
+    --select-chip-bg: #f4cccc;
+    --select-chip-border: #e06666;
+    border-color: var(--select-chip-border);
+    background-color: var(--select-chip-bg);
+    color: #990000;
 }
 
 .monitoring-grid-table.is-product .grid-status-select option {
@@ -3643,20 +3664,28 @@ body.is-modal-open {
 .monitoring-grid-table.is-product .grid-choice {
     display: flex;
     justify-content: center;
-    overflow: visible;
+    width: calc(100% - 8px);
+    height: 17px;
+    min-height: 17px;
+    margin: 1px auto;
+    border: 1px solid var(--sheet-grid-border);
+    border-radius: 8px;
+    background: #ffffff;
+    overflow: hidden;
 }
 
 .monitoring-grid-table.is-product .grid-choice-btn {
     flex: 1 1 0;
-    min-height: 100%;
+    min-height: 15px;
+    height: 15px;
     padding: 0 2px;
     border: 0;
     background: transparent;
     color: #777777;
     font-family: Arial, sans-serif;
     font-size: inherit;
-    font-weight: inherit;
-    line-height: inherit;
+    font-weight: 700;
+    line-height: 15px;
 }
 
 .monitoring-grid-table.is-product .grid-choice-btn + .grid-choice-btn {
@@ -3664,8 +3693,17 @@ body.is-modal-open {
 }
 
 .monitoring-grid-table.is-product .grid-choice-btn.is-active {
-    background: transparent;
-    color: inherit;
+    color: #000000;
+}
+
+.monitoring-grid-table.is-product .grid-choice-btn.is-active[data-value="true"] {
+    background: #d9ead3;
+    color: #274e13;
+}
+
+.monitoring-grid-table.is-product .grid-choice-btn.is-active[data-value="false"] {
+    background: #f4cccc;
+    color: #990000;
 }
 
 .monitoring-grid-table.is-product .grid-stock-trigger {
